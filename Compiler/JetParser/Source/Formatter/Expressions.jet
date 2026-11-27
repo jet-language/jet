@@ -2132,7 +2132,8 @@ jfmt_fmt_value_loop: fn(f: ^JetFmt, body: [Stmt], route_attached: Bool) {
     controller: body[0]
     if controller == {
         .For(var, _, var2, kind, inner, span, _, _, _) -> {
-            jfmt_write(f, "loop ")
+            marked_loop: if kind == .In(_, _, mark) -> mark != None else -> false
+            jfmt_write(f, if marked_loop -> "loop? " else -> "loop ")
             jfmt_fmt_for_header(f, var, var2, kind, inner)
             ^current: if ast_loop_destructures(var, inner) -> inner[1..<inner.len()] else -> inner
             loop current.len() == 1 {
@@ -2210,7 +2211,7 @@ jfmt_fmt_for_header: fn(f: ^JetFmt, var: String, var2: NamedSpan?, kind: ForKind
                 jfmt_fmt_expr(f, step_expr, JFMT_PREC_OR_FALLBACK)
             }
         }
-        .In(collection, step) -> {
+        .In(collection, step, _) -> {
             jfmt_fmt_expr(f, collection, JFMT_PREC_OR_FALLBACK)
             if step == .Val(step_expr) {
                 jfmt_write(f, ", ")
@@ -3189,6 +3190,7 @@ jfmt_fmt_str_format: fn(f: ^JetFmt, format: StrSelector?, parts: [StrPart], next
     selector: format ?? return
     jfmt_write(f, ":{selector.name}")
     if selector.args.len() == 0 {
+        if selector.failure_mark != None -> jfmt_write(f, "?")
         return
     }
     jfmt_write(f, "(")
@@ -3210,6 +3212,7 @@ jfmt_fmt_str_format: fn(f: ^JetFmt, format: StrSelector?, parts: [StrPart], next
         }
     }
     jfmt_write(f, ")")
+    if selector.failure_mark != None -> jfmt_write(f, "?")
 }
 
 // S70 re-emit a triple-quoted string at the current indent, so

@@ -35,7 +35,8 @@ use {
         core_record_field_is_core_only,
         diagnostic_with_edit,
         diagnostic_with_edit_grade,
-        expr_optional_method_call_as_call,
+        expr_node_id,
+        expr_source_span,
         expr_span,
         foundation_link_inner,
         boundary_head_carrier_module,
@@ -1070,7 +1071,7 @@ sema_expression_rows_view: fn(base: Expr, member: String, span: Span, ty: Type, 
     rows: Expr.Field{base: base.copy(), member: "__rows", span: span, id: AST_NODE_GENERATED}
     label: NamedSpan{name: "__jet_collect_loop_{span.start}", span: span}
     body: [Stmt]{Stmt.Yield{value: item, span: Span{start: span.start, end: span.start}}}
-    walk: Stmt.For{var: "__row", var_span: span, var2: None, kind: ForKind.In{collection: rows, step: None}, body: body, span: span, arrow_body: false, label: Val(label), auto_vectorization: None}
+    walk: Stmt.For{var: "__row", var_span: span, var2: None, kind: ForKind.In{collection: rows, step: None, failure_mark: None}, body: body, span: span, arrow_body: false, label: Val(label), auto_vectorization: None}
     ^meta: ast_empty_lambda_meta()
     meta.collecting_loop = true
     lambda: Lambda{take_names: [NamedSpan]{}, params: [LambdaParam]{}, effects: None, body: LambdaBody.Block{body: [Stmt]{walk}}, span: span, meta: meta}
@@ -1770,10 +1771,72 @@ sema_expression_secret_declared_by: fn(graph: SemaRegistrationGraph, ty: Type, c
     false
 }
 
-// S71 the chain yields `T?`; an already-optional member flattens, so
-// `user?.address?.city` stays one optional layer deep.
+// Checks the base/receiver of `?.`: when `base` is a call returning a
+// non-optional `T E!`, propagates `E!` (marked by the `?` in `?.`, warning
+// L0537 if infallible) and signals `propagated = true` so the caller accesses
+// `.member` / `.method()` directly on `T` without lifting to `Option`. When
+// `base` is a call returning `T? E!`, propagates `E!` without marking `?` so
+// E0434 wraps `(call()?)?.member`, and hands `T?` to ordinary optional chaining.
+SemaOptBaseResult: struct {
+    value: TExpr,
+    direct_failure_chain: Bool,
+}
+
+sema_expression_optional_base: fn(base: Expr, member_span: Span, check: ^SemaBodyCheck) -> SemaOptBaseResult? {
+    if !sema_failure_marks_is_call(base) {
+        checked: sema_check_expression(base, None, check) ?? return None
+        return Val(SemaOptBaseResult{value: checked, direct_failure_chain: false})
+    }
+    raw_base: sema_check_expression_carrier(base, None, check) ?? return None
+    if !sema_expression_auto_propagates(raw_base.ty, None, check.context) {
+        return Val(SemaOptBaseResult{value: raw_base, direct_failure_chain: false})
+    }
+    payload: sema_expression_carrier_payload(raw_base.ty)
+    is_option: if payload == .Val(p) -> {
+        sema_expr_unwrap_tag(p) == .Option(_) || sema_expr_unwrap_tag(sema_expr_expected_type(p, check.environment.*, check.program.*)) == .Option(_)
+    } else -> false
+    ^raw_owned: raw_base
+    if payload != None && !is_option {
+        mark_span: sema_failure_marks_opt_dot_question_span(expr_source_span(base).end, member_span.start, check.environment.*, check.program.*)
+        previous_written: check.context.failure_mark_written
+        previous_written_span: check.context.failure_mark_written_span
+        previous_consumed: check.context.failure_mark_consumed
+        target_id: expr_node_id(base)
+        check.context.failure_mark_written = target_id
+        check.context.failure_mark_written_span = mark_span
+        check.context.failure_mark_consumed = -1
+        propagated: sema_expression_auto_propagate(base, raw_owned, None, check)
+        consumed: check.context.failure_mark_consumed == target_id
+        check.context.failure_mark_written = previous_written
+        check.context.failure_mark_written_span = previous_written_span
+        check.context.failure_mark_consumed = previous_consumed
+        prop: propagated ?? return None
+        if !consumed {
+            if mark_span == .Val(ms) {
+                sema_failure_marks_warn_unused(ms, check.scopes, check.context, check.diagnostics)
+            }
+        }
+        return Val(SemaOptBaseResult{value: prop, direct_failure_chain: true})
+    }
+    // `T? E!`: receiver yields an optional AND can fail, so `?.` chains the
+    // optional and the call itself still needs `(call()?)?.member`.
+    previous_receiver: check.context.failure_mark_receiver
+    check.context.failure_mark_receiver = expr_node_id(base)
+    propagated: sema_expression_auto_propagate(base, raw_owned, None, check)
+    check.context.failure_mark_receiver = previous_receiver
+    prop: propagated ?? return None
+    Val(SemaOptBaseResult{value: prop, direct_failure_chain: false})
+}
+
+// S71 optional chaining (`T?.member -> F?`, flattening nested `Option`) and
+// failure-propagating call chaining (`call()?.member -> F` when `call()` is
+// `T E!` with non-optional `T`).
 sema_expression_optional_field: fn(base: Expr, member: String, member_span: Span, span: Span, expected: Type?, check: ^SemaBodyCheck) -> TExpr? {
-    checked_base: sema_check_expression(base, None, check) ?? return None
+    base_result: sema_expression_optional_base(base, member_span, check) ?? return None
+    if base_result.direct_failure_chain {
+        return sema_expression_field_checked(base_result.value, member, span, expected, check.environment.*, check.program.*, check.scopes, check.context, check.diagnostics)
+    }
+    checked_base: base_result.value
     inner_ty: if checked_base.ty == {
         .Option(value) -> value
         .Int | .Float | .Bool | .String | .Char | .List(_) | .Map(_, _, _) | .Shared(_) | .Result(_, _) | .Fn(_, _, _, _, _, _) | .Named(_) | .Apply(_, _) | .TraitObject(_) | .Tuple(_) | .FixedList(_, _) | .IntN(_, _) | .InlineRange(_, _, _) | .Float32 | .Tagged(_, _) | .Union(_) | .Case(_, _) | .Quantity(_, _) | .Measure(_) -> {
@@ -1793,13 +1856,25 @@ sema_expression_optional_field: fn(base: Expr, member: String, member_span: Span
     sema_expr_expected(value, expected, check.environment.*, check.program.*, check.diagnostics)
 }
 
-// S71 `receiver?.method(args)` checks the ordinary method call on
-// a read-only view of the present payload. The call runs only when the
-// receiver is present; its result lifts to `R?` and flattens like `?.field`.
-// The call keeps its own failure rule: a fallible method propagates exactly as
-// the same call on a plain receiver would.
-sema_expression_optional_method_call: fn(receiver: Expr, method: String, method_span: Span, type_args: [Type], args: [CallArg], span: Span, expected: Type?, check: ^SemaBodyCheck) -> TExpr? {
-    checked_base: sema_check_expression(receiver, None, check) ?? return None
+// S71 `receiver?.method(args)`: for a non-optional fallible call receiver
+// (`T E!`), propagates `E!` and calls `.method(args)` directly on `T` (keeping
+// the outer call's own propagation and `?` mark); for `T?`, runs `.method`
+// when present and lifts its result to `R?` (flattening nested `Option`).
+sema_expression_optional_method_call: fn(opt_expr: Expr, receiver: Expr, method: String, method_span: Span, type_args: [Type], args: [CallArg], span: Span, expected: Type?, outer_carrier_root: Bool, check: ^SemaBodyCheck) -> TExpr? {
+    base_result: sema_expression_optional_base(receiver, method_span, check) ?? return None
+    if base_result.direct_failure_chain {
+        ^prop_receiver: base_result.value
+        if foundation_link_inner(prop_receiver.ty) == .Val(link_inner) {
+            prop_receiver = sema_tree_node(link_inner, TExprKind.Deref{value: prop_receiver}, prop_receiver.span)
+        }
+        method_expected: if outer_carrier_root -> expected else -> None
+        ^checked_call: sema_expr_check_method_on(receiver, prop_receiver, method, method_span, [Type]{}, type_args, args, method_expected, check) ?? return None
+        if !outer_carrier_root && sema_expression_auto_propagates(checked_call.ty, expected, check.context) {
+            return sema_expression_auto_propagate(opt_expr, checked_call, expected, check)
+        }
+        return sema_expr_expected(checked_call, expected, check.environment.*, check.program.*, check.diagnostics)
+    }
+    checked_base: base_result.value
     inner_ty: if checked_base.ty == {
         .Option(value) -> value
         .Int | .Float | .Bool | .String | .Char | .List(_) | .Map(_, _, _) | .Shared(_) | .Result(_, _) | .Fn(_, _, _, _, _, _) | .Named(_) | .Apply(_, _) | .TraitObject(_) | .Tuple(_) | .FixedList(_, _) | .IntN(_, _) | .InlineRange(_, _, _) | .Float32 | .Tagged(_, _) | .Union(_) | .Case(_, _) | .Quantity(_, _) | .Measure(_) -> {
@@ -1829,7 +1904,7 @@ sema_expression_optional_method_call: fn(receiver: Expr, method: String, method_
         return None
     }
     sema_ownership_declare_binding(check.state, symbol, false)
-    call_expr: expr_optional_method_call_as_call(Expr.Ident{name: name, span: receiver_span, id: AST_NODE_GENERATED}, method, method_span, type_args, args)
+    call_expr: Expr.MethodCall{receiver: Expr.Ident{name: name, span: receiver_span, id: AST_NODE_GENERATED}, method: method, method_span: method_span, owner_type_args: [Type]{}, type_args: type_args, args: args, id: expr_node_id(opt_expr)}
     ^checked_call: sema_check_expression(call_expr, None, check)
     sema_scope_leave(check.scopes, check.state)
     call: checked_call ?? return None

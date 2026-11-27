@@ -490,7 +490,7 @@ sema_check_statements: fn(statements: [Stmt], return_type: Type?, check: ^SemaBo
                             }
                         }
                     }
-                    .In(written_collection, step_expr) -> {
+                    .In(written_collection, step_expr, failure_mark) -> {
                         // `loop x in xs.move()` takes the source: every shape
                         // check below reads it as the exact take.
                         collection_expr: sema_expr_take_place_form(written_collection, check.scopes) ?? written_collection
@@ -508,16 +508,25 @@ sema_check_statements: fn(statements: [Stmt], return_type: Type?, check: ^SemaBo
                         ^range_source: sema_stmt_for_in_is_range(collection.ty)
                         ^method_kind: sema_stmt_for_in_method_kind(collection_expr, collection)
                         ^iterable_item_type: Type?{None}
+                        ^iterable_checked_mark: false
                         if method_kind == None && !range_source {
-                            ^iterable: sema_stmt_for_in_iterable_fact(check, collection.ty, expr_span(collection_expr))
-                            if iterable == None {
+                            ^iterable: sema_stmt_for_in_iterable_fact(check, collection.ty, expr_span(collection_expr), span, failure_mark)
+                            if iterable != None {
+                                iterable_checked_mark = true
+                            } else {
                                 iterable = sema_stmt_for_in_reader_fact(check, collection.ty)
+                                if iterable != None -> iterable_checked_mark = true
                             }
                             if iterable != None {
                                 fact: iterable ?? SemaForInIterableFact{method_kind: TForInMethod.Chars, item_type: Type.Named{name: "Unit"}}
                                 if !fact.routed -> valid = false
                                 method_kind = Val(fact.method_kind)
                                 iterable_item_type = Val(fact.item_type)
+                            }
+                        }
+                        if valid && !iterable_checked_mark {
+                            if failure_mark == .Val(mark) {
+                                sema_failure_marks_warn_unused(mark, check.scopes, check.context, check.diagnostics)
                             }
                         }
                         ^item_type_option: sema_stmt_for_in_item_type(collection.ty, method_kind, iterable_item_type)
@@ -1425,13 +1434,11 @@ sema_stmt_check_scoped_statement: fn(statement: Stmt, return_type: Type?, check:
                 check.diagnostics.push(sema_runtime_only_build_time_diagnostic("Compile-time code runs this block", span))
                 complete = false
             }
-            ^previous_failures_policy: sema_failure_marks_push_policy(check.scopes, declarations)
             nested: sema_stmt_check_block(body, return_type, check, "policy@{span.start}", loop_depth)
             check.context.arithmetic_policy = outer_arithmetic
             check.context.runtime_policy = outer_runtime
             sema_scope_pop_unit_policy(check.scopes, previous_unit_policy)
             check.scopes.copies_explicit = previous_copies_policy
-            check.scopes.failures_explicit = previous_failures_policy
             // `#Policy(sentries: …)` turns the sentry's checks on or off over
             // its body at run time (JetIR ir_sentry_policy), so it stays a
             // scope of its own; any other policy only changed how the body

@@ -161,7 +161,7 @@ sema_variadic_bound_specialize: fn(function: Func, bounds: [String], arity: Int)
 sema_variadic_bound_direct_loop: fn(statement: Stmt, name: String) -> Bool Never! {
     if statement == .For(_, _, second, kind, _, _, _, label, _) {
         if second != None || label != None -> return false
-        if kind == .In(collection, step) {
+        if kind == .In(collection, step, _) {
             if step != None -> return false
             if collection == .Ident(collection_name, _, _) -> return collection_name == name
         }

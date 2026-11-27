@@ -71,14 +71,11 @@ LSPChoice: struct {
 // comptime code may reach the network and inline assembly. `stage` runs a
 // tool stage's `program` (JetDriver ToolStages.jet) beside `entry` with the
 // open documents overlaid: the answer rows of the call on each of `bodies`,
-// in call order. `failure_marks` gives the byte offsets in `entry`'s open
-// text just past each call that passes a failure up by itself, where
-// `jet fmt --explicit-failures` writes its `?`. `sources` gives the saved
-// `.jet` files below a workspace folder, in path order.
+// in call order. `sources` gives the saved `.jet` files below a workspace
+// folder, in path order.
 LSPChecker: trait {
     check: fn(self, entry: String, overlays: [JetDriverSourceDocument]) -[FS, Env, Exec, IO, Time, Net, FFI.Asm]> LSPChecked Never!,
     stage: fn(self, entry: String, overlays: ^^[JetDriverSourceDocument], stage: String, bodies: [Span], program: ^^String) -[FS, Env, Exec, IO, Time, Net, FFI.Asm]> [[JetDriverToolStageItem]] Never!,
-    failure_marks: fn(self, entry: String, overlays: ^^[JetDriverSourceDocument]) -[FS, Env, Exec, IO, Time, Net, FFI.Asm]> [Int] Never!,
     sources: fn(self, root: String) -[FS]> [JetDriverSourceDocument] Never!,
 }
 

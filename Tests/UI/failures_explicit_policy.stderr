@@ -1,17 +1,17 @@
 Error: Jet.FailureMarkRequired: `parse` can fail, so the call is written with `?`
-  --> Tests/UI/failures_explicit_policy.jet:13:11
+  --> Tests/UI/failures_explicit_policy.jet:11:11
     |
- 13 |     rows: parse(path)
+ 11 |     rows: parse(path)
     |           ^^^^^
- Why: `#Policy(failures: .Explicit)` writes `?` at every call that can pass a failure up, so each early exit shows in the text
+ Why: Every call that can pass a failure up writes `?` so each early exit shows in the text
  Fix: Write `?` after the call, or `?(text)` to add a context frame
 More: jet-lang.dev/e/Jet.FailureMarkRequired
 
 Error: Jet.FailureMarkRequired: `load` can fail, so the call is written with `?`
-  --> Tests/UI/failures_explicit_policy.jet:20:22
+  --> Tests/UI/failures_explicit_policy.jet:18:22
     |
- 20 |     first + second + load(path).rows
+ 18 |     first + second + load(path).rows
     |                      ^^^^
- Why: `#Policy(failures: .Explicit)` writes `?` at every call that can pass a failure up, so each early exit shows in the text
- Fix: Write the call as `(…?)`; a `?` before `.` or `(` would read as `?.` or a context frame
+ Why: Every call that can pass a failure up writes `?` so each early exit shows in the text
+ Fix: Write `?` after the call (`call()?.member`), or `?(text)` to add a context frame
 More: jet-lang.dev/e/Jet.FailureMarkRequired

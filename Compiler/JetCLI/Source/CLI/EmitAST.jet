@@ -357,7 +357,7 @@ jet_cli_emit_ast_stmt: fn(tables: ASTTables, statement: StmtNode) -> JetCLIEmitN
                     }
                     children.push(jet_cli_emit_node("range", if exclusive -> "range ..<" else -> "range ..", range_children))
                 }
-                .In(collection, step) -> {
+                .In(collection, step, _) -> {
                     children.push(jet_cli_emit_ast_expr(tables, collection))
                     if step == .Val(value) {
                         children.push(jet_cli_emit_node("step", "step", [JetCLIEmitNode]{jet_cli_emit_ast_expr(tables, value)}))

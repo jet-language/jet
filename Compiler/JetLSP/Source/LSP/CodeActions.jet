@@ -22,42 +22,15 @@ LSPCodeAction: struct {
     workspace: String{""},
 }
 
-lsp_fix_all_call_mark_edits: fn(diagnostics: [Diagnostic]) -> [TextEdit] Never! {
-    ^edits: [TextEdit]{}
-    loop diagnostic in diagnostics {
-        if diagnostic.code != "E0228" -> next
-        if diagnostic.applicability != Val(DiagnosticFixApplicability.Safe) -> next
-        edit: diagnostic.edit ?? next
-        ^duplicate: false
-        loop existing in edits {
-            if existing.span.start == edit.span.start && existing.span.end == edit.span.end && existing.new_text == edit.new_text {
-                duplicate = true
-                break
-            }
-        }
-        if !duplicate -> edits.push(TextEdit{span: edit.span, new_text: "{edit.new_text}"})
-    }
-    if edits.len() <= 1 -> return edits
-    edits.sort_by(fn(left: TextEdit, right: TextEdit) { (left.span.start <=> right.span.start).then(left.span.end <=> right.span.end) })
-    ^filtered: [TextEdit]{}
-    ^last_end: -1
-    loop edit in edits.move() {
-        if edit.span.start < last_end -> next
-        last_end = edit.span.end
-        filtered.push(edit)
-    }
-    filtered
-}
 
 // The actions for the bytes `start` to `end` of the document `view` reads,
 // of the kinds `only` names (`context.only`; every kind when absent).
 // `server` holds the open documents a rename's edits reach.
 lsp_code_actions: fn(server: LSPServer, view: LSPView, start: Int, end: Int, only: Dyn?) -> [LSPCodeAction] Never! {
     document: lsp_retain_document_diagnostics(view.checked.diagnostics, view.doc.path, view.doc.text)
-    // Document-wide actions (`source.fixAll` and `source.organizeImports`) read
-    // every diagnostic of the document from the server's last check, before
+    // Source actions read every diagnostic of the document, so they run before
     // the ones in the range move into their fixes.
-    fix_all: if lsp_code_action_wanted(only, "source.fixAll") -> lsp_fix_all_call_mark_edits(document) else -> [TextEdit]{}
+    fix_all: if lsp_code_action_wanted(only, "source.fixAll") -> lsp_fix_all_safe_mark_edits(view, document) else -> [TextEdit]{}
     organized: if lsp_code_action_wanted(only, "source.organizeImports") -> lsp_organize_imports_edits(view, document) else -> [TextEdit]{}
     ^diagnostics: [Diagnostic]{}
     loop diagnostic in document.move() {
@@ -108,12 +81,49 @@ lsp_code_actions: fn(server: LSPServer, view: LSPView, start: Int, end: Int, onl
         }
     }
     if fix_all.len() > 0 {
-        actions.push(LSPCodeAction{title: "Insert call marks", kind: "source.fixAll", preferred: true, edits: fix_all})
+        actions.push(LSPCodeAction{title: "Apply safe failure and call marks", kind: "source.fixAll", preferred: true, edits: fix_all})
     }
     if organized.len() > 0 {
         actions.push(LSPCodeAction{title: "Organize imports", kind: "source.organizeImports", preferred: false, edits: organized})
     }
     actions
+}
+
+// Non-overlapping Safe edits across the whole document for `source.fixAll`
+// (missing `?` / `loop?` / `(…?)` from E0434, stale `?` removal from L0537,
+// and missing `^` call marks from E0228 excluding receivers).
+lsp_fix_all_safe_mark_edits: fn(view: LSPView, diagnostics: [Diagnostic]) -> [TextEdit] Never! {
+    length: view.doc.text.count_bytes()
+    ^raw: [TextEdit]{}
+    loop diagnostic in diagnostics {
+        if diagnostic.applicability != Val(DiagnosticFixApplicability.Safe) -> next
+        if diagnostic.code != "E0434" && diagnostic.code != "L0537" && diagnostic.code != "E0228" -> next
+        if diagnostic.code == "E0228" && diagnostic.what.starts_with("`.") -> next
+        if diagnostic.edit == .Val(first) -> raw.push(TextEdit{span: first.span, new_text: "{first.new_text}"})
+        loop edit in diagnostic.fix_edits -> raw.push(TextEdit{span: edit.span, new_text: "{edit.new_text}"})
+    }
+    if raw.len() == 0 -> return raw
+    raw.sort_by(fn(left: TextEdit, right: TextEdit) {
+        if left.span.start != right.span.start -> return left.span.start <=> right.span.start
+        left.span.end <=> right.span.end
+    })
+    ^edits: [TextEdit]{}
+    ^cursor: 0
+    loop edit in raw {
+        if edit.span.start < 0 || edit.span.end < edit.span.start || edit.span.end > length -> next
+        if edit.span.start < cursor -> next
+        ^dup: false
+        loop existing in edits {
+            if existing.span.start == edit.span.start && existing.span.end == edit.span.end && existing.new_text == edit.new_text && edit.new_text != "(" {
+                dup = true
+                break
+            }
+        }
+        if dup -> next
+        cursor = edit.span.end
+        edits.push(edit)
+    }
+    edits
 }
 
 lsp_code_action_response: fn(server: LSPServer, params: Dyn?, id: Dyn) -> String {

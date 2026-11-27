@@ -434,7 +434,7 @@ sema_expression_lambda_statement_use_outer: fn(statement: Stmt, frame: Int, para
                         }
                     }
                 }
-                .In(collection, step) -> {
+                .In(collection, step, _) -> {
                     if sema_expression_lambda_uses_outer(collection, frame, params, scopes) {
                         return true
                     }
@@ -720,7 +720,7 @@ sema_expression_lambda_bound_statement_use: fn(statement: Stmt, name: String) ->
                     }
                     if sema_expression_lambda_bound_optional_expr(step, name) -> return true
                 }
-                .In(collection, step) -> {
+                .In(collection, step, _) -> {
                     if sema_expression_lambda_bound_expr_use(collection, name) || sema_expression_lambda_bound_optional_expr(step, name) {
                         return true
                     }
@@ -872,7 +872,7 @@ sema_expression_lambda_bound_statement_non_direct_use: fn(statement: Stmt, name:
                         return true
                     }
                 }
-                .In(collection, step) -> {
+                .In(collection, step, _) -> {
                     if sema_expression_lambda_bound_expr_non_direct_use(collection, name) {
                         return true
                     }
@@ -1039,7 +1039,7 @@ sema_expression_lambda_bound_statement_mut_use: fn(statement: Stmt, name: String
                         return true
                     }
                 }
-                .In(collection, step) -> {
+                .In(collection, step, _) -> {
                     if sema_expression_lambda_bound_expr_mut_use(collection, name) -> return true
                     if step != None && sema_expression_lambda_bound_expr_mut_use(step, name) {
                         return true

@@ -45,7 +45,6 @@ use {
         TOKEN_AMP_EQ,
         TOKEN_AMP_TILDE_EQ,
         TOKEN_AND_AND,
-        TOKEN_AT,
         TOKEN_BANG,
         TOKEN_BREAK,
         TOKEN_CARET,
@@ -78,6 +77,7 @@ use {
         TOKEN_LPAREN,
         TOKEN_MINUS,
         TOKEN_MINUS_EQ,
+        TOKEN_QUESTION,
         TOKEN_NULL,
         TOKEN_OR_OR,
         TOKEN_PERCENT_EQ,
@@ -1363,9 +1363,9 @@ parser_loop_source_binding: fn(state: ^JetParserState) -> ParserExpressionFormLo
     if parser_current_kind(state) == TOKEN_COMMA && parser_kind_at(state, 1) == TOKEN_IDENT && parser_kind_at(state, 2) == TOKEN_SEMI {
         parser_bump(state)
         second: parser_expect_name(state, "as the second loop variable")
-        return ParserExpressionFormLoopClause{var: parser_value(state, first), var_span: first.span, var2: Val(NamedSpan{name: parser_value(state, second), span: second.span}), kind: ForKind.In{collection: Expr.Unit{span: first.span, id: parser_node_id(state)}, step: None}}
+        return ParserExpressionFormLoopClause{var: parser_value(state, first), var_span: first.span, var2: Val(NamedSpan{name: parser_value(state, second), span: second.span}), kind: ForKind.In{collection: Expr.Unit{span: first.span, id: parser_node_id(state)}, step: None, failure_mark: None}}
     }
-    ParserExpressionFormLoopClause{var: parser_value(state, first), var_span: first.span, var2: None, kind: ForKind.In{collection: Expr.Unit{span: first.span, id: parser_node_id(state)}, step: None}}
+    ParserExpressionFormLoopClause{var: parser_value(state, first), var_span: first.span, var2: None, kind: ForKind.In{collection: Expr.Unit{span: first.span, id: parser_node_id(state)}, step: None, failure_mark: None}}
 }
 
 // `in`, or the retired `;` separator, refused as the `;` it is (E0373) and
@@ -1386,9 +1386,15 @@ parser_loop_source_separator: fn(state: ^JetParserState) {
 
 // S19-amend: `loop` reads all loop forms by header: `loop {}` (infinite),
 // `loop ^name: value, cond {}` (state), `loop x in source[, stride] {}`
-// (iteration, `(key, value)` for two names, `{a, b}` or `Row{a, b}` to take
-// each item apart) and `loop cond {}` (conditional).
+// (iteration, `loop?` when the source's step can fail, `(key, value)` for two
+// names, `{a, b}` or `Row{a, b}` to take each item apart) and `loop cond {}`
+// (conditional).
 parser_parse_loop_after_keyword: fn(state: ^JetParserState, start: Span, label: NamedSpan?) -> Stmt {
+    ^failure_mark: Span?{None}
+    if parser_current_kind(state) == TOKEN_QUESTION {
+        mark: parser_bump(state)
+        failure_mark = Val(mark.span)
+    }
     first_kind: parser_current_kind(state)
     second_kind: parser_kind_at(state, 1)
     pattern_head: (first_kind == TOKEN_LBRACE || (first_kind == TOKEN_IDENT && second_kind == TOKEN_LBRACE)) && parser_loop_pattern_head_ahead(state)
@@ -1416,7 +1422,7 @@ parser_parse_loop_after_keyword: fn(state: ^JetParserState, start: Span, label: 
         binding: parser_loop_source_binding(state)
         parser_loop_source_separator(state)
         first: parser_in_place_window(parser_parse_expression_no_struct_lit(state, 1))
-        ^kind: ForKind.In{collection: first.expr, step: None}
+        ^kind: ForKind.In{collection: first.expr, step: None, failure_mark: failure_mark}
         if first.expr == {
             .Range(range_start, range_end, exclusive, _, _) -> {
                 kind = ForKind.Range{start: range_start, end: range_end, step: parser_loop_stride(state), exclusive: exclusive}
@@ -1431,7 +1437,7 @@ parser_parse_loop_after_keyword: fn(state: ^JetParserState, start: Span, label: 
                         kind = ForKind.Range{start: first.expr, end: finish.expr, step: parser_loop_stride(state), exclusive: exclusive}
                     }
                     else -> {
-                        kind = ForKind.In{collection: first.expr, step: parser_loop_stride(state)}
+                        kind = ForKind.In{collection: first.expr, step: parser_loop_stride(state), failure_mark: failure_mark}
                     }
                 }
             }

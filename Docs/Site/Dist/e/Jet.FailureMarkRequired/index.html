@@ -5,9 +5,9 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>Jet.FailureMarkRequired — Jet diagnostic</title>
-<meta name="description" content="A call under `#Policy(failures: .Explicit)` can pass a failure up to its caller and is written without `?` or `?(text)`.">
+<meta name="description" content="A call or loop header that can pass a typed failure up to its caller is written without `?` or `?(text)`.">
 <meta property="og:title" content="Jet.FailureMarkRequired — Jet diagnostic">
-<meta property="og:description" content="A call under `#Policy(failures: .Explicit)` can pass a failure up to its caller and is written without `?` or `?(text)`.">
+<meta property="og:description" content="A call or loop header that can pass a typed failure up to its caller is written without `?` or `?(text)`.">
 <link rel="icon" type="image/svg+xml" href="../../assets/favicon.svg">
 <link rel="stylesheet" href="../../assets/site.css">
 </head>
@@ -25,34 +25,34 @@
 <div class="page-header">
 <p class="eyebrow">// diagnostic E0434</p>
 <h1>Jet.FailureMarkRequired</h1>
-<p>A call under `#Policy(failures: .Explicit)` can pass a failure up to its caller and is written without `?` or `?(text)`.</p>
+<p>A call or loop header that can pass a typed failure up to its caller is written without `?` or `?(text)`.</p>
 </div>
 </section>
 <article class="wrap article">
 <h2>What</h2>
-<p class="diag-copy what" data-registry-field="what">A call under `#Policy(failures: .Explicit)` can pass a failure up to its caller and is written without `?` or `?(text)`.</p>
+<p class="diag-copy what" data-registry-field="what">A call or loop header that can pass a typed failure up to its caller is written without `?` or `?(text)`.</p>
 <h2>Why</h2>
-<p class="diag-copy why" data-registry-field="why">A call that can fail passes its failure up by itself. The policy asks that the text show each such call, so a reader sees every point where the function can stop early.</p>
+<p class="diag-copy why" data-registry-field="why">Every early exit from a typed `E!` failure is visible in source text so readers see where the function can stop early.</p>
 <h2>Fix</h2>
-<p class="diag-copy fix" data-registry-field="fix">Write `?` after the call, or `?(text)` to add a context frame; a call read as a receiver is written `(call()?)`. `jet fmt --explicit-failures` writes every mark.</p>
+<p class="diag-copy fix" data-registry-field="fix">Write `?` after the call (or `call()?.member` to chain, `loop? x in source` for failing iterators, or `?(text)` to add a context frame). `jet fmt` writes every mark automatically.</p>
 <h2>Worked example</h2>
 <p>First UI snapshot mentioning <code>Jet.FailureMarkRequired</code>: <code>Tests/UI/failures_explicit_policy.stderr</code>.</p>
 <pre class="diag">Error: Jet.FailureMarkRequired: `parse` can fail, so the call is written with `?`
-  --&gt; Tests/UI/failures_explicit_policy.jet:13:11
+  --&gt; Tests/UI/failures_explicit_policy.jet:11:11
     |
- 13 |     rows: parse(path)
+ 11 |     rows: parse(path)
     |           ^^^^^
- Why: `#Policy(failures: .Explicit)` writes `?` at every call that can pass a failure up, so each early exit shows in the text
+ Why: Every call that can pass a failure up writes `?` so each early exit shows in the text
  Fix: Write `?` after the call, or `?(text)` to add a context frame
 More: jet-lang.dev/e/Jet.FailureMarkRequired
 
 Error: Jet.FailureMarkRequired: `load` can fail, so the call is written with `?`
-  --&gt; Tests/UI/failures_explicit_policy.jet:20:22
+  --&gt; Tests/UI/failures_explicit_policy.jet:18:22
     |
- 20 |     first + second + load(path).rows
+ 18 |     first + second + load(path).rows
     |                      ^^^^
- Why: `#Policy(failures: .Explicit)` writes `?` at every call that can pass a failure up, so each early exit shows in the text
- Fix: Write the call as `(…?)`; a `?` before `.` or `(` would read as `?.` or a context frame
+ Why: Every call that can pass a failure up writes `?` so each early exit shows in the text
+ Fix: Write `?` after the call (`call()?.member`), or `?(text)` to add a context frame
 More: jet-lang.dev/e/Jet.FailureMarkRequired
 </pre>
 <p><a href="../index.html">Back to all error codes</a></p>

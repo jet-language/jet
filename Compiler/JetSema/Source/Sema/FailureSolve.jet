@@ -312,8 +312,10 @@ sema_failure_fixpoint: fn(candidates: [SemaFunctionFailureFacts]) -> [String] Ne
 // as an error.
 sema_failure_settle_obligations: fn(diagnostics: ^[Diagnostic], solved: NameTable) -> Bool Never! {
     mark: sema_failure_obligation_mark()
+    stale_mark: sema_failure_marks_stale_mark()
     pending: loop diagnostic in diagnostics {
-        if (diagnostic.detail ?? "").starts_with(mark) {
+        detail: diagnostic.detail ?? ""
+        if detail.starts_with(mark) || detail.starts_with(stale_mark) {
             break true
         }
     } ?? false
@@ -331,6 +333,18 @@ sema_failure_settle_obligations: fn(diagnostics: ^[Diagnostic], solved: NameTabl
     loop held.len() > 0 {
         ^diagnostic: held.pop() ?? break
         detail: diagnostic.detail ?? ""
+        if detail.starts_with(stale_mark) {
+            lines: detail.split("\n").to_list()
+            callee: lines[0].replace(stale_mark, "")
+            // Stale-mark L0537 survives ONLY when the solve proved the callee infallible.
+            if name_find(solved, callee) == None -> next
+            remainder: loop line_index in 1..<lines.len() -> lines[line_index]
+            rest: remainder.join("\n")
+            diagnostic.detail = None
+            if rest != "" -> diagnostic.detail = Val(rest)
+            diagnostics.push(diagnostic)
+            next
+        }
         if !detail.starts_with(mark) {
             diagnostics.push(diagnostic)
             next

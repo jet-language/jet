@@ -1,7 +1,7 @@
-// Shared per-package checked-insertion pass for `jet fmt` (#7037 n3):
-// serves call-mark (`^`) insertion, `--explicit-copies` materialization, and
-// `--explicit-failures` (`?` / `(` / `?)`) through one checked compile per
-// package root rather than multiple compiles per file.
+// Shared per-package checked-insertion pass for `jet fmt`:
+// serves call-mark (`^`), failure-mark (`?` / `(` / `?)` / `loop?`), stale-mark
+// deletion (L0537), and `--explicit-copies` materialization through one checked
+// compile per package root rather than multiple compiles per file.
 use {
     jet_driver.[
         JetDriverCompileMode,
@@ -131,8 +131,8 @@ jet_cli_fmt_package_compile: fn(origin: String, source: String, policy: String, 
 
 // Whether `diagnostic` is a requested Safe mark insertion rather than a
 // blocking check error.
-jet_cli_fmt_is_mark_diagnostic: fn(diagnostic: Diagnostic, code: String, texts: [String]) -> Bool Never! {
-    if code != "" -> return diagnostic.code == code
+jet_cli_fmt_is_mark_diagnostic: fn(diagnostic: Diagnostic, codes: [String], texts: [String]) -> Bool Never! {
+    if codes.len() > 0 -> return codes.contains(diagnostic.code)
     edit: diagnostic.edit ?? return false
     edit.span.start == edit.span.end && texts.contains(edit.new_text)
 }
@@ -161,7 +161,8 @@ jet_cli_fmt_unshifted_diagnostic: fn(diagnostic: ^^Diagnostic, shifts: [String:I
 }
 
 // Shared checked-insertion pass for one file using the cached per-package
-// compile in `memo`. Inserts only requested Safe zero-width marks for `origin`.
+// compile in `memo`. Inserts requested Safe zero-width marks and applies Safe
+// deletions for `delete_codes` (such as stale `?` marks from L0537).
 // When `strict` is true, any blocking check error keeps `origin` untouched and
 // returns the blocking diagnostics so the caller reports why.
 jet_cli_fmt_checked_marks: fn(
@@ -171,7 +172,8 @@ jet_cli_fmt_checked_marks: fn(
     policy: String,
     policy_marker: String,
     mode_key: String,
-    code: String,
+    codes: [String],
+    delete_codes: [String],
     texts: [String],
     skip_receivers: Bool,
     strict: Bool,
@@ -186,7 +188,7 @@ jet_cli_fmt_checked_marks: fn(
     canonical: jet_cli_overlay_path(origin)
     ^blocking: [Diagnostic]{}
     loop diagnostic in jet_cli_errors(pkg.diagnostics) {
-        if !jet_cli_fmt_is_mark_diagnostic(diagnostic, code, texts) {
+        if !jet_cli_fmt_is_mark_diagnostic(diagnostic, codes, texts) {
             blocking.push(jet_cli_fmt_unshifted_diagnostic(diagnostic.move(), pkg.shifts, pkg.sources))
         }
     }
@@ -201,43 +203,57 @@ jet_cli_fmt_checked_marks: fn(
     loop diagnostic in pkg.diagnostics {
         owner: diagnostic.origin ?? next
         if owner.path != canonical -> next
-        if code != "" && diagnostic.code != code -> next
+        is_delete: delete_codes.contains(diagnostic.code)
+        is_code: codes.len() == 0 || codes.contains(diagnostic.code)
+        if !is_code && !is_delete -> next
         if skip_receivers && jet_cli_fmt_is_receiver_call_mark(diagnostic) -> next
-        if code == "E0228" && diagnostic.applicability != Val(DiagnosticFixApplicability.Safe) -> next
+        if (diagnostic.code == "E0228" || diagnostic.code == "E0434" || is_delete) && diagnostic.applicability != Val(DiagnosticFixApplicability.Safe) -> next
         first: diagnostic.edit ?? next
         // A failure mark's receiver chain can open multiple `(` at one byte,
-        // each keyed by its call's span start; call marks (`^`) and explicit
-        // copies deduplicate per `(site, text)`.
-        report: if code == "E0434" && diagnostic.span == .Val(at) -> at.start else -> 0
-        jet_cli_fmt_add_mark(marks, first, texts, shift, length, report)
+        // each keyed by its call's span start; call marks (`^`), deletions, and
+        // explicit copies deduplicate per `(start, end, text)`.
+        report: if diagnostic.code == "E0434" && diagnostic.span == .Val(at) -> at.start else -> 0
+        jet_cli_fmt_add_mark(marks, first, texts, is_delete, shift, length, report)
         loop edit in diagnostic.fix_edits {
-            jet_cli_fmt_add_mark(marks, edit, texts, shift, length, report)
+            jet_cli_fmt_add_mark(marks, edit, texts, is_delete, shift, length, report)
         }
     }
     if marks.len() == 0 -> return jet_cli_fmt_formatted(source)
-    marks.sort_by(fn(left: JetCLIFmtMark, right: JetCLIFmtMark) { left.site <=> right.site })
+    marks.sort_by(fn(left: JetCLIFmtMark, right: JetCLIFmtMark) {
+        if left.start != right.start -> return left.start <=> right.start
+        left.end <=> right.end
+    })
     ^marked: ""
     ^cursor: 0
     loop mark in marks {
-        marked = "{marked}{foundation_byte_text(bytes, cursor, mark.site)}{mark.text}"
-        cursor = mark.site
+        if mark.start < cursor -> next
+        marked = "{marked}{foundation_byte_text(bytes, cursor, mark.start)}{mark.text}"
+        cursor = mark.end
     }
     jet_cli_fmt_formatted("{marked}{foundation_byte_text(bytes, cursor, length)}")
 }
 
-// Call-mark insertion pass: plain checked compile (one compile per package,
-// no prepended policy), inserting only Safe `^` marks from E0228 without
-// touching receivers or valid `^^`.
-jet_cli_fmt_call_marks: fn(source: String, origin: String, color: Bool, memo: ^JetCLIFmtCheckMemo) -> JetCLIFmtSource {
-    jet_cli_fmt_checked_marks(source, origin, color, "", "", "call_marks", "E0228", [String]{"^"}, skip_receivers: true, strict: true, memo: memo)
+// Default checked-mark pass: one plain checked compile per package, inserting
+// Safe `^` marks (E0228, excluding receivers), inserting Safe `?` / `(` / `?)`
+// failure marks (E0434), and removing Safe stale `?` marks (L0537).
+jet_cli_fmt_default_marks: fn(source: String, origin: String, color: Bool, memo: ^JetCLIFmtCheckMemo) -> JetCLIFmtSource {
+    jet_cli_fmt_checked_marks(
+        source,
+        origin,
+        color,
+        "",
+        "",
+        "default_marks",
+        [String]{"E0228", "E0434"},
+        [String]{"L0537"},
+        [String]{"^", "?", "(", "?)"},
+        skip_receivers: true,
+        strict: true,
+        memo: memo,
+    )
 }
 
 // Shared per-package `--explicit-copies` pass (one compile per package).
 jet_cli_fmt_explicit_copies_memo: fn(source: String, origin: String, color: Bool, memo: ^JetCLIFmtCheckMemo) -> JetCLIFmtSource {
-    jet_cli_fmt_checked_marks(source, origin, color, JET_CLI_FMT_EXPLICIT_COPIES_POLICY, "#Policy(copies: .Explicit)", "explicit_copies", "", [String]{JET_CLI_FMT_EXPLICIT_COPIES_TEXT}, skip_receivers: false, strict: true, memo: memo)
-}
-
-// Shared per-package `--explicit-failures` pass (one compile per package).
-jet_cli_fmt_explicit_failures_memo: fn(source: String, origin: String, color: Bool, memo: ^JetCLIFmtCheckMemo) -> JetCLIFmtSource {
-    jet_cli_fmt_checked_marks(source, origin, color, JET_CLI_FMT_EXPLICIT_FAILURES_POLICY, "#Policy(failures: .Explicit)", "explicit_failures", "E0434", [String]{"?", "(", "?)"}, skip_receivers: false, strict: true, memo: memo)
+    jet_cli_fmt_checked_marks(source, origin, color, JET_CLI_FMT_EXPLICIT_COPIES_POLICY, "#Policy(copies: .Explicit)", "explicit_copies", [String]{}, [String]{}, [String]{JET_CLI_FMT_EXPLICIT_COPIES_TEXT}, skip_receivers: false, strict: true, memo: memo)
 }

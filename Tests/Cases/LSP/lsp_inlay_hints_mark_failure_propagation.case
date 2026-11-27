@@ -1,20 +1,14 @@
-# Each call whose failure passes up by itself gets one `?` hint just past it,
-# where `jet fmt --explicit-failures` writes the mark. Four calls pass a
-# failure up; the call handled by `??`, the `Never!` calls and the `print`
-# calls get none.
+# Unmarked fallible calls report E0434 diagnostics instead of faint `?` inlay
+# hints; calls handled by `??`, `Never!` calls, and `print` calls report none.
 session lsp content-length: jet self lsp
 send lsp: Messages/LSPInlayHintsMarkFailurePropagation/0.json
 recv lsp until $.id = 1
 send lsp: Messages/LSPInlayHintsMarkFailurePropagation/1.json
 recv lsp
-json: stdout doc $.params.diagnostics #= 0
+json: stdout doc $.params.diagnostics #= 4
 send lsp: Messages/LSPInlayHintsMarkFailurePropagation/2.json
 recv lsp until $.id = 2
-json: stdout doc $.result[?label="?"] #= 4
-json: stdout doc $.result[?label="?"][0].position = {"line":3,"character":20}
-json: stdout doc $.result[?label="?"][1].position = {"line":11,"character":24}
-json: stdout doc $.result[?label="?"][2].position = {"line":14,"character":31}
-json: stdout doc $.result[?label="?"][3].position = {"line":15,"character":23}
+json: stdout doc $.result[?label="?"] #= 0
 send lsp: Messages/LSPInlayHintsMarkFailurePropagation/3.json
 recv lsp until $.id = 3
 close lsp

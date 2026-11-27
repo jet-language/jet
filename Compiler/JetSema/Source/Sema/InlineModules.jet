@@ -1495,7 +1495,7 @@ sema_inline_rewrite_stmt: fn(rewrite: ^SemaInlineRewrite, stmt: Stmt) -> Stmt Ne
         .For(var, var_span, var2, kind, body, span, arrow_body, label, auto_vectorization) -> {
             mapped_kind: if kind == {
                 .Range(start, end, step, exclusive) -> ForKind.Range{start: sema_inline_rewrite_expr(rewrite, start), end: sema_inline_rewrite_expr(rewrite, end), step: sema_inline_rewrite_optional_expr(rewrite, step), exclusive: exclusive}
-                .In(collection, step) -> ForKind.In{collection: sema_inline_rewrite_expr(rewrite, collection), step: sema_inline_rewrite_optional_expr(rewrite, step)}
+                .In(collection, step, failure_mark) -> ForKind.In{collection: sema_inline_rewrite_expr(rewrite, collection), step: sema_inline_rewrite_optional_expr(rewrite, step), failure_mark: failure_mark}
             }
             saved: rewrite.locals.len()
             rewrite.locals.push(var.copy())

@@ -1,0 +1,107 @@
+// Explicit failure marks: every expression that propagates a typed failure
+// writes `?` (or `?(note)` to add a context frame): `call()?`, `call()?(note)`,
+// `call()?.member`, `call()?.method()`, and `loop? x in source`. Local
+// handling with `??` stops propagation and takes no `?`.
+
+#Error
+ParseError: enum {
+    Empty,
+    Negative(Int),
+    LimitExceeded(Int),
+}
+
+Record: struct {
+    label: String,
+    value: Int,
+
+    doubled: fn(self) -> Int ParseError! {
+        if self.value > 100 -> return Err(ParseError.LimitExceeded(self.value))
+        Ok(self.value * 2)
+    }
+
+    summary: fn(self) -> String Never! {
+        "{self.label}={self.value}"
+    }
+}
+
+parse_positive: fn(raw: Int) -> Int ParseError! {
+    if raw == 0 -> return Err(ParseError.Empty)
+    if raw < 0 -> return Err(ParseError.Negative(raw))
+    Ok(raw)
+}
+
+load_record: fn(label: String, raw: Int) -> Record ParseError! {
+    n: parse_positive(raw)?
+    Ok(Record{label: label, value: n})
+}
+
+BatchIter: struct {
+    items: [Int],
+    cursor: Int,
+
+    impl Iterator {
+        Item: Int,
+        Error: ParseError,
+
+        next: fn(^self) -> Int? ParseError! {
+            if self.cursor >= self.items.len() -> return Ok(None)
+            raw: self.items[self.cursor]
+            self.cursor += 1
+            n: parse_positive(raw)?
+            Ok(Val(n))
+        }
+    }
+}
+
+Batch: struct {
+    items: [Int],
+
+    impl Iterable {
+        Iter: BatchIter,
+
+        iter: fn(^^self) -> BatchIter Never! {
+            BatchIter{items: self.items, cursor: 0}
+        }
+    }
+}
+
+sum_batch: fn(items: [Int]) -> Int ParseError! {
+    ^total: 0
+    batch: Batch{items: items}
+    loop? n in batch {
+        total += n
+    }
+    Ok(total)
+}
+
+compute_pipeline: fn(label: String, raw: Int) -> Int ParseError! {
+    // `call()?.member` and `call()?.method()` propagate without parentheses.
+    direct_value: load_record(label, raw)?.value
+    doubled_value: load_record(label, raw)?.doubled()?
+    // `call()?(note)` propagates with a context frame.
+    checked_raw: parse_positive(raw)?("validating {label}")
+    Ok(direct_value + doubled_value + checked_raw)
+}
+
+format_record: fn(label: String, raw: Int) -> String ParseError! {
+    // Chaining a fallible call into an infallible method needs `?` only on the fallible step.
+    Ok(load_record(label, raw)?.summary())
+}
+
+fallback_doubled: fn(label: String, raw: Int) -> Int ParseError! {
+    // `load_record` propagates via `?.`; `.doubled()` is handled locally with `??`.
+    Ok(load_record(label, raw)?.doubled() ?? 500)
+}
+
+run: fn() {
+    // Local handling with `??` needs no `?`.
+    handled_err: parse_positive(-7) ?? 99
+    chain_fallback: fallback_doubled("high", 150) ?? -1
+    pipeline_ok: compute_pipeline("alpha", 12) ?? -1
+    summary_ok: format_record("beta", 5) ?? "failed"
+    batch_ok: sum_batch([Int]{3, 4, 5}) ?? -1
+    batch_err: sum_batch([Int]{3, -2, 5}) ?? -1
+    print("handled={handled_err} fallback={chain_fallback}")
+    print("pipeline={pipeline_ok} summary={summary_ok}")
+    print("batch_ok={batch_ok} batch_err={batch_err}")
+}

@@ -6183,7 +6183,7 @@ priv sema_ownership_collect_evaluated_one_stmt: fn(state: ^SemaOwnershipState, s
                         sema_ownership_collect_evaluated_expr_accesses(state, step_expr, mode, bound, nested, scopes, events, checks)
                     }
                 }
-                .In(collection, step) -> {
+                .In(collection, step, _) -> {
                     sema_ownership_collect_evaluated_expr_accesses(state, collection, mode, bound, nested, scopes, events, checks)
                     if step == .Val(step_expr) {
                         sema_ownership_collect_evaluated_expr_accesses(state, step_expr, mode, bound, nested, scopes, events, checks)
@@ -7698,7 +7698,7 @@ sema_ownership_check_statement: fn(state: ^SemaOwnershipState, statement: Stmt, 
                         valid = false
                     }
                 }
-                .In(collection, step) -> {
+                .In(collection, step, _) -> {
                     if !sema_ownership_check_expression(state, collection, scopes, diagnostics) {
                         valid = false
                     }

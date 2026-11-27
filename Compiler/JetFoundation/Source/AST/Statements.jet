@@ -109,13 +109,11 @@ PolicyKey: enum {
     Copies,
     Sentries,
     Arithmetic,
-    Failures,
     Runtime,
 }
 
 // `#Overflow(.Mode)`, at function, method or
 // block scope only; the innermost declaration wins and never crosses a call.
-// `failures: .Explicit`: each call that can fail is written with `?`.
 // `#Runtime(.NoEager)` and `#Runtime(.Only)`, at function, method or block
 // scope only, are the `Runtime` key's `NoEager` and `Only` values: the body
 // computes no local value while compiling, and `Only` also keeps every
@@ -153,7 +151,7 @@ PolicyScope: enum {
 
 ForKind: enum {
     Range(start: Expr, end: Expr, step: Expr?, exclusive: Bool),
-    In(collection: Expr, step: Expr?),
+    In(collection: Expr, step: Expr?, failure_mark: Span?),
 }
 
 // A destructuring loop head (`loop {a, b} in rows`, `loop Row{a, b} in

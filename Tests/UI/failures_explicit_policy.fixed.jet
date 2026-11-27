@@ -1,5 +1,3 @@
-#Policy(failures: .Explicit)
-
 Table: struct {
     rows: Int,
 }
@@ -17,7 +15,7 @@ load: fn(path: String) -> Table {
 total: fn(path: String) -> Int {
     first: parse(path)?
     second: parse(path)?("reading {path} again")
-    first + second + (load(path)?).rows
+    first + second + load(path)?.rows
 }
 
 run: fn() { print(total("ab") ?? 0) }

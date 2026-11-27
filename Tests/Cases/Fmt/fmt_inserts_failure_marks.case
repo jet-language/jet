@@ -1,12 +1,11 @@
-# `jet fmt --explicit-failures` writes the `?` that each call under
-# `#Policy(failures: .Explicit)` able to pass a failure up is missing, as
-# `(call()?)` for a call read as a receiver. The marked file checks clean, and
-# a plain format keeps every mark.
+# `jet fmt` writes the `?` that each call able to pass a failure up is missing,
+# chaining receivers cleanly as `call()?.member`. The marked file checks clean,
+# and a second format is idempotent.
 fixture: FmtInsertsFailureMarks/Input
 env: NO_COLOR=1
 env: JET_STORE_DIR={work}/cache
 env: JETPACK_ROOT={work}/jetpack
-step: jet fmt --explicit-failures run.jet
+step: jet fmt run.jet
 exit: 0
 file: run.jet = FmtInsertsFailureMarks/formatted.out
 step: jet check run.jet

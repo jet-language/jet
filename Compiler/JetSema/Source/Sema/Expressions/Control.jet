@@ -1433,10 +1433,13 @@ sema_expression_auto_propagate: fn(expr: Expr, value: ^^TExpr, expected: Type?, 
     span: expr_span(expr)
     method_callee: sema_failure_method_callee(value, check)
     conversion: sema_expression_propagation_conversion(value.ty, Val(expr), method_callee, span, true, check.environment.*, check.program.*, check.scopes, check.context, check.diagnostics) ?? return None
-    if check.scopes.failures_explicit {
-        sema_failure_marks_require(expr, conversion, sema_failure_callee_of(Val(expr), method_callee, check.environment.*, check.program.*, check.scopes), check.environment.*, check.program.*, check.scopes, check.context, check.diagnostics)
-    }
     payload: sema_expression_carrier_payload(value.ty) ?? return None
+    if conversion != .Never {
+        if expr_node_id(expr) == check.context.failure_mark_written {
+            check.context.failure_mark_consumed = expr_node_id(expr)
+        }
+        sema_failure_marks_require(expr, payload, conversion, sema_failure_callee_of(Val(expr), method_callee, check.environment.*, check.program.*, check.scopes), check.environment.*, check.program.*, check.scopes, check.context, check.diagnostics)
+    }
     location: sema_expression_panic_location(check.environment.*, check.program.*, check.scopes, span)
     propagated: sema_tree_node(payload, TExprKind.TryWithContext{inner: value.move(), note: None, convert: conversion, file: location.file, line: location.line, function: location.function}, span)
     sema_expr_expected(propagated, expected, check.environment.*, check.program.*, check.diagnostics)

@@ -1,10 +1,10 @@
 // Inlay hints: from the checked index, the type of each local, the parameter
 // each positional argument binds, the `^` or `^^` of each receiver a call
 // writes or takes and each unwritten `^^` take argument, and on a type each
-// method an impl declares outside its body; the `?` after each call that
-// passes a failure up by itself; then the `lsp.inlay_hints` hooks of a marked
-// block's package label places in its body. A request's range keeps the hints
-// inside it, and a range past the end of the document stops at its end.
+// method an impl declares outside its body; then the `lsp.inlay_hints` hooks
+// of a marked block's package label places in its body. A request's range
+// keeps the hints inside it, and a range past the end of the document stops
+// at its end.
 use {
     core.encoding.[Dyn]
     jet_foundation.[AccessConvention, ParamZone, Span, TOOL_STAGE_LSP_INLAY_HINTS, Type, access_sigil, failure_contract_signature_return, foundation_json_quote, type_name]
@@ -37,11 +37,6 @@ lsp_inlay_hint_response: fn(server: LSPServer, params: Dyn?, id: Dyn) -> String 
     ^hints: lsp_checked_inlay_hints(view)
     staged: server.stage_items(view, TOOL_STAGE_LSP_INLAY_HINTS)
     loop row in staged.move() { hints.push(LSPInlayHint{at: row.at, label: row.label, kind: None}) }
-    // A call whose failure passes up by itself shows the `?` the explicit
-    // failures policy would have written after it.
-    loop site in server.failure_marks(view) {
-        hints.push(LSPInlayHint{at: site, label: "?", kind: None})
-    }
     hints.sort_by(fn(left: LSPInlayHint, right: LSPInlayHint) { left.at <=> right.at })
     ^rows: [String]{}
     loop hint in hints {

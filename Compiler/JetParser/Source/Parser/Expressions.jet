@@ -1472,7 +1472,12 @@ parser_parse_string_format: fn(state: ^JetParserState, depth: Int, computed: ^[E
         }
         parser_expect(state, TOKEN_RPAREN, "after the arguments of `{head}( )`")
     }
-    Val(StrSelector{name: name, span: selector.span, args: args})
+    ^failure_mark: Span?{None}
+    if parser_current_kind(state) == TOKEN_QUESTION {
+        mark: parser_bump(state)
+        failure_mark = Val(mark.span)
+    }
+    Val(StrSelector{name: name, span: selector.span, args: args, failure_mark: failure_mark})
 }
 
 // One selector argument. An Int literal or a quoted text is a constant; a
@@ -2291,10 +2296,8 @@ parser_parse_postfix: fn(state: ^JetParserState, initial: ^^ParsedExpr, depth: I
         }
         if kind == TOKEN_QUESTION {
             operator: parser_bump(state)
-            // Bare `?` propagation is retired; a value's `x?)` and the
-            // context frame `x?(note)` remain, and a call's `call()?` is the
-            // mark `#Policy(failures: .Explicit)` asks for (sema refuses it
-            // outside the policy, where the call propagates by itself).
+            // Bare `?` marks a propagating call (`call()?`) or wraps a value
+            // as `x?)`; `x?(note)` adds a failure-context frame.
             if parser_current_kind(state) == TOKEN_LPAREN {
                 parser_bump(state)
                 note: parser_parse_expression(state, 1, depth + 1)

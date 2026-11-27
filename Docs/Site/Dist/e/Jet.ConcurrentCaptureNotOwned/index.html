@@ -36,13 +36,31 @@
 <h2>Fix</h2>
 <p class="diag-copy fix" data-registry-field="fix">Give it away with `.move()`, freeze it with `freeze`, or share it with `Shared{{…}}`</p>
 <h2>Worked example</h2>
-<p>First UI snapshot mentioning <code>Jet.ConcurrentCaptureNotOwned</code>: <code>Tests/UI/Closures/parallel_adapters_reject_unsafe_boundaries_before_codegen.stderr</code>.</p>
-<pre class="diag">Error: Jet.ConcurrentCaptureNotOwned: `seen` cannot cross the `parallel worker` boundary: the value writes shared state
-  --&gt; Tests/UI/Closures/parallel_adapters_reject_unsafe_boundaries_before_codegen.jet:3:33
+<p>First UI snapshot mentioning <code>Jet.ConcurrentCaptureNotOwned</code>: <code>Tests/UI/Cffi/ManagedCallbackSafety/stderr</code>.</p>
+<pre class="diag">Error: Jet.CallbackReadsContext: The C callback lambda reads `context.thread`.
+  --&gt; Tests/UI/Cffi/ManagedCallbackSafety/run.jet:4:20
     |
-  3 |     ignored: [1, 2, 3].para_map(fn(n: Int) { seen.push(n) })
-    |                                 ^^^^^^^^^^^^^^^^^^^^^^^^^^^
- Why: The `parallel worker` boundary can run concurrently with its owner; the write would race with the owner or require a hidden merge rule
+  4 |     source.on_data(fn(event) {
+    |                    ^^^^^^^^^^^
+ Why: C calls a callback on a thread it chooses, where no Jet task runs, so there is no task context to read.
+ Fix: Read the value before the foreign call and pass it to the callback through C, or drop the read.
+More: jet-lang.dev/e/Jet.CallbackReadsContext
+
+Error: Jet.ValueNotSendable: `cell` can&#39;t be captured by a foreign C callback because `Cell&lt;Int&gt;` isn&#39;t sendable
+  --&gt; Tests/UI/Cffi/ManagedCallbackSafety/run.jet:11:20
+    |
+ 11 |     source.on_data(fn(event) {
+    |                    ^^^^^^^^^^^
+ Why: Foreign C callbacks are retained by C and invoked on a thread C chooses, so their captured state must be owned and thread-safe
+ Fix: Capture only owned sendable values in the foreign callback, or use `Shared&lt;T&gt;` for synchronized state
+More: jet-lang.dev/e/Jet.ValueNotSendable
+
+Error: Jet.ConcurrentCaptureNotOwned: `count` cannot cross the `foreign C callback` boundary: the value writes shared state
+  --&gt; Tests/UI/Cffi/ManagedCallbackSafety/run.jet:19:20
+    |
+ 19 |     source.on_data(fn(event) {
+    |                    ^^^^^^^^^^^
+ Why: The `foreign C callback` boundary can run concurrently with its owner; the write would race with the owner or require a hidden merge rule
  Fix: Give it away with `.move()`, freeze it with `freeze`, or share it with `Shared{…}`
 More: jet-lang.dev/e/Jet.ConcurrentCaptureNotOwned
 </pre>

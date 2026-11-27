@@ -1461,7 +1461,7 @@ sema_derive_expand_loop_block: fn(expansion: ^SemaDeriveExpansion, body: [Stmt],
         return
     }
     if body[0] == .For(var, _, _, kind, loop_body, _, _, _, _) {
-        if kind == .In(collection, _) {
+        if kind == .In(collection, _, _) {
             values: sema_derive_loop_values(expansion, collection) ?? {
                 sema_derive_fail(expansion, sema_error("E0956", span, "a `#loop` source is not a compile-time list", "`#loop` expands one statement template for each value in its source list", "use a reflected/comptime list such as `T.reflect().fields`"))
                 return
@@ -1585,7 +1585,7 @@ sema_derive_expand_stmt: fn(expansion: ^SemaDeriveExpansion, stmt: Stmt) -> Stmt
         .For(var, var_span, var2, kind, body, span, arrow_body, label, auto_vectorization) -> {
             expanded_kind: if kind == {
                 .Range(start, end, step, exclusive) -> ForKind.Range{start: sema_derive_expand_expr(expansion, start), end: sema_derive_expand_expr(expansion, end), step: sema_derive_expand_optional_expr(expansion, step), exclusive: exclusive}
-                .In(collection, step) -> ForKind.In{collection: sema_derive_expand_expr(expansion, collection), step: sema_derive_expand_optional_expr(expansion, step)}
+                .In(collection, step, failure_mark) -> ForKind.In{collection: sema_derive_expand_expr(expansion, collection), step: sema_derive_expand_optional_expr(expansion, step), failure_mark: failure_mark}
             }
             Stmt.For{var: var, var_span: var_span, var2: var2, kind: expanded_kind, body: sema_derive_expand_stmts(expansion, body), span: span, arrow_body: arrow_body, label: label, auto_vectorization: auto_vectorization}
         }

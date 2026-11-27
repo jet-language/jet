@@ -180,7 +180,6 @@ jfmt_policy_key_name: fn(key: PolicyKey) -> String Never! {
         .Copies -> "copies"
         .Sentries -> "sentries"
         .Arithmetic -> "arithmetic"
-        .Failures -> "failures"
         .Runtime -> "runtime"
     }
 }
@@ -1299,7 +1298,8 @@ jfmt_fmt_loop_head_pattern: fn(f: ^JetFmt, var: String, body: [Stmt]) -> Bool {
 // head ends in the source.
 jfmt_fmt_for_head: fn(f: ^JetFmt, var: String, var_span: Span, var2: NamedSpan?, kind: ForKind, body: [Stmt], span: Span, label: NamedSpan?) -> Int {
     jfmt_fmt_loop_label(f, label)
-    jfmt_write(f, "loop ")
+    marked_loop: if kind == .In(_, _, mark) -> mark != None else -> false
+    jfmt_write(f, if marked_loop -> "loop? " else -> "loop ")
     // The bindingless form writes its subject bare. The parser records the
     // implicit binding under INTERNAL_LOOP_ITEM, so `loop it in words` prints
     // its authored name while a bindingless loop omits it.
@@ -1329,7 +1329,7 @@ jfmt_fmt_for_head: fn(f: ^JetFmt, var: String, var_span: Span, var2: NamedSpan?,
             step_width: if step == .Val(value) -> expr_span(value).end - expr_span(value).start + 2 else -> 0
             expr_span(start).end - expr_span(start).start + expr_span(end).end - expr_span(end).start + step_width + (if exclusive -> 6 else -> 5)
         }
-        .In(collection, step) -> {
+        .In(collection, step, _) -> {
             step_width: if step == .Val(value) -> expr_span(value).end - expr_span(value).start + 2 else -> 0
             expr_span(collection).end - expr_span(collection).start + step_width + 3
         }
@@ -1337,7 +1337,7 @@ jfmt_fmt_for_head: fn(f: ^JetFmt, var: String, var_span: Span, var2: NamedSpan?,
     wrap: f.col + clause_width > JFMT_MAX_WIDTH
     first_clause_start: if kind == {
         .Range(start, _, _, _) -> expr_span(start).start
-        .In(collection, _) -> expr_span(collection).start
+        .In(collection, _, _) -> expr_span(collection).start
     }
     if bindingless -> jfmt_maybe_wrap_loop_clause(f, wrap) else {
         jfmt_loop_source_separator(f, first_clause_start, wrap)
@@ -1354,7 +1354,7 @@ jfmt_fmt_for_head: fn(f: ^JetFmt, var: String, var_span: Span, var2: NamedSpan?,
             }
             header_end = if step == .Val(value) -> expr_span(value).end else -> expr_span(end).end
         }
-        .In(collection, step) -> {
+        .In(collection, step, _) -> {
             jfmt_fmt_expr(f, collection, JFMT_PREC_OR_FALLBACK)
             if step == .Val(value) {
                 jfmt_loop_clause_separator(f, expr_span(value).start, wrap)

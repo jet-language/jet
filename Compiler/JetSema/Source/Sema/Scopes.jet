@@ -1010,11 +1010,19 @@ SemaCheckContext: struct {
     // being checked that its expectation describes the success value.
     failure_carrier_root: Bool,
     failure_success_view: Bool,
-    // Under `failures: .Explicit` (FailureMarks.jet): the node of the call a
-    // written `?` marks, and the node of the call the expression being
-    // checked reads a member of, which its mark must wrap in parentheses.
+    // Failure mark tracking (FailureMarks.jet): the node of the call a
+    // written `?` marks, the node of a member/method receiver (which only
+    // needs parens when its payload is optional), the node of a CallValue
+    // callee (which needs parens before `(...)`), the node whose written `?`
+    // actually propagated a failure (used to detect stale `?` for L0537), and
+    // whether the enclosing expression had `failure_carrier_root` set (used by
+    // `call()?.method()` chaining).
     failure_mark_written: Int{-1},
+    failure_mark_written_span: Span?{None},
     failure_mark_receiver: Int{-1},
+    failure_mark_callee: Int{-1},
+    failure_mark_consumed: Int{-1},
+    failure_carrier_outer: Bool{false},
     // An open callback (no written or expected return) adopts the carrier of
     // its first propagated call.
     failure_inference: Bool,
@@ -1233,7 +1241,6 @@ SemaNumberRetype: struct {
 SemaScopeModulePolicy: struct {
     unit_explicit_units: Bool,
     copies_explicit: Bool,
-    failures_explicit: Bool,
     // Split the exact span key into scalar indexes, without formatting it.
     function_unit_starts: [Int:Int],
     function_unit_ends: [[Int:Bool]],
@@ -1269,9 +1276,6 @@ SemaScopeTable: struct {
     // While checking the first step of a named-head pipe (`xs |> grow(^<>)`),
     // the head's symbol id so call-mark reports name `<>` rather than `xs`.
     pipe_in_place_symbol: SymbolID?{None},
-    // `failures: .Explicit` is active: every call that can fail is written
-    // with `?` (FailureMarks.jet).
-    failures_explicit: Bool{false},
     // The innermost `#Context` block: 0 outside one, 1 inside one without an
     // `allocator:` field, 2 when an enclosing block names an allocator.
     context_allocation: Int{0},
@@ -1356,7 +1360,6 @@ SemaScopeMark: struct {
     unit_explicit_units: Bool,
     copies_explicit: Bool,
     pipe_in_place_symbol: SymbolID?,
-    failures_explicit: Bool,
     context_allocation: Int,
     open_marks: Int,
     deep_check: SemaDeepFrame?,
@@ -2399,7 +2402,6 @@ sema_scope_snapshot: fn(source: SemaScopeTable) -> SemaScopeTable Never! {
         unit_explicit_units: source.unit_explicit_units,
         copies_explicit: source.copies_explicit,
         pipe_in_place_symbol: source.pipe_in_place_symbol,
-        failures_explicit: source.failures_explicit,
         context_allocation: source.context_allocation,
         binding_undo: source.binding_undo.copy(),
         open_marks: source.open_marks,
@@ -2432,7 +2434,6 @@ sema_scope_mark: fn(table: ^SemaScopeTable) -> SemaScopeMark Never! {
         unit_explicit_units: table.unit_explicit_units,
         copies_explicit: table.copies_explicit,
         pipe_in_place_symbol: table.pipe_in_place_symbol,
-        failures_explicit: table.failures_explicit,
         context_allocation: table.context_allocation,
         open_marks: table.open_marks,
         deep_check: table.deep_check,
@@ -2476,7 +2477,6 @@ sema_scope_rollback: fn(table: ^SemaScopeTable, mark: SemaScopeMark) Never! {
     table.unit_explicit_units = mark.unit_explicit_units
     table.copies_explicit = mark.copies_explicit
     table.pipe_in_place_symbol = mark.pipe_in_place_symbol
-    table.failures_explicit = mark.failures_explicit
     table.context_allocation = mark.context_allocation
     table.deep_check = mark.deep_check
     // Exact even when a nested mark was abandoned by an early return.
@@ -2695,7 +2695,6 @@ sema_scope_module_policy: fn(table: ^SemaScopeTable, graph: SemaRegistrationGrap
     ^policy: SemaScopeModulePolicy{
         unit_explicit_units: false,
         copies_explicit: false,
-        failures_explicit: false,
         function_unit_starts: [Int:Int]{},
         function_unit_ends: [[Int:Bool]]{},
     }
@@ -2722,7 +2721,6 @@ sema_scope_module_policy: fn(table: ^SemaScopeTable, graph: SemaRegistrationGrap
                 }
                 if declaration.key == PolicyKey.ExplicitUnits -> policy.unit_explicit_units = true
                 if sema_string_view_copies_declaration(declaration) -> policy.copies_explicit = true
-                if sema_failure_marks_declaration(declaration) -> policy.failures_explicit = true
             }
         }
     }
@@ -3287,7 +3285,6 @@ sema_scope_light_copy: fn(source: SemaScopeTable) -> SemaScopeTable Never! {
             unit_explicit_units: source.unit_explicit_units,
             copies_explicit: source.copies_explicit,
             pipe_in_place_symbol: source.pipe_in_place_symbol,
-            failures_explicit: source.failures_explicit,
             context_allocation: source.context_allocation,
             policy_modules: source.policy_modules,
             policy_rows: source.policy_rows,
@@ -3350,7 +3347,6 @@ sema_scope_light_copy: fn(source: SemaScopeTable) -> SemaScopeTable Never! {
         unit_explicit_units: source.unit_explicit_units,
         copies_explicit: source.copies_explicit,
         pipe_in_place_symbol: source.pipe_in_place_symbol,
-        failures_explicit: source.failures_explicit,
         context_allocation: source.context_allocation,
         policy_modules: source.policy_modules,
         policy_rows: source.policy_rows,

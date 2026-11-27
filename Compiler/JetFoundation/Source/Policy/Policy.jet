@@ -27,7 +27,6 @@ policy_key_name: fn(key: PolicyKey) -> String Never! {
         .Copies -> "copies"
         .Sentries -> "sentries"
         .Arithmetic -> "arithmetic"
-        .Failures -> "failures"
         .Runtime -> "runtime"
     }
 }
@@ -55,14 +54,13 @@ policy_key_parse: fn(name: String) -> PolicyKey? Never! {
         "explicit_units" -> Val(PolicyKey.ExplicitUnits)
         "copies" -> Val(PolicyKey.Copies)
         "sentries" -> Val(PolicyKey.Sentries)
-        "failures" -> Val(PolicyKey.Failures)
         else -> None
     }
 }
 
 policy_key_is_audited_gate: fn(key: PolicyKey) -> Bool Never! {
     if key == {
-        .ScopedGC | .ExplicitUnits | .Copies | .Sentries | .Arithmetic | .Failures | .Runtime -> false
+        .ScopedGC | .ExplicitUnits | .Copies | .Sentries | .Arithmetic | .Runtime -> false
         .Unsafe | .Impure | .Nondeterministic | .DependencyGrant | .BuildFlag | .SessionFlag | .TrustGrant | .ForcePin | .TaintScrub | .DutyDrop | .StateTransition | .PrecisionDemotion | .Structure | .LintAllow | .CheckRemoval | .LinkOverride | .HostFacts -> true
     }
 }
@@ -217,7 +215,6 @@ POLICY_RULES: #run { [PolicyRule]{
     {key: PolicyKey.Sentries, scopes: POLICY_PACKAGE_SCOPES, combine: PolicyCombine.Tighten},
     // The innermost mode wins: a wrapping block inside a checked function wraps.
     {key: PolicyKey.Arithmetic, scopes: POLICY_BODY_SCOPES, combine: PolicyCombine.Override},
-    {key: PolicyKey.Failures, scopes: POLICY_PACKAGE_SCOPES, combine: PolicyCombine.Tighten},
     // `#Runtime(.NoEager)` inside `#Runtime(.Only)` would widen it.
     {key: PolicyKey.Runtime, scopes: POLICY_BODY_SCOPES, combine: PolicyCombine.Tighten},
 } }
@@ -313,7 +310,6 @@ policy_key_debug_text: fn(key: PolicyKey) -> String Never! {
         .Copies -> "Copies"
         .Sentries -> "Sentries"
         .Arithmetic -> "Arithmetic"
-        .Failures -> "Failures"
         .Runtime -> "Runtime"
     }
 }
@@ -402,7 +398,7 @@ policy_widens: fn(key: PolicyKey, outer: PolicyValue, inner: PolicyValue) -> Boo
     if (key == PolicyKey.ScopedGC || key == PolicyKey.ExplicitUnits) && outer == PolicyValue.Enabled && inner == PolicyValue.Enabled {
         return false
     }
-    if (key == PolicyKey.Copies || key == PolicyKey.Failures) && outer == PolicyValue.Explicit && inner == PolicyValue.Explicit {
+    if key == PolicyKey.Copies && outer == PolicyValue.Explicit && inner == PolicyValue.Explicit {
         return false
     }
     if key == PolicyKey.Sentries {
@@ -472,10 +468,6 @@ policy_parse_value: fn(key: PolicyKey, raw: String) -> PolicyValue PolicyValueEr
     if key == PolicyKey.Copies {
         if value == ".Explicit" -> return Ok(PolicyValue.Explicit)
         return Err(PolicyValueError{detail: "`copies` must be `.Explicit`"})
-    }
-    if key == PolicyKey.Failures {
-        if value == ".Explicit" -> return Ok(PolicyValue.Explicit)
-        return Err(PolicyValueError{detail: "`failures` must be `.Explicit`"})
     }
     if key == PolicyKey.Sentries {
         if value == {

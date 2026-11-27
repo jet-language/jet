@@ -72,12 +72,6 @@ LSPServer: struct {
         items
     }
 
-    // Where each call in the document `view` reads passes a failure up by
-    // itself: the byte just past the call.
-    failure_marks: fn(self, view: LSPView) -> [Int] {
-        self.checker.failure_marks(lsp_doc_check_path(view.doc), self.overlays())
-    }
-
     overlays: fn(self) -> [JetDriverSourceDocument] Never! {
         overlays: loop (_, open) in self.diagnostic_state.docs -> if open.host_doc == {
             .Val(host_doc) -> JetDriverSourceDocument{path: "{host_doc.path}", source: "{host_doc.source}", host: host_doc.host}

@@ -2995,9 +2995,20 @@ sema_expr_check_format_style: fn(value: Expr, checked: TExpr, selector: StrSelec
     receiver: if type_identity_equal(base, checked.ty) -> checked else -> sema_expr_numeric_conversion(checked, base, checked.span, line) ?? return None
     call: sema_expr_check_declared_method(value, receiver, style.method, style.method, checked.span, [Type]{}, [Type]{}, args, None, check) ?? return None
     // The selector is a call root: a user implementation whose failure row
-    // is inferred propagates its failure as any call does, so the text is
-    // the String it returns, never its Result carrier.
-    sema_expression_auto_propagate(value, call, None, check)
+    // is inferred or declared propagates its failure and requires `{x:Sel?}`;
+    // an infallible selector rejects a stale `?` with L0537.
+    if !sema_expression_auto_propagates(call.ty, None, check.context) {
+        if selector.failure_mark == .Val(mark) {
+            sema_failure_marks_warn_unused(mark, check.scopes, check.context, check.diagnostics)
+        }
+        return Val(call)
+    }
+    method_callee: sema_failure_method_callee(call, check)
+    conversion: sema_expression_propagation_conversion(call.ty, None, method_callee, selector.span, true, check.environment.*, check.program.*, check.scopes, check.context, check.diagnostics) ?? return None
+    sema_failure_marks_check_selector(selector, conversion, method_callee, check.scopes, check.context, check.diagnostics)
+    payload: sema_expression_carrier_payload(call.ty) ?? return None
+    location: sema_expression_panic_location(check.environment.*, check.program.*, check.scopes, selector.span)
+    Val(sema_tree_node(payload, TExprKind.TryWithContext{inner: call, note: None, convert: conversion, file: location.file, line: location.line, function: location.function}, selector.span))
 }
 
 sema_expr_call_callee: fn(program: SemaProgramTables, value: TExpr) -> SymbolID? {
@@ -7079,7 +7090,7 @@ sema_expr_copy_fork_map: fn(subject: Expr, depth: Int, span: Span) -> Expr Never
     read: Expr.Index{base: sema_expr_copy_fork_name(made, span), index: sema_expr_copy_fork_name(key, span), span: span, kind: IndexKind.Unknown, id: AST_NODE_GENERATED}
     write: Stmt.Assign{target: LValue.Index{base: sema_expr_copy_fork_name(made, span), index: sema_expr_copy_fork_name(key, span), span: span, kind: IndexKind.Unknown}, op: None, op_span: span, value: sema_expr_copy_fork_part(read, span)}
     keys: Expr.MethodCall{receiver: sema_expr_copy_fork_name(made, span), method: "keys", method_span: span, owner_type_args: [Type]{}, type_args: [Type]{}, args: [CallArg]{}, id: AST_NODE_GENERATED}
-    each: Stmt.For{var: key.move(), var_span: span, var2: None, kind: ForKind.In{collection: keys, step: None}, body: [Stmt]{write}, span: span, arrow_body: true, label: None, auto_vectorization: None}
+    each: Stmt.For{var: key.move(), var_span: span, var2: None, kind: ForKind.In{collection: keys, step: None, failure_mark: None}, body: [Stmt]{write}, span: span, arrow_body: true, label: None, auto_vectorization: None}
     sema_expr_copy_fork_over_share(made, subject, each, span)
 }
 
@@ -7537,7 +7548,7 @@ sema_check_expression_cold: fn(expr: Expr, expected: Type?, check: ^SemaBodyChec
         .Slice(base, start, end, range, span, _) -> sema_expression_slice(base, start, end, range, span, expected, check)
         .Field(base, member, span, _) -> sema_expression_field(expr, base, member, span, expected, check)
         .OptField(base, member, member_span, _, span, _) -> sema_expression_optional_field(base, member, member_span, span, expected, check)
-        .OptMethodCall(receiver, method, method_span, type_args, args, span, _) -> sema_expression_optional_method_call(receiver, method, method_span, type_args, args, span, expected, check)
+        .OptMethodCall(receiver, method, method_span, type_args, args, span, _) -> sema_expression_optional_method_call(expr, receiver, method, method_span, type_args, args, span, expected, check.context.failure_carrier_outer, check)
         .Deref(value, span, _) -> sema_expression_deref(value, span, expected, check)
         .Place(value, access, span, _) -> {
             if check.scopes.ownership_call_depth == 0 && !sema_ownership_check_expression(check.state, expr, check.scopes, check.diagnostics) {
@@ -8318,14 +8329,18 @@ sema_check_expression: fn(expr: Expr, expected: Type?, check: ^SemaBodyCheck) ->
     propagates: !grouping && !carrier_root && sema_expression_propagating_call(expr, check.scopes)
     previous_success_view: check.context.failure_success_view
     previous_mark_receiver: check.context.failure_mark_receiver
+    previous_mark_callee: check.context.failure_mark_callee
+    previous_carrier_outer: check.context.failure_carrier_outer
     check.context.failure_success_view = propagates
-    if check.scopes.failures_explicit {
-        check.context.failure_mark_receiver = sema_failure_marks_receiver(expr)
-    }
+    check.context.failure_mark_receiver = sema_failure_marks_receiver(expr)
+    check.context.failure_mark_callee = sema_failure_marks_callee(expr)
+    check.context.failure_carrier_outer = carrier_root
     ^checked: sema_check_expression_inner(expr, expected, check)
     sema_leave_source_nesting(check.context)
     check.context.failure_success_view = previous_success_view
     check.context.failure_mark_receiver = previous_mark_receiver
+    check.context.failure_mark_callee = previous_mark_callee
+    check.context.failure_carrier_outer = previous_carrier_outer
     if propagates && checked != None {
         ^taken_checked: checked.move()
         checked = None

@@ -309,7 +309,7 @@ sema_divergence_conditional_loop: fn(cond: Expr, body: SemaDivergenceFlow) -> Se
 sema_divergence_for_kind: fn(graph: SemaRegistrationGraph, scope: ^SemaDivergenceScope, kind: ForKind) -> SemaDivergenceFlow Never! {
     if kind == {
         .Range(start, end, step, _) -> sema_divergence_then(sema_divergence_then(sema_divergence_expr(graph, scope, start), sema_divergence_expr(graph, scope, end)), sema_divergence_optional(graph, scope, step))
-        .In(collection, step) -> sema_divergence_then(sema_divergence_expr(graph, scope, collection), sema_divergence_optional(graph, scope, step))
+        .In(collection, step, _) -> sema_divergence_then(sema_divergence_expr(graph, scope, collection), sema_divergence_optional(graph, scope, step))
     }
 }
 

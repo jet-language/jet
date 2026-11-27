@@ -1856,13 +1856,15 @@ body_codec_put_strselector: fn(out: ^BodyCodecOut, value: StrSelector) Never! {
     body_codec_put_string(out, value.name)
     body_codec_put_span(out, value.span)
     body_codec_put_list_strselectorarg(out, value.args)
+    body_codec_put_opt_span(out, value.failure_mark)
 }
 
 body_codec_get_strselector: fn(bytes: [U8], input: ^BodyCodecIn) -> StrSelector Never! {
     f0: body_codec_get_string(bytes, input)
     f1: body_codec_get_span(bytes, input)
     f2: body_codec_get_list_strselectorarg(bytes, input)
-    StrSelector{name: f0, span: f1, args: f2}
+    f3: body_codec_get_opt_span(bytes, input)
+    StrSelector{name: f0, span: f1, args: f2, failure_mark: f3}
 }
 
 body_codec_put_strselectorarg: fn(out: ^BodyCodecOut, value: StrSelectorArg) Never! {
@@ -4193,10 +4195,11 @@ body_codec_put_forkind: fn(out: ^BodyCodecOut, value: ForKind) Never! {
             body_codec_put_opt_expr(out, p2)
             body_codec_put_bool(out, p3)
         }
-        .In(p0, p1) -> {
+        .In(p0, p1, p2) -> {
             body_codec_put_tag(out, 1)
             body_codec_put_expr(out, p0)
             body_codec_put_opt_expr(out, p1)
+            body_codec_put_opt_span(out, p2)
         }
     }
 }
@@ -4207,7 +4210,8 @@ body_codec_get_forkind: fn(bytes: [U8], input: ^BodyCodecIn) -> ForKind Never! {
         1 -> {
             f0: body_codec_get_expr(bytes, input)
             f1: body_codec_get_opt_expr(bytes, input)
-            ForKind.In{collection: f0, step: f1}
+            f2: body_codec_get_opt_span(bytes, input)
+            ForKind.In{collection: f0, step: f1, failure_mark: f2}
         }
         else -> {
             f0: body_codec_get_expr(bytes, input)
@@ -4277,8 +4281,7 @@ body_codec_put_policykey: fn(out: ^BodyCodecOut, value: PolicyKey) Never! {
         .Copies -> { body_codec_put_tag(out, 19) }
         .Sentries -> { body_codec_put_tag(out, 20) }
         .Arithmetic -> { body_codec_put_tag(out, 21) }
-        .Failures -> { body_codec_put_tag(out, 22) }
-        .Runtime -> body_codec_put_tag(out, 23)
+        .Runtime -> body_codec_put_tag(out, 22)
     }
 }
 
@@ -4306,8 +4309,7 @@ body_codec_get_policykey: fn(bytes: [U8], input: ^BodyCodecIn) -> PolicyKey Neve
         19 -> PolicyKey.Copies
         20 -> PolicyKey.Sentries
         21 -> PolicyKey.Arithmetic
-        22 -> PolicyKey.Failures
-        23 -> PolicyKey.Runtime
+        22 -> PolicyKey.Runtime
         else -> PolicyKey.Unsafe
     }
 }

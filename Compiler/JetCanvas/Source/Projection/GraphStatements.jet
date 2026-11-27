@@ -118,7 +118,7 @@ project_stmt: fn(g: ^GraphBuilder, index: SemIndex, src: String, stmt: StmtNode,
             add_node(g, node_id, "loop", "loop {var}", span, x, y, [String]{"control"}, [String]{"source_jump"})
             iter_ty: if kind == {
                 .Range(_, _, _, _) -> "Int"
-                .In(_, _) -> "iterable"
+                .In(_, _, _) -> "iterable"
             }
             output: add_pin(g, node_id, var, "output", iter_ty, "", false)
             g.local_pins[var] = output
@@ -139,7 +139,7 @@ project_stmt: fn(g: ^GraphBuilder, index: SemIndex, src: String, stmt: StmtNode,
                         connect_expr_to_input(g, index, src, value, ordinal * 10 + 2, "stride", node_id, stride_pin, x - 220, y + 60)
                     }
                 }
-                .In(collection, stride) -> {
+                .In(collection, stride, _) -> {
                     source_pin: add_pin(g, node_id, "source", "input", "Iterable", "", false)
                     connect_expr_to_input(g, index, src, collection, ordinal * 10, "source", node_id, source_pin, x - 220, y)
                     if stride == .Val(value) {

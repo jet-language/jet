@@ -563,7 +563,7 @@ sema_function_header_variadic_statement: fn(statement: Stmt, name: String, top_l
         }
         .For(_, _, second, kind, body, span, _, label, _) -> {
             ^direct: false
-            if top_level && second == None && label == None && kind == .In(direct_collection, direct_step) && direct_step == None && direct_collection == .Ident(direct_name, _, _) && direct_name == name {
+            if top_level && second == None && label == None && kind == .In(direct_collection, direct_step, _) && direct_step == None && direct_collection == .Ident(direct_name, _, _) && direct_name == name {
                 direct = true
             }
             if direct -> loops += 1 else {
@@ -575,7 +575,7 @@ sema_function_header_variadic_statement: fn(statement: Stmt, name: String, top_l
                             sema_function_header_variadic_expr(step_value, name, uses)
                         }
                     }
-                    .In(collection, step) -> {
+                    .In(collection, step, _) -> {
                         if collection == .Ident(collection_name, _, _) && collection_name == name {
                             uses.push(span.copy())
                         } else { sema_function_header_variadic_expr(collection, name, uses) }

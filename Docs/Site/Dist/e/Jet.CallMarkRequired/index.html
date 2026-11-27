@@ -36,23 +36,32 @@
 <h2>Fix</h2>
 <p class="diag-copy fix" data-registry-field="fix">Write `^` before the named argument the quoted signature changes, or `^^` (or no mark) for a whole-name take.</p>
 <h2>Worked example</h2>
-<p>First UI snapshot mentioning <code>Jet.CallMarkRequired</code>: <code>Tests/UI/E0228_take_mark_explains_take.stderr</code>.</p>
-<pre class="diag">Error: Jet.CallMarkRequired: `^^` cannot mark a part of `st`
-  --&gt; Tests/UI/E0228_take_mark_explains_take.jet:19:10
+<p>First UI snapshot mentioning <code>Jet.CallMarkRequired</code>: <code>Tests/UI/e0228_call_mark_required.stderr</code>.</p>
+<pre class="diag">Error: Jet.CallMarkRequired: `grow` changes `items`, so the call writes `^items`
+  --&gt; Tests/UI/e0228_call_mark_required.jet:7:33
     |
- 19 |     seal(^^st.buf)
-    |          ^^
- Why: `seal: fn(xs: ^^[Int])` takes this input, but a `^^` call mark applies only to a whole named value, not a field or indexed part
- Fix: Remove `^^`, or write `.move()` on the part if you intend to move it out
+  7 | relay: fn(items: ^[Int]) { grow(items) }
+    |                                 ^^^^^
+ Why: `grow: fn(items: ^[Int])` changes this input, and every call writes `^` before a named argument it changes
+ Fix: Write `^items`, or run `jet fmt` / `jet fix`
 More: jet-lang.dev/e/Jet.CallMarkRequired
 
-Error: Jet.CallMarkRequired: `n` is a copied type, so `take_n` takes no `^^`
-  --&gt; Tests/UI/E0228_take_mark_explains_take.jet:21:12
+Error: Jet.CallMarkRequired: `grow` changes `st.items`, so the call writes `^st.items`
+  --&gt; Tests/UI/e0228_call_mark_required.jet:13:10
     |
- 21 |     take_n(^^n)
-    |            ^^
- Why: `take_n: fn(n: ^^Int)` takes this input by value, which copies `n` instead of moving it, so `n` stays usable after the call
- Fix: Remove the `^^`
+ 13 |     grow(st.items)
+    |          ^^^^^^^^
+ Why: `grow: fn(items: ^[Int])` changes this input, and every call writes `^` before a named argument it changes
+ Fix: Write `^st.items`, or run `jet fmt` / `jet fix`
+More: jet-lang.dev/e/Jet.CallMarkRequired
+
+Error: Jet.CallMarkRequired: `archive` takes `title`, so its mark is `^^`, not `^`
+  --&gt; Tests/UI/e0228_call_mark_required.jet:16:21
+    |
+ 16 |     print(&quot;{archive(^title)} {st.items.len()}&quot;)
+    |                     ^
+ Why: `archive: fn(title: ^^String)` takes this input rather than changing it in place; omit the mark or write `^^`
+ Fix: Write `^^title` or remove `^`
 More: jet-lang.dev/e/Jet.CallMarkRequired
 </pre>
 <p><a href="../index.html">Back to all error codes</a></p>

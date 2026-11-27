@@ -3,6 +3,12 @@
 // the methods an impl declares outside its body. The fixture checker resolves
 // free calls and impl heads but infers no local types, so local type hints and
 // method receivers are covered by the LSP cases.
+use {
+    jet_driver.[JetDriverSourceDocument, JetDriverToolStageItem]
+    jet_foundation.[DIAGNOSTIC_ERROR, DIAGNOSTIC_LINT, Diagnostic, DiagnosticFixApplicability, Span, TextEdit]
+    jet_lsp.[LSPChecked, LSPChecker, lsp_server]
+}
+
 LSP_TEST_HINTS_URI: "file:///w/hints.jet"
 
 // Line 5 calls `clamp` with two positional arguments, one that spells its
@@ -112,12 +118,64 @@ lsp_test_hints: fn(server: ^LSPServer, uri: String, end_line: Int) -> [String] {
     assert_eq(tokens, [String]{"10:4:0", "10:10:4", "10:17:0"})
 }
 
-#Test("inlay hints show a `?` after each call that passes a failure up") {
+#Test("inlay hints no longer emit faint `?` failure marks") {
     ^server: lsp_test_server()
     lsp_test_open(server, LSP_TEST_FAILURES_URI, LSP_TEST_FAILURES)
-    assert_eq(lsp_test_hints(server, LSP_TEST_FAILURES_URI, 9), [String]{"5:17 ?", "6:18 ?", "6:27 ?", "7:27 ?"})
-    // The range keeps those inside it.
-    assert_eq(lsp_test_hints(server, LSP_TEST_FAILURES_URI, 6), [String]{"5:17 ?"})
+    assert_eq(lsp_test_hints(server, LSP_TEST_FAILURES_URI, 9), [String]{})
+}
+
+LSPFixAllChecker: struct {
+    insert_at: Int,
+    delete_at: Int,
+
+    impl LSPChecker {
+        check: fn(self, entry: String, overlays: [JetDriverSourceDocument]) -[FS, Env, Exec, IO, Time, Net, FFI.Asm]> LSPChecked Never! {
+            ^checked: LSPFixtureChecker{}.check(entry, overlays)
+            e0434: Diagnostic{
+                code: "E0434",
+                severity: DIAGNOSTIC_ERROR,
+                what: "`fail` can fail, so the call is written with `?`",
+                why: "every call that can pass a failure up writes `?`",
+                fix: "write `?` after the call",
+                span: Val(Span{start: self.insert_at - 6, end: self.insert_at}),
+                edit: Val(TextEdit{span: Span{start: self.insert_at, end: self.insert_at}, new_text: "?"}),
+                applicability: Val(DiagnosticFixApplicability.Safe),
+            }
+            l0537: Diagnostic{
+                code: "L0537",
+                severity: DIAGNOSTIC_LINT,
+                what: "this `?` is unnecessary because this expression cannot fail",
+                why: "a bare `?` marks a failure propagation",
+                fix: "remove the unnecessary `?`",
+                span: Val(Span{start: self.delete_at, end: self.delete_at + 1}),
+                edit: Val(TextEdit{span: Span{start: self.delete_at, end: self.delete_at + 1}, new_text: ""}),
+                applicability: Val(DiagnosticFixApplicability.Safe),
+            }
+            checked.diagnostics = [Diagnostic]{e0434, l0537}
+            checked
+        }
+
+        stage: fn(self, entry: String, overlays: ^^[JetDriverSourceDocument], stage: String, bodies: [Span], program: ^^String) -[FS, Env, Exec, IO, Time, Net, FFI.Asm]> [[JetDriverToolStageItem]] Never! {
+            LSPFixtureChecker{}.stage(entry, overlays, stage, bodies, program)
+        }
+
+        sources: fn(self, root: String) -[FS]> [JetDriverSourceDocument] Never! {
+            LSPFixtureChecker{}.sources(root)
+        }
+    }
+}
+
+#Test("source.fixAll applies safe E0434 and L0537 edits across the document") {
+    source: "run: fn() {{\n    a: fail()\n    b: ok()?\n}}\n"
+    insert_at: source.find("fail()") + 6
+    delete_at: source.find("ok()?") + 4
+    ^server: lsp_server(LSPFixAllChecker{insert_at: insert_at, delete_at: delete_at})
+    ^_: lsp_test_result(server, "initialize", "{{}}")
+    lsp_test_open(server, "file:///w/fixall.jet", source)
+    assert_eq(
+        lsp_imports_actions(server, "file:///w/fixall.jet", 0, "source.fixAll"),
+        [String]{"Apply safe failure and call marks|source.fixAll|true|1:13-1:13 ?;2:11-2:12 "},
+    )
 }
 
 #Test("completion in a write parameter slot inserts ^name") {

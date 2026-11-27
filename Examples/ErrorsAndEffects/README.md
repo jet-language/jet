@@ -64,6 +64,7 @@ Run a lesson from the repository root, for example `jet run Examples/ErrorsAndEf
 - [DefaultErrValue](Errors/DefaultErrValue.jet) — Err is both the default error type and its constructor.
 - [ErrorContext](Errors/ErrorContext.jet) — Automatic `?`-propagation trail (dev builds) + lazy `?` notes.
 - [Errors](Errors/Errors.jet)
+- [FailureMarks](Errors/FailureMarks.jet) — Explicit `?` failure marks on propagating calls, `call()?.member`, `call()?.method()`, `call()?(note)`, `loop?`, and local `??` handling.
 - [FallbackChain](Errors/FallbackChain.jet) — `a ??
 - [FallibleArmTables](Errors/FallibleArmTables.jet) — A decision table is the value of a fallible function.
 - [FallibleRun](Errors/FallibleRun.jet) — Optional success and typed failure use prefix roles.

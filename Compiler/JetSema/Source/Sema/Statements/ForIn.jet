@@ -238,7 +238,7 @@ sema_stmt_for_in_trait_impl: fn(graph: SemaRegistrationGraph, trait_name: String
 // so a failure of it passes up as an implicit fallible call's does, through
 // the same conversion (sema_expression_propagation_conversion) at the
 // header `span`.
-sema_stmt_for_in_iterable_fact: fn(check: ^SemaBodyCheck, collection_type: Type, span: Span) -> SemaForInIterableFact? {
+sema_stmt_for_in_iterable_fact: fn(check: ^SemaBodyCheck, collection_type: Type, span: Span, loop_span: Span, failure_mark: Span?) -> SemaForInIterableFact? {
     if sema_stmt_for_in_named_type_name(collection_type) == None -> return None
     graph: check.program.registration_graph
     // Impls key their target by the declaring nominal's identity, so a
@@ -286,9 +286,11 @@ sema_stmt_for_in_iterable_fact: fn(check: ^SemaBodyCheck, collection_type: Type,
         converted: sema_expression_propagation_conversion(Type.Result{ok: Type.Option{inner: item}, err: error}, Val(step_call), Val(callee), span, true, check.environment.*, check.program.*, check.scopes, check.context, check.diagnostics)
         routed = converted != None
         failure = converted ?? TTryConvert.Never
-        if converted == .Val(conversion) && check.scopes.failures_explicit {
-            sema_failure_marks_require_loop_step(span, conversion, Val(callee), check.scopes, check.context, check.diagnostics)
+        if converted == .Val(conversion) {
+            sema_failure_marks_require_loop_step(loop_span, failure_mark, conversion, Val(callee), check.environment.*, check.program.*, check.scopes, check.context, check.diagnostics)
         }
+    } else if failure_mark == .Val(mark) {
+        sema_failure_marks_warn_unused(mark, check.scopes, check.context, check.diagnostics)
     }
     Val(SemaForInIterableFact{
         method_kind: TForInMethod.Iterable{coll_type: collection_identity, iter_type: iterator_identity, iter_symbol: iter_key, next_symbol: next_key, item_type: item, failure: failure},
@@ -1079,7 +1081,7 @@ sema_stmt_index_root_with_stmt: fn(statement: Stmt, root: String, index_var: Str
                         if sema_stmt_index_root_with_expr(stride, root, index_var) -> return true
                     }
                 }
-                .In(collection, step) -> {
+                .In(collection, step, _) -> {
                     if sema_stmt_index_root_with_expr(collection, root, index_var) -> return true
                     if step == .Val(stride) {
                         if sema_stmt_index_root_with_expr(stride, root, index_var) -> return true

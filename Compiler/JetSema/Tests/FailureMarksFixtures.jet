@@ -1,33 +1,51 @@
-// Regression tests for #7034 n3, n4, and n5:
-// - n3: E0434 fix edits land at the call's closing `)`, never inside trailing
-//   typed list literals (`each_size([String]{...})`) or lambdas (`apply_all(..., fn(...) {...})`),
-//   and applying all edits produces valid parseable Jet source.
-// - n4: loop headers over failing `Iterable` sources emit E0434 under
-//   `#Policy(failures: .Explicit)` while infallible `Iterable` loops stay allowed.
-// - n5: compiler-generated `#CLI` wrappers (`__jet_cli_run`, `__jet_cli_parse`,
-//   `__jet_cli_decode`, `merge`) never emit E0434 while unmarked user calls
-//   inside `run(args: T)` still do.
+// Regression tests for unconditional failure marks:
+// - E0434 fix edits land at the call's closing `)`, never inside trailing
+//   typed list literals or lambdas; non-optional receivers chain cleanly as
+//   `call()?.member` without parens; optional `T? E!` receivers and CallValue
+//   callees wrap `(call()?)`.
+// - Loop headers over failing `Iterable` sources emit E0434 with a Safe `loop?`
+//   edit, while infallible `Iterable` loops reject `loop?` with L0537.
+// - Format selectors `{x:Sel?}` require `?` when fallible and warn L0537 when
+//   infallible.
+// - Bare `?` on infallible calls (explicit `Never!` or inferred-infallible)
+//   emits L0537 with a Safe removal edit.
+// - Compiler-generated `#CLI` wrappers never emit E0434 while unmarked user
+//   calls inside `run(args: T)` still do.
 use {
     files: core.files
+    process: core.process
+    sys: core.sys
     jet_driver.[JetDriverCompileMode, jet_driver_present_diagnostics]
     jet_cli.[jet_cli_compile_file]
-    jet_foundation.[DIAGNOSTIC_ERROR, Diagnostic, TextEdit]
+    jet_foundation.[DIAGNOSTIC_ERROR, DIAGNOSTIC_LINT, Diagnostic, TextEdit]
     jet_parser.[parse_source]
 }
 
-failure_marks_compile: fn(file: String) -> [Diagnostic] {
+failure_marks_compile_all: fn(file: String) -> [Diagnostic] {
     checked: jet_cli_compile_file(file, false, None, JetDriverCompileMode.Program)
     if checked == {
         .Refused(refusal) -> panic("{file}: {refusal.stderr}")
         .Compiled(result, snapshot) -> {
             if result.internal_problem != None -> panic("{file}: internal compiler failure")
-            ^errors: [Diagnostic]{}
-            loop diagnostic in jet_driver_present_diagnostics(result.diagnostics, snapshot, result.generated_source_files) {
-                if diagnostic.severity == DIAGNOSTIC_ERROR -> errors.push(diagnostic)
-            }
-            return errors
+            return jet_driver_present_diagnostics(result.diagnostics, snapshot, result.generated_source_files)
         }
     }
+}
+
+failure_marks_compile: fn(file: String) -> [Diagnostic] {
+    ^errors: [Diagnostic]{}
+    loop diagnostic in failure_marks_compile_all(file) {
+        if diagnostic.severity == DIAGNOSTIC_ERROR -> errors.push(diagnostic)
+    }
+    errors
+}
+
+failure_marks_lints: fn(file: String) -> [Diagnostic] {
+    ^lints: [Diagnostic]{}
+    loop diagnostic in failure_marks_compile_all(file) {
+        if diagnostic.severity == DIAGNOSTIC_LINT -> lints.push(diagnostic)
+    }
+    lints
 }
 
 failure_marks_show: fn(diagnostics: [Diagnostic]) -> String {
@@ -83,7 +101,7 @@ failure_marks_apply_edits: fn(source: String, diagnostics: [Diagnostic]) -> Stri
     assert(fixed.contains("each_size([String]{{\"a\", \"bb\"}})?"), "typed list literal call mark misplaced:\n{fixed}")
     assert(fixed.contains("apply_all([String]{{\"a\"}}, fn(s: String) -> Int MarkFail! {{ parse_one(s)? }})?"), "lambda call mark misplaced:\n{fixed}")
     assert(fixed.contains("with_tricky(\"a ) {{inner(\")\")}}\", `raw )`)?"), "string/raw-string call mark misplaced:\n{fixed}")
-    assert(fixed.contains("(make_box([String]{{\"x\"}})?).count"), "receiver typed list call mark misplaced:\n{fixed}")
+    assert(fixed.contains("make_box([String]{{\"x\"}})?.count"), "receiver typed list call mark should use clean ?. chaining:\n{fixed}")
     assert(fixed.contains("parse_one(\"z\")?"), "plain call mark misplaced:\n{fixed}")
     parsed: parse_source(fixed.bytes())
     if parsed.diagnostics.len() > 0 {
@@ -91,26 +109,107 @@ failure_marks_apply_edits: fn(source: String, diagnostics: [Diagnostic]) -> Stri
     }
 }
 
-#Test("failure_marks_n4_failing_iterable_loop_header_is_e0434") {
-    diagnostics: failure_marks_compile("Compiler/JetSema/Tests/Fixtures/FailureMarksLoopStep.fixture/LoopStep.jet")
+#Test("failure_marks_n4_failing_iterable_loop_header_is_e0434_with_loop_mark_edit") {
+    file: "Compiler/JetSema/Tests/Fixtures/FailureMarksLoopStep.fixture/LoopStep.jet"
+    diagnostics: failure_marks_compile(file)
     if diagnostics.len() != 1 {
         panic("expected 1 E0434 error on failing loop header, got {diagnostics.len()}: {failure_marks_show(diagnostics)}")
     }
     assert_eq(diagnostics[0].code, "E0434")
     assert(diagnostics[0].what.contains("`.next`"))
-    assert(diagnostics[0].edit == None)
-    assert_eq(diagnostics[0].fix_edits.len(), 0)
+    assert(diagnostics[0].edit != None, "expected Safe `loop?` edit on failing loop header")
+    source: files.read(file) ?? panic("read {file}")
+    fixed: failure_marks_apply_edits(source, diagnostics)
+    assert(fixed.contains("loop? item in source"), "expected `loop?` edit:\n{fixed}")
+    tmp_dir: "{sys.temp_dir()}/jet-loop-mark-fixed-{process.current_pid()}"
+    files.remove_all(tmp_dir).drop("cleanup prior temp dir")
+    files.create_dir_all(tmp_dir) ?? panic("create temp dir")
+    fixed_path: "{tmp_dir}/LoopStepFixed.jet"
+    files.write(fixed_path, fixed) ?? panic("write fixed loop file")
+    rechecked: failure_marks_compile(fixed_path)
+    files.remove_all(tmp_dir).drop("cleanup temp dir")
+    if rechecked.len() != 0 {
+        panic("expected 0 errors after applying `loop?` edit, got {rechecked.len()}: {failure_marks_show(rechecked)}")
+    }
+}
+
+failure_marks_for_entry: fn(file: String) -> [Diagnostic] {
+    ^errors: [Diagnostic]{}
+    loop diagnostic in failure_marks_compile(file) {
+        if diagnostic.origin == .Val(origin) {
+            if !origin.path.ends_with(file) -> next
+        }
+        errors.push(diagnostic)
+    }
+    errors
 }
 
 #Test("failure_marks_n5_cli_entry_wrapper_exempt_user_body_checked") {
-    clean: failure_marks_compile("Compiler/JetSema/Tests/Fixtures/FailureMarksCLIEntry.fixture/CLIEntry.jet")
+    clean: failure_marks_for_entry("Compiler/JetSema/Tests/Fixtures/FailureMarksCLIEntry.fixture/CLIEntry.jet")
     if clean.len() != 0 {
         panic("expected 0 errors for marked CLI entry, got {clean.len()}: {failure_marks_show(clean)}")
     }
-    unmarked: failure_marks_compile("Compiler/JetSema/Tests/Fixtures/FailureMarksCLIEntryUnmarked.fixture/CLIEntryUnmarked.jet")
+    unmarked: failure_marks_for_entry("Compiler/JetSema/Tests/Fixtures/FailureMarksCLIEntryUnmarked.fixture/CLIEntryUnmarked.jet")
     if unmarked.len() != 1 {
         panic("expected 1 E0434 error on user call only, got {unmarked.len()}: {failure_marks_show(unmarked)}")
     }
     assert_eq(unmarked[0].code, "E0434")
     assert(unmarked[0].what.contains("`load_name`"))
+}
+
+#Test("failure_marks_chaining_and_parens_and_stale_l0537") {
+    tmp_dir: "{sys.temp_dir()}/jet-failure-marks-chain-{process.current_pid()}"
+    files.remove_all(tmp_dir).drop("cleanup prior temp dir")
+    files.create_dir_all(tmp_dir) ?? panic("create temp dir")
+
+    // 1. Clean chaining: call()?.member, call()?.method(), a()?.b()?.c()?, call()?.method() ?? fallback,
+    //    rare T? E! wrapped as (call()?)?.member, and CallValue wrapped as (get_fn()?)(arg).
+    chain_path: "{tmp_dir}/chain.jet"
+    chain_src: "#Error\nChainErr: enum {{ Bad }}\n\nLeaf: struct {{\n    n: Int,\n    inc: fn(self) -> Int ChainErr! {{\n        if self.n < 0 -> return Err(ChainErr.Bad)\n        Ok(self.n + 1)\n    }}\n    plain: fn(self) -> Int Never! {{ self.n }}\n}}\n\nMid: struct {{\n    leaf: Leaf,\n    take_leaf: fn(self) -> Leaf ChainErr! {{ Ok(self.leaf) }}\n}}\n\nget_mid: fn() -> Mid ChainErr! {{ Ok(Mid{{leaf: Leaf{{n: 5}}}}) }}\nmaybe_leaf: fn() -> Leaf? ChainErr! {{ Ok(Val(Leaf{{n: 7}})) }}\nget_fn: fn() -> (fn(Int) -> Int) ChainErr! {{ Ok(fn(x: Int) -> Int {{ x + 1 }}) }}\n\nuse_clean: fn() -> Int ChainErr! {{\n    a: get_mid()?.leaf.n\n    b: get_mid()?.take_leaf()?.inc()?\n    c: get_mid()?.take_leaf()?.plain()\n    d: get_mid()?.take_leaf()?.inc() ?? 0\n    e: (maybe_leaf()?)?.n ?? 0\n    f: (get_fn()?)(4)\n    Ok(a + b + c + d + e + f)\n}}\n\nrun: fn() {{ print(use_clean() ?? 0) }}\n"
+    files.write(chain_path, chain_src) ?? panic("write chain.jet")
+    chain_all: failure_marks_compile_all(chain_path)
+    if chain_all.len() != 0 {
+        panic("expected 0 diagnostics for clean chaining, got {chain_all.len()}: {failure_marks_show(chain_all)}")
+    }
+
+    // 2. Unmarked optional T? E! receiver and CallValue callee produce parenthesized Safe edits.
+    wrap_path: "{tmp_dir}/wrap.jet"
+    wrap_src: "#Error\nChainErr: enum {{ Bad }}\n\nLeaf: struct {{ n: Int }}\n\nmaybe_leaf: fn() -> Leaf? ChainErr! {{ Ok(Val(Leaf{{n: 7}})) }}\nget_fn: fn() -> (fn(Int) -> Int) ChainErr! {{ Ok(fn(x: Int) -> Int {{ x + 1 }}) }}\n\nuse_unmarked: fn() -> Int ChainErr! {{\n    a: maybe_leaf()?.n ?? 0\n    b: get_fn()(4)\n    Ok(a + b)\n}}\n\nrun: fn() {{ print(use_unmarked() ?? 0) }}\n"
+    files.write(wrap_path, wrap_src) ?? panic("write wrap.jet")
+    wrap_errs: failure_marks_compile(wrap_path)
+    if wrap_errs.len() != 2 {
+        panic("expected 2 E0434 errors on optional receiver + callee, got {wrap_errs.len()}: {failure_marks_show(wrap_errs)}")
+    }
+    wrap_fixed: failure_marks_apply_edits(wrap_src, wrap_errs)
+    assert(wrap_fixed.contains("(maybe_leaf()?)?.n"), "expected parenthesized optional receiver:\n{wrap_fixed}")
+    assert(wrap_fixed.contains("(get_fn()?)(4)"), "expected parenthesized CallValue callee:\n{wrap_fixed}")
+
+    // 3. Stale `?` on explicit Never!, inferred-infallible call, and infallible loop? emits L0537 with Safe deletion.
+    stale_path: "{tmp_dir}/stale.jet"
+    stale_src: "never_fn: fn() -> Int Never! {{ 1 }}\ninferred_ok: fn() -> Int {{ 2 }}\n\ncheck_stale: fn() -> Int {{\n    a: never_fn()?\n    b: inferred_ok()?\n    xs: [Int]{{1, 2}}\n    ^sum: a + b\n    loop? x in xs {{\n        sum += x\n    }}\n    sum\n}}\n\nrun: fn() {{ print(check_stale() ?? 0) }}\n"
+    files.write(stale_path, stale_src) ?? panic("write stale.jet")
+    stale_errs: failure_marks_compile(stale_path)
+    if stale_errs.len() != 0 {
+        panic("expected 0 errors for stale ? marks, got {stale_errs.len()}: {failure_marks_show(stale_errs)}")
+    }
+    stale_lints: failure_marks_lints(stale_path)
+    ^l0537: [Diagnostic]{}
+    loop item in stale_lints {
+        if item.code == "L0537" -> l0537.push(item)
+    }
+    if l0537.len() != 3 {
+        panic("expected 3 L0537 stale-mark lints (Never!, inferred, loop?), got {l0537.len()}: {failure_marks_show(stale_lints)}")
+    }
+    stale_fixed: failure_marks_apply_edits(stale_src, l0537)
+    assert(stale_fixed.contains("a: never_fn()\n"), "expected L0537 to remove ? on Never!:\n{stale_fixed}")
+    assert(stale_fixed.contains("b: inferred_ok()\n"), "expected L0537 to remove ? on inferred-infallible:\n{stale_fixed}")
+    assert(stale_fixed.contains("loop x in xs"), "expected L0537 to remove ? on infallible loop?:\n{stale_fixed}")
+
+    // 4. Golden example Examples/ErrorsAndEffects/Errors/FailureMarks.jet checks with 0 errors and 0 L0537 lints.
+    example_all: failure_marks_compile_all("Examples/ErrorsAndEffects/Errors/FailureMarks.jet")
+    if example_all.len() != 0 {
+        panic("expected 0 diagnostics on FailureMarks.jet golden example, got {example_all.len()}: {failure_marks_show(example_all)}")
+    }
+
+    files.remove_all(tmp_dir).drop("cleanup temp dir")
 }

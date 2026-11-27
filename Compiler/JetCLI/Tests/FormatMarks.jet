@@ -17,7 +17,7 @@ use {
     jet_driver.[JET_DRIVER_EXIT_OK]
 }
 
-fmt_marks_request: fn(paths: [String], explicit_copies: Bool{false}, explicit_failures: Bool{false}) -> JetCLIFmtRequest Never! {
+fmt_marks_request: fn(paths: [String], explicit_copies: Bool{false}) -> JetCLIFmtRequest Never! {
     JetCLIFmtRequest{
         paths: paths,
         stdin_mode: false,
@@ -26,7 +26,6 @@ fmt_marks_request: fn(paths: [String], explicit_copies: Bool{false}, explicit_fa
         diff: false,
         changed: false,
         explicit_copies: explicit_copies,
-        explicit_failures: explicit_failures,
         simplify: false,
         color: false,
         json: false,
@@ -98,19 +97,19 @@ fmt_marks_request: fn(paths: [String], explicit_copies: Bool{false}, explicit_fa
     cli_files.remove_all(root).drop("cleanup broken dir")
 }
 
-#Test("fmt_marks_explicit_failures_uses_one_compile_per_package") {
+#Test("fmt_marks_failure_marks_and_stale_removal_use_one_compile_per_package") {
     root: "{cli_sys.temp_dir()}/jet-fmt-failures-pkg-{cli_process.current_pid()}"
     cli_files.remove_all(root).drop("cleanup prior failures dir")
     cli_files.create_dir_all(root) ?? panic("create failures dir")
     cli_files.write("{root}/package.jet", "name: \"fmt_fail_demo\"\nversion: \"0.0.1\"\nedition: \"2026\"\n") ?? panic("write package.jet")
     a_path: "{root}/a.jet"
     b_path: "{root}/b.jet"
-    a_src: "#Error\nBoom: struct {{ message: String, }}\n\nfallible_a: fn() -> Int Boom! {{\n    Ok(1)\n}}\n\ncaller_a: fn() -> Int Boom! {{\n    v: fallible_a()\n    Ok(v + 1)\n}}\n"
+    a_src: "#Error\nBoom: struct {{ message: String, }}\n\nBoxed: struct {{ n: Int }}\n\nfallible_a: fn() -> Int Boom! {{\n    Ok(1)\n}}\n\nmake_boxed: fn() -> Boxed Boom! {{\n    Ok(Boxed{{n: 2}})\n}}\n\npure_ok: fn() -> Int Never! {{ 3 }}\n\ncaller_a: fn() -> Int Boom! {{\n    v: fallible_a()\n    w: make_boxed().n\n    p: pure_ok()?\n    Ok(v + w + p)\n}}\n"
     b_src: "caller_b: fn() -> Int Boom! {{\n    v: caller_a()\n    Ok(v + 2)\n}}\n"
     cli_files.write(a_path, a_src) ?? panic("write a.jet")
     cli_files.write(b_path, b_src) ?? panic("write b.jet")
 
-    request: fmt_marks_request([String]{}, explicit_failures: true)
+    request: fmt_marks_request([String]{})
     ^hooks: jet_cli_tool_stage_memo()
     ^checks: jet_cli_fmt_check_memo()
     a_out: jet_cli_fmt_one(a_path, a_src, request, hooks, checks)
@@ -119,9 +118,11 @@ fmt_marks_request: fn(paths: [String], explicit_copies: Bool{false}, explicit_fa
     assert_eq(a_out.diagnostics.len(), 0)
     assert_eq(b_out.diagnostics.len(), 0)
     assert(a_out.formatted.contains("fallible_a()?"), "a.jet must receive failure mark: {a_out.formatted}")
+    assert(a_out.formatted.contains("make_boxed()?.n"), "a.jet must chain receiver with ?.: {a_out.formatted}")
+    assert(a_out.formatted.contains("p: pure_ok()\n") && !a_out.formatted.contains("pure_ok()?"), "a.jet must remove stale ? via L0537: {a_out.formatted}")
     assert(b_out.formatted.contains("caller_a()?"), "b.jet must receive failure mark: {b_out.formatted}")
-    // 1 plain compile for call_marks + 1 policy compile for explicit_failures across BOTH files (not 4-6!).
-    assert_eq(checks.compiles, 2)
+    // Single plain compile across BOTH files for default call + failure + stale marks!
+    assert_eq(checks.compiles, 1)
     cli_files.remove_all(root).drop("cleanup failures dir")
 }
 

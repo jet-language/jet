@@ -2153,22 +2153,24 @@ enclosing union: each member keeps its own variant in the wider union. A
 failure with any member outside the enclosing union needs a conversion.
 (D-UNIONTYPE1=A)
 
-A fallible call propagates its failure automatically: success continues with
-its payload and failure returns from the current fallible context. A missing
-value never leaves a function by itself: it stays an ordinary `T?` value until
-the code handles it with `?.`, `??`, or a `.Val`/`.None` pattern, and reading a
-field of it directly is E0310 (D-OUTCOME-SHAPE1=A). The postfix form `?(text)`
-is not a second propagation operator; it adds one failure-context frame to the
-report. Use it when a boundary needs a local explanation. (S7, D-FAIL-CTX1)
+A fallible call propagates its failure to the caller: success continues with
+its payload and failure returns from the current fallible context. Every
+expression that can pass a typed `E!` failure up writes `?` (or `?(text)` to
+add one failure-context frame): `call()?`, `call()?(text)`, `call()?.member`,
+`call()?.method()`, `loop? x in source` when `Iterator.next` can fail, and
+`{x:Sel?}` when a format selector can fail. A missing value never leaves a
+function by itself: it stays an ordinary `T?` value until the code handles it
+with `?.`, `??`, or a `.Val`/`.None` pattern, and reading a field of it
+directly is E0310. When a call yields an optional value and can also fail
+(`T? E!`), chaining wraps `(call()?)?.member` so `?.` stays optional chaining,
+and calling a returned function value wraps `(callee()?)(args)`.
 
-`#Policy(failures: .Explicit)` on a block, function, module, or package makes
-each call that can pass a failure up carry a written mark: `call()?` or
-`call()?(text)`. A call that may fail without one is E0434, at the call, with a
-Safe edit that writes the `?`; a call used as a receiver is wrapped, as
-`(call()?).field`, because `call()?.field` is an optional chain. A marked call
-checks and runs exactly as the unmarked one, and a mark on a call that cannot
-fail is accepted. Outside the policy a bare `?` after a call stays the parse
-error it is elsewhere. `jet fmt --explicit-failures` writes every mark.
+An unmarked expression that can pass a failure up is E0434 with a Safe edit
+that writes the mark; a bare `?` on a call, loop header, or format selector
+that cannot fail is L0537 with a Safe edit that removes it. A call whose
+failure is handled locally with `??` or a `.Ok`/`.Err` pattern does not
+propagate and takes no `?`. `jet fmt` writes missing `?` marks and removes
+stale `?` marks as part of normal formatting.
 
 A `T Never!` call supplies `T` in an ordinary value position, including a
 source field default evaluated by a generated codec. The codec checks the
@@ -6236,8 +6238,8 @@ and writes formatted source to stdout; `--stdin-path=<label>` supplies the
 reported source name. These commands run the lexer, parser, and printer, not
 sema. (S44)
 
-The formatter also accepts `--lang`, `--simplify`, `--changed`,
-`--explicit-copies`, and `--explicit-failures`. `--simplify` opts into the
+The formatter also accepts `--lang`, `--simplify`, `--changed`, and
+`--explicit-copies`. `--simplify` opts into the
 ratified simplest spellings; the default output does not depend on it.
 Among them, `--simplify` writes a value block's old arm-table shapes in the
 current form: a fallback-free table whose arms each only `return` a value,
@@ -6254,10 +6256,11 @@ unwinds one guard at a time. A body is left as written when the work would
 bind a name the body already holds or holds a `defer`, or when a comment
 sits in the part that moves.
 `--changed` selects changed project files. `--explicit-copies` keeps copy
-operations explicit where that mode requires them; `--explicit-failures`
-writes the `?` that `#Policy(failures: .Explicit)` asks at each call that can
-pass a failure up. For a write-free preview, use `--check` and optionally
-`--diff`; the public help advertises `--check`.
+operations explicit where that mode requires them. As part of normal formatting
+on files, `jet fmt` inserts missing failure marks (`?`, `loop?`, `(…?)`) and
+removes stale `?` marks (L0537) in one checked compile per package. For a
+write-free preview, use `--check` and optionally `--diff`; the public help
+advertises `--check`.
 
 Canonical style uses four-space indentation, an opening brace on the header
 line, one statement per line, at most one blank line between top-level items,
