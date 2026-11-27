@@ -2,8 +2,8 @@
   "meta": {
     "version": 4,
     "project": "Jet",
-    "nextNum": 7058,
-    "rev": 115125,
+    "nextNum": 7059,
+    "rev": 115131,
     "ui": {
       "toggled": [
         "dec-group:syntax",
@@ -64160,6 +64160,24 @@
           "verifiedBy": null,
           "evidence": "",
           "at": "2026-11-27T18:59:22.019Z"
+        },
+        {
+          "n": 2,
+          "text": "G42: Targeted parser hints for use ... as ... and pkg[a, b], E0003 printing exact unresolved path & searched dirs, and clean lexical shadowing of unused module aliases + direct qualified module access (UI snapshots + tests)",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-11-27T18:59:23.485Z"
+        },
+        {
+          "n": 3,
+          "text": "G43 & H45: Unify warning vs error policy across Compiler/Diagnostics.jet/Docs/Tower (tidy/style lints warn in dev + auto-prune in jet fix/fmt and fail on --deny-warnings/--release; safety/correctness stays error; delete contradictory \"no warnings\" text); exempt #Test and run-entry scripts from L2401/L2421 (UI snapshots + tests)",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-11-27T18:59:24.380Z"
         }
       ],
       "refs": [],
@@ -64167,9 +64185,65 @@
       "parentId": null,
       "needsAcceptance": false,
       "created": "2026-11-27T18:59:20.698Z",
-      "updated": "2026-11-27T18:59:22.019Z",
+      "updated": "2026-11-27T18:59:24.380Z",
       "updatedBy": "Orchestrator",
-      "criteriaLastN": 1
+      "criteriaLastN": 3
+    },
+    {
+      "id": "c0v29n8b",
+      "num": 7058,
+      "title": "Authoring friction P0: J48/J49/J50 CLI & test ergonomics (--errors/--warnings, single --flag value syntax, zero-cache fast cold single-file test, jet fmt/inspect polish)",
+      "body": "Owner-approved CLI/test P0 card (J48, J49, J50 from Docs/Research/jet-authoring-friction-2026-11-27.md — STRICTLY NO compile caching or incremental build caches; keep cold compilation fast from scratch): (1) J48: jet check plain shows both warnings and errors with errors printed LAST; add --errors (errors only), --warnings (warnings only), and --file <path>. (2) J49: enforce ONE canonical flag spelling across every jet subcommand (space-separated --flag value, with crisp hint rejecting --flag=value); exit non-zero when --filter matches 0 tests (with --allow-empty); jet test <file.jet> runs only that file; jet test <file.case> runs .case directly; full assert diffs + #Test caller frame on panic + --help-case. (3) J50: NO caching — profile (jet perf) and fix the real cold-compile bottleneck when running a single Compiler test file (compile only reachable deps for that file); add jet fmt --stdout, --check-lines, jet inspect exports <pkg>, and align stale := REPL goldens to ^name:.",
+      "kind": "task",
+      "track": "epoch",
+      "epoch": "G1",
+      "milestoneId": null,
+      "phase": "ready",
+      "priority": "P0",
+      "plan": null,
+      "checkSteps": null,
+      "probe": null,
+      "visualMedia": [],
+      "blockedBy": [],
+      "assignee": null,
+      "log": [],
+      "criteria": [
+        {
+          "n": 1,
+          "text": "J48: jet check prints errors LAST in plain mode and supports --errors (errors only), --warnings (warnings only), and --file <path> (tests + UI snapshots)",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-11-27T18:59:51.317Z"
+        },
+        {
+          "n": 2,
+          "text": "J49: Standardize ONE canonical CLI flag syntax (--flag value across all jet subcommands, with crisp hint on --flag=value); exit non-zero on 0 --filter matches (with --allow-empty); jet test <file.jet> runs only that file; jet test <file.case> runs .case directly; full assert diffs + #Test caller frame on panic + --help-case",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-11-27T18:59:52.224Z"
+        },
+        {
+          "n": 3,
+          "text": "J50 (ZERO caching): Profile (jet perf) and fix the real cold single-file test compile bottleneck (compiling only the target file and reachable deps from cold — no compile cache!); add jet fmt --stdout, jet fmt --check-lines, jet inspect exports <pkg>, and migrate stale := REPL goldens to ^name:",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-11-27T18:59:53.063Z"
+        }
+      ],
+      "refs": [],
+      "tags": [],
+      "parentId": null,
+      "needsAcceptance": false,
+      "created": "2026-11-27T18:59:50.392Z",
+      "updated": "2026-11-27T18:59:53.063Z",
+      "updatedBy": "Orchestrator",
+      "criteriaLastN": 3
     }
   ],
   "decisions": [
@@ -123239,6 +123313,48 @@
     }
   ],
   "events": [
+    {
+      "at": "2026-11-27T18:59:53.063Z",
+      "by": "Orchestrator",
+      "action": "card.criteria-add",
+      "ref": "c0v29n8b",
+      "note": "#3 J50 (ZERO caching): Profile (jet perf) and fix the real cold"
+    },
+    {
+      "at": "2026-11-27T18:59:52.224Z",
+      "by": "Orchestrator",
+      "action": "card.criteria-add",
+      "ref": "c0v29n8b",
+      "note": "#2 J49: Standardize ONE canonical CLI flag syntax (--flag value"
+    },
+    {
+      "at": "2026-11-27T18:59:51.317Z",
+      "by": "Orchestrator",
+      "action": "card.criteria-add",
+      "ref": "c0v29n8b",
+      "note": "#1 J48: jet check prints errors LAST in plain mode and supports"
+    },
+    {
+      "at": "2026-11-27T18:59:50.392Z",
+      "by": "Orchestrator",
+      "action": "card.add",
+      "ref": "c0v29n8b",
+      "note": "Authoring friction P0: J48/J49/J50 CLI & test ergonomics (--errors/--warnings, single --flag value syntax, zero-cache fast cold single-file test, jet fmt/inspect polish)"
+    },
+    {
+      "at": "2026-11-27T18:59:24.380Z",
+      "by": "Orchestrator",
+      "action": "card.criteria-add",
+      "ref": "c07z82uc",
+      "note": "#3 G43 & H45: Unify warning vs error policy across Compiler/Dia"
+    },
+    {
+      "at": "2026-11-27T18:59:23.485Z",
+      "by": "Orchestrator",
+      "action": "card.criteria-add",
+      "ref": "c07z82uc",
+      "note": "#2 G42: Targeted parser hints for use ... as ... and pkg[a, b],"
+    },
     {
       "at": "2026-11-27T18:59:22.019Z",
       "by": "Orchestrator",
