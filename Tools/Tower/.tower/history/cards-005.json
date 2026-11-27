@@ -43826,6 +43826,598 @@
         }
       ],
       "retiredAt": "2026-11-25T13:10:56.609Z"
+    },
+    {
+      "id": "c05gn07n",
+      "num": 6177,
+      "title": "Odin-level array programming: element-wise array operators, swizzles on any small array, matrices",
+      "body": "Owner 2026-10-29 (direct): Odin's built-in array support (array arithmetic with + - * / that just works, swizzling, strong support for 3D and graphics) must ALL be added to or verified in Jet. This amends D-VECARITH1 (element-wise operators closed to compiler-provided lane and linalg types) and widens D-SWIZZLE1.\n\nToday: swizzles work only on five hard-coded Core type names (F32x4, F64x2, Vec2, Vec3, Vec4; Sema/Expressions/Places.jet:679), with x/y/z/w only and no rgba. Element-wise arithmetic is limited to compiler-provided lane and linalg types. Fixed arrays `[T#N]` (S76/D-FIXARR1) get no element-wise operators or swizzles.\n\nOdin reference set to audit row by row: fixed arrays of numbers with element-wise + - * / % and bit ops between arrays and with a scalar (broadcast), and unary minus; == and !=; swizzles .xyzw and .rgba for N<=4 (read, write and repeat-read); swizzle on the result of an expression; built-in matrix types with * as matrix product, matrix-vector product, transpose and the like; quaternions; #simd vectors; #soa struct-of-arrays layouts; array-to-slice conversion; `len` as a compile-time constant; and compile-time evaluation of all of the above.",
+      "kind": "feature",
+      "track": "epoch",
+      "epoch": "G1",
+      "milestoneId": null,
+      "phase": "done",
+      "priority": "P1",
+      "plan": "1. Audit: write a table of every Odin array, matrix, quaternion, simd and soa feature (cite the Odin docs/spec) against Jet today, with each row PASS, PARTIAL or MISSING and a probe program. Send the table to Main before implementing; any new spelling needs an owner ballot (I7).\n2. Implement every MISSING and PARTIAL row whose spelling is already ratified or needs no new syntax: element-wise operators on [T#N] numeric fixed arrays (array op array, array op scalar), swizzles on [T#N] with N<=4 plus rgba on every swizzleable type, driven by a type fact instead of hard-coded Core names.\n3. One runtime meaning on all tiers (I9), with lowering to SIMD where the backend has it.\n4. Examples/features/lowlevel goldens; UI snapshots for length mismatch, a non-numeric element and an invalid lane.\n5. Pair each new performance-relevant surface with a two-program perf cell against the plain loop (AGENTS.md performance gate).",
+      "checkSteps": null,
+      "probe": null,
+      "visualMedia": [],
+      "blockedBy": [],
+      "assignee": null,
+      "log": [
+        {
+          "at": "2026-11-18",
+          "by": "Main",
+          "text": "D-ARRAY-ZIPCOLUMNS1 r5/r6 (2026-11-18): the open performance question is resolved honestly. A record built in place with .move() is the fastest measured form (0.488 s, 254 MB, against literal 0.495, rows 0.533 and helper record 0.521); adopt was slower only because of a general backend gap (#6923 c11, 2.88 G extra instructions for a returned record). The adversarial review (Docs/Audits/ballot-redesign-r5-review-2026-11-18.md) verdict: fails the strict pre-ratification gate, because no built Columns candidate exists. The ballot is not reposted until c17 holds; drafts are in $JET_SCRATCH_ROOT/lanes/Main/ballot-rework/r3/D-ARRAY-ZIPCOLUMNS1.r6.json."
+        },
+        {
+          "at": "2026-11-18",
+          "by": "Main",
+          "text": "Owner ratified D-ARRAY-CONVERT1=A and D-ARRAY-MATRESIZE1=A (2026-11-18). Build work is queued to the next free implementer. D-ARRAY-ZIPCOLUMNS1 is being reworked (open question resolved with evidence)."
+        },
+        {
+          "at": "2026-11-17",
+          "by": "Main",
+          "text": "D-ARRAY-ROWMAJOR1 is withdrawn as a duplicate. The ratified D-ARRAY-MATOPS1=A already settles layout as an optional parameter, Matrix<R,C,T=Float,Layout=.ColumnMajor>, with views and conversions, which answers the owner's q2ihn3ot. A fresh adversarial review (BallotReview, 2026-11-17) found the open ballot only re-voted settled law. Its repaired build contract (no universal zero-copy or shader-layout promise; ownership, stride and ABI limits on layout-changing transposes) is kept as build guidance for the MATOPS1 work."
+        },
+        {
+          "at": "2026-10-29",
+          "by": "Main",
+          "text": "Array ballots on Tower: D-ARRAY-CORENAMES1, MATRIX1, KEYED1, LAYOUT1. Drafted by KitSpeed-2; adversarial reader Ballots-4. Ratified conflicts fixed (card #1437 matrix family INDEX1=E, MUL1=F, LIT1=E, BCAST1=E, SOLVE1=B, HOME1=D; D-LANES1=A; D-SPACE-GEOMETRY1=A; ..= is E0318). Readings for the owner to confirm: MATRIX1 treats Matrix*Vec as the transform product, with BCAST1 limited to repeating operators; LAYOUT1 says push through a window is refused where visible and stops otherwise. Main replaced alias declarations in MATRIX1 with the #6176 form."
+        },
+        {
+          "at": "2026-10-29",
+          "by": "Main",
+          "text": "Correction to the audit counts (KitSpeed-2): 87 rows, of which 25 PASS, 6 PARTIAL, 55 MISSING and 1 bug."
+        },
+        {
+          "at": "2026-10-29",
+          "by": "Main",
+          "text": "Audit (KitSpeed-2, 2026-10-29, 78 probes at O0 and full on 25f9dee): 19 PASS, 7 PARTIAL, 49 MISSING, 1 bug. SIMD S1-S11 is ratified but unbuilt (E2104 cites #5984). Swizzle write is broken (lowlevel/swizzle.jet FAILs on all tiers). Rows needing no new syntax are in implementation; B0-B10 go to owner ballots."
+        }
+      ],
+      "criteria": [
+        {
+          "n": 1,
+          "text": "A dated audit in Docs/Audits lists every Odin array, matrix, quaternion, simd and soa feature with its Jet status and probe; every row is PASS or links a card or an owner ballot. Proof: the audit file exists (`git ls-files 'Docs/Audits/*odin-arrays*'`) and has no row without a status.",
+          "status": "met",
+          "metBy": "Main",
+          "verifiedBy": null,
+          "evidence": "Audit Docs/Audits/2026-11-16-odin-arrays.md landed in 58664a641a (p239: cases audit_reports_list_findings_without_a_disposition PASS); every section 9 row cites its open ballot D-ARRAY-CONVERT1/SHUFFLE1/MATRESIZE1/ROWMAJOR1/CONJ1/COMPLEXT1/LANEBCAST1/ZIPCOLUMNS1 in 06bc13fa64.",
+          "at": "2026-11-17T02:51:30.673Z"
+        },
+        {
+          "n": 2,
+          "text": "Numeric fixed arrays `[T#N]` support element-wise + - * / % and bit operators with another `[T#N]` and with a scalar, unary minus and ==; a length or element mismatch is a registered error. Proof: `jet test Compiler --profile golden --filter LowLevel/FixedArrayArithmetic` on o0, o1 and o2 and `jet test Compiler --profile ui --filter fixed_array_elementwise_mismatch`.",
+          "status": "met",
+          "metBy": "Main",
+          "verifiedBy": null,
+          "evidence": "p242 batch compiler (dev 5c081329fd; feature 4b98782f82): golden LowLevel/FixedArrayArithmetic n=3 bad=0 (o0 o1 o2); ui fixed_array_elementwise_mismatch n=1 bad=0.",
+          "at": "2026-11-17T03:46:22.342Z"
+        },
+        {
+          "n": 3,
+          "text": "Swizzles .xyzw and .rgba (read, write, repeated read) work on every `[T#N]` with N <= 4 and every vector or lane type, decided by a type fact instead of the five Core names hard-coded in Sema/Expressions/Places.jet (lines 1199 and 1217 on dev 72a8142651); invalid lanes are E3110 and E3111. Proof: `jet test Compiler --profile golden --filter LowLevel/Swizzle` on o0, o1 and o2, `jet test Compiler --profile ui --filter swizzle_`, and `git grep -n '\"F32x4\"' -- Compiler/JetSema/Source/Sema/Expressions/Places.jet` prints nothing.",
+          "status": "met",
+          "metBy": "Main",
+          "verifiedBy": null,
+          "evidence": "p242 batch compiler (dev 5c081329fd; feature ac576c78ed): golden LowLevel/Swizzle n=3 bad=0 (o0 o1 o2); ui swizzle_ n=4 bad=0; git grep '\"F32x4\"' Compiler/JetSema/Source/Sema/Expressions/Places.jet prints nothing on dev 7876bc1625.",
+          "at": "2026-11-17T03:46:29.581Z"
+        },
+        {
+          "n": 4,
+          "text": "Each matrix and quaternion operation the audit (c1) marks as an Odin built-in has a Jet equivalent with golden output, or links a card or ballot. Proof: `jet test Compiler --profile golden --filter Math/LinearAlgebra` on o0, o1 and o2.",
+          "status": "met",
+          "metBy": "Main",
+          "verifiedBy": null,
+          "evidence": "p242 batch compiler (dev 31436719be): golden Math/LinearAlgebra n=3 bad=0 (o0 o1 o2); rows without a built-in cite D-MATRIX-INDEX1/BCAST1/MUL1 or open ballots D-ARRAY-* in the audit.",
+          "at": "2026-11-17T03:46:23.757Z"
+        },
+        {
+          "n": 6,
+          "text": "Integer lane types (I8 to I64 and U8 to U64 lanes) support element-wise `<<`, `>>` (arithmetic for signed, logical for unsigned), `.bit_and`, `.bit_or`, `.bit_xor` and `.bit_not` with a lane or scalar right side, matching the scalar fold. Proof: `jet test Compiler --profile golden --filter LowLevel/IntegerLaneBits` on o0 and o2, and `jet test Compiler --profile ui --filter float_lane_shift`.",
+          "status": "met",
+          "metBy": "Main",
+          "verifiedBy": null,
+          "evidence": "p244 batch compiler (dev 5613c2f956); feature 5613c2f956: golden LowLevel/IntegerLaneBits n=3 bad=0 (o0 o1 o2), ui float_lane_shift n=1 bad=0.",
+          "at": "2026-11-17T04:28:07.740Z"
+        },
+        {
+          "n": 8,
+          "text": "Data/Syntax registry entry updated",
+          "status": "met",
+          "metBy": "Orchestrator",
+          "verifiedBy": null,
+          "evidence": "Landed in dev c89b0a4a8a. Added LINALG_MAT2_TYPE, LINALG_QUATERNION_TYPE, TYPE_COMPLEX32 in MathLayout.jet, Complex32 highlight in Highlights.jet, and array/swizzle LEXICAL_LEDGER row in Spellings.jet; CompilerData --check and LexicalLedger --check PASS.",
+          "at": "2026-11-22T11:20:41.083Z"
+        },
+        {
+          "n": 9,
+          "text": "syntax-decisions.md log entry",
+          "status": "met",
+          "metBy": "Orchestrator",
+          "verifiedBy": null,
+          "evidence": "Landed in dev c89b0a4a8a. Updated Docs/Spec/syntax-decisions.md with all ratified D-ARRAY-* decision rows (COMPLEXT1, CONJ1, CONVERT1, LANEBCAST1, MATOPS1, MATRESIZE1, SHUFFLE1) and prose summary with golden links.",
+          "at": "2026-11-22T11:20:43.851Z"
+        },
+        {
+          "n": 10,
+          "text": "editor grammars regenerated (jet self devtools grammars)",
+          "status": "met",
+          "metBy": "Orchestrator",
+          "verifiedBy": null,
+          "evidence": "Landed in dev c89b0a4a8a. Regenerated all 4 editor grammars via jet self devtools grammars with Complex32 in type.builtin; all Tests/Guards (211/211) PASS.",
+          "at": "2026-11-22T11:20:45.739Z"
+        },
+        {
+          "n": 11,
+          "text": "snapshots re-blessed",
+          "status": "met",
+          "metBy": "Orchestrator",
+          "verifiedBy": null,
+          "evidence": "Landed in dev c89b0a4a8a. Verified all #6177 goldens (24/24 across o0/o1/o2) and UI snapshots (fixed_array_elementwise_mismatch, swizzle_ 5/5, float_lane_shift, lane_scalar_wrong_element_type) PASS with zero drift.",
+          "at": "2026-11-22T11:20:48.523Z"
+        },
+        {
+          "n": 12,
+          "text": "D-ARRAY-COMPLEXT1=A: Complex32 is the F32 specialization of the one internal generic complex implementation that also backs Complex. Both have the same operations at their own precision, with Complex.from_complex(s) widening and Complex32.from_complex(z) narrowing fallibly. Proof: golden example with output on o0, o1 and o2, plus a cases row for the narrowing failure.",
+          "status": "met",
+          "metBy": "Orchestrator",
+          "verifiedBy": null,
+          "evidence": "9d77f4df8b: Complex32 F32 specialization over shared internal ComplexCore<T> in Core/Math/Math.jet + Core.rows/CoreModules/Copy/TypeRelations; Examples/Math/Complex32.jet PASS o0/o1/o2, Tests/Cases/CoreMathNumeric/complex32_narrowing_failure_on_every_tier.case PASS o0/o1/o2",
+          "at": "2026-11-22T09:34:41.404Z"
+        },
+        {
+          "n": 13,
+          "text": "D-ARRAY-COMPLEXT1 owner comment (2026-11-17): consider r: and i: as the constructor labels for real and imaginary, to cut tokens. Post a ballot on the field labels, covering Complex and Complex32 and the quaternion labels for consistency, with the same-program alternatives.",
+          "status": "met",
+          "metBy": "Orchestrator",
+          "verifiedBy": null,
+          "evidence": "master 4c9b0f9d82: posted full-profile ballot D-ARRAY-COMPLEX-LABELS1 on #6177 covering Complex, Complex32, and Quaternion field labels (A: re/im + wxyz, B: r/i + wxyz, C: r/i + rijk, D: real/imaginary + wxyz) with same-program alternatives; validated by Validate.jet (0 gaps) and independently reviewed by CodegenOpt.",
+          "at": "2026-11-22T19:46:25.108Z"
+        },
+        {
+          "n": 14,
+          "text": "D-ARRAY-CONJ1=A: Complex.conj() (and Complex32.conj()) returns the conjugate at the value's own precision; no conjugate alias exists. Proof: golden example printing 3 - 4i for Complex{real: 3.0, imaginary: 4.0}.conj() on o0, o1 and o2.",
+          "status": "met",
+          "metBy": "Orchestrator",
+          "verifiedBy": null,
+          "evidence": "9d77f4df8b: Complex.conj() and Complex32.conj() (no conjugate alias); Examples/Math/ComplexConjugate.jet PASS o0/o1/o2 printing 3 - 4i",
+          "at": "2026-11-22T09:34:42.227Z"
+        },
+        {
+          "n": 15,
+          "text": "D-ARRAY-LANEBCAST1=A: + - * / between an exact lane value and its element scalar, on either side, wherever the lane-lane operation exists, through ordinary owning-package operator hooks (no new sema mechanism). Proof: golden example (pixels * gain, F32{1.0} - pixels, F32{2.0} / pixels) on o0, o1 and o2, and a UI snapshot for a scalar of the wrong element type.",
+          "status": "met",
+          "metBy": "Orchestrator",
+          "verifiedBy": null,
+          "evidence": "6e387d3e3b: owning-package Add/Sub/Mul/Div lane-scalar broadcast for all 20 SIMD lane types in Core/Math/Math.jet, Examples/LowLevel/LaneScalarBroadcast.jet PASS o0/o1/o2, Tests/UI/lane_scalar_wrong_element_type.jet PASS",
+          "at": "2026-11-22T03:09:06.976Z"
+        },
+        {
+          "n": 16,
+          "text": "D-ARRAY-SHUFFLE1=B: lanes and fixed arrays pick slots by number with .swizzle(i, ...) (rgb.swizzle(2, 1, 0), eight.swizzle(7, 6, 5, 4)); out-of-range or non-constant indexes are a registered build error with a UI snapshot; no single-instruction promise. Proof: golden example on o0, o1 and o2 plus the UI snapshot.",
+          "status": "met",
+          "metBy": "Orchestrator",
+          "verifiedBy": null,
+          "evidence": "6e387d3e3b: numeric .swizzle(i, ...) in FixedArithmetic.jet with E3110 checks, Examples/LowLevel/NumericSwizzle.jet PASS o0/o1/o2, Tests/UI/swizzle_numeric_invalid.jet PASS",
+          "at": "2026-11-22T03:09:07.789Z"
+        },
+        {
+          "n": 17,
+          "text": "D-ARRAY-ZIPCOLUMNS1 is posted only after a built Columns<T> candidate (owning from_columns/into_columns and a borrowed view_columns, built as a scratch prototype) strictly beats the plain spelling it replaces in the paired two-program cell, on both wall time and peak memory and with identical output (AGENTS.md performance gate: ratifying a performance surface waits until it strictly beats the plain form). The plain baseline is the best hand-written form measured by the 2026-11-18 review (a record built in place with .move(): 0.488 s, 254 MB), and the comparison runs after #6923 c11 removes the general returned-record penalty. Proof: the paired cell in the canonical perf manifest reports Jet-candidate/plain below 1.00 on both metrics, and the ballot cites the numbers.",
+          "status": "met",
+          "metBy": "Orchestrator",
+          "verifiedBy": null,
+          "evidence": "The owner rejected D-ARRAY-ZIPCOLUMNS1 on the board. c17 only governed when that ballot could be posted (after a Columns<T> prototype beat the plain form), so nothing is left to gate. Any future Columns join/split surface needs a new ballot with its own paired cell.",
+          "at": "2026-11-24T00:26:33.224Z",
+          "closure": "obsolete"
+        }
+      ],
+      "refs": [],
+      "tags": [],
+      "parentId": null,
+      "needsAcceptance": false,
+      "created": "2026-10-29T13:58:56.482Z",
+      "updated": "2026-11-24T00:26:41.603Z",
+      "updatedBy": "Orchestrator",
+      "criteriaLastN": 17,
+      "completedAt": "2026-11-24T00:26:41.603Z",
+      "questions": [
+        {
+          "id": "q0xqu5fn",
+          "cardId": "c05gn07n",
+          "decisionId": "D-ARRAY-CONVERT1",
+          "by": "owner",
+          "kind": "question",
+          "text": "Not sure if B is the best answer. The braces are a literal constructor but should also be a conversion, like a cast, that can take an \"argument\" that satisfies the needed info to construct a new item. Thoughts?",
+          "status": "answered",
+          "answer": "Agreed. The recommendation now makes braces both literal construction and conversion. Jet already executes user-defined `From` implementations through `Target{source}`, so arrays and matrices should extend that mechanism rather than introduce another trait or source-named conversion family. Ordinary fields, whole values and nested elements retain priority. Equal-shape arrays convert recursively without flattening. Numeric exactness and failure remain scalar rules; aggregate `checked(...)` support is explicitly proposed, not claimed to work today. The matrix ballot uses this same dispatch and failure protocol. I removed the unsupported claim about today's map result type and checked the current behavior on gate-p260.",
+          "created": "2026-11-17T11:01:42.868Z",
+          "answeredAt": "2026-11-17",
+          "answeredBy": "Main"
+        },
+        {
+          "id": "q13p1rdp",
+          "cardId": "c05gn07n",
+          "decisionId": "D-ARRAY-MATRESIZE1",
+          "by": "owner",
+          "kind": "question",
+          "text": "1) the literal constructor syntax is also the syntax used to \"cast/convert\" a value to a new type. so I think we should lean into that but give tools to engineer away the downsides of that option. 2)  ~ is NOT copy syntax, it is .copy() 3) For option A you have a from array to array both methods which looks terrible and stupid. why not just allow conversion directly, specifying the target matrix. the implementation could be in a trait or something if needed right? basically like Matrix<2, 8>{grown} should just work?",
+          "status": "answered",
+          "answer": "Agreed on all three points. The recommendation now uses direct `Mat4{basis}`, `Mat3{grown}` and `Matrix<2,8>{grown}` conversions through Jet's existing `From` trait—the same mechanism as array conversion. Square resizing preserves coordinates and fills identity; equal-count shape changes preserve logical column order independently of storage layout. Typed source records carry explicit fill or row-order policies when needed. Literal precedence, narrowing, checked behavior and cleanup are shared with CONVERT1. All explicit copies use `.copy()`. There is no required array adapter chain, and the ballot no longer falsely claims identity, determinant or inverse are missing. Owned reordering and intentional cropping remain named, unavoidable costs.",
+          "created": "2026-11-17T11:07:44.573Z",
+          "answeredAt": "2026-11-17",
+          "answeredBy": "Main"
+        },
+        {
+          "id": "q2ihn3ot",
+          "cardId": "c05gn07n",
+          "decisionId": "D-ARRAY-ROWMAJOR1",
+          "by": "owner",
+          "kind": "question",
+          "text": "why not make layout an optional parameter with a sensible default, then we should get the best of both a and b, right?",
+          "status": "answered",
+          "answer": "Yes. The recommendation is now `Matrix<R,C,T=Float,Layout=.ColumnMajor>`, retaining `Mat3` and `Matrix<3,3>` as simple defaults while allowing explicit row-major storage. Row-friendly input remains independent of storage selection. Logical indexing and multiplication keep the same meaning; mixed-layout kernels read coordinates directly rather than silently repacking whole operands. Brace conversion changes storage while preserving cells, using the same `From` mechanism as the other matrix ballots. I replaced the misleading implementation-cost argument with the real residual costs: used specialization combinations and unavoidable owned reordering. Both have concrete mitigations. No layout alone promises shader-compatible width, padding or stride.",
+          "created": "2026-11-17T11:09:53.898Z",
+          "answeredAt": "2026-11-17",
+          "answeredBy": "Main"
+        },
+        {
+          "id": "q3qejlb0",
+          "cardId": "c05gn07n",
+          "decisionId": "D-ARRAY-MATOPS1",
+          "by": "owner",
+          "kind": "question",
+          "text": "We need to be the best compared to all alternatives. This doesnt have the downsides engineered away & looks like it misses functionality compared to alternatives",
+          "status": "answered",
+          "answer": "The narrow helper-only recommendation was not strong enough. I promoted one generic matrix family, aligned its type parameters with the layout ballot, and added integer/complex domains, rectangular outer products, views, reusable decompositions and solves to the delivery contract. Existing inverse, determinant and identity are now correctly described as implemented. Redundant inverse-transpose and adjoint names stay compositions that should fuse safely. I also found the current absolute singularity cutoff and required consistent numerical semantics at alias cutover. The ballot no longer claims universal superiority: it requires matched-operation measurements and numerical evidence. Code footprint and physically necessary stable computation or overlap temporaries remain explicit costs, with concrete mitigations.",
+          "created": "2026-11-17T11:15:49.192Z",
+          "answeredAt": "2026-11-17",
+          "answeredBy": "Main"
+        },
+        {
+          "id": "q4f453bp",
+          "cardId": "c05gn07n",
+          "decisionId": "D-ARRAY-ZIPCOLUMNS1",
+          "by": "owner",
+          "kind": "question",
+          "text": "downsides must be engineered away. you can do better than that. balance readability/reasonability with getting max performance out by default",
+          "status": "answered",
+          "answer": "The recommendation now includes both zero-copy owning adoption and borrowed joins within one `Columns` family, rather than forcing a false choice. Owning adoption validates lengths transactionally; mismatch returns every original buffer in the typed error instead of destroying them. Extraction returns the original allocations and row count, including zero-field records. Growth commits lengths only after capacity work succeeds. Borrowing uses ordinary lifetimes, and duplication is explicitly `.copy()`. The remaining costs are real: independently adopted buffers remain separate allocations, and recovery inputs travel through the error. Both are documented with concrete mitigations. No benchmark superiority is claimed; no element copying or element-buffer allocation is the required fast-path contract.",
+          "created": "2026-11-17T11:16:36.399Z",
+          "answeredAt": "2026-11-17",
+          "answeredBy": "Main"
+        }
+      ],
+      "retiredAt": "2026-11-27T01:36:21.291Z"
+    },
+    {
+      "id": "c0r6d7ja",
+      "num": 6846,
+      "title": "Generated code: the Compiler value, Meta effects, generation rounds and rollback",
+      "body": "Destination: a program that generates or rewrites code does it through one passed, root-created `Compiler` value whose actions are Meta effects checked like any effect, and generation is deterministic, provenanced and all-or-nothing. Why: generated code must be as trustworthy and debuggable as hand-written code, and nothing above marker expansion may happen by import alone.\n\nGoverning decisions: D-META-LADDER1=A (Meta effects follow the rule of every effect; compiler control is one passed value; macros stay out), D-META-OPTIN2=A (a checked package opt-in suffices for above-level-five operations), D-HOOK-STAGES1=A, D-ADDSTRUCT-TYPE1=A (meta.add_struct names a field's type with a TypeId). Spec: Docs/spec/reference/metaprogramming.md.\n\nCarried decisions: the org policy file accepts the same `authority: { deny: [...] }` record as package.jet (D-EFFBUDGET1), applied as an outer rung that only narrows (Main 2026-11-11). `#build`, `#program`, `#package` and `#phase` are spelled with `#` and cannot be shadowed (D-META-HASH2=A, landed 00a2b37a42..53805444ba). Sizing (owner 2026-11-11): each Compiler-value slice is at most one hour of code and one hour of tests. Background: the Compiler value needs a build session alive through application checking and closures called on each checked-function event; see the G6Decl notes in $JET_SCRATCH_ROOT/lanes/G6Decl/BLOCKED.md.\n\nCarried from #3526, #3520 and #4276 (closed 2026-11-14).",
+      "kind": "feature",
+      "track": "epoch",
+      "epoch": "G1",
+      "milestoneId": null,
+      "phase": "done",
+      "priority": "P2",
+      "plan": null,
+      "checkSteps": null,
+      "probe": null,
+      "visualMedia": [],
+      "blockedBy": [],
+      "assignee": null,
+      "log": [
+        {
+          "at": "2026-11-23",
+          "by": "Orchestrator",
+          "text": "c12 scope decision: c12 is met by S2 (the standard sizes are Prelude aliases of the three generic families, generated into the parser and number-kind tables) and S12 (an impl on a family expands to one impl per size; Core's per-size impls become one per family), once golden Basics/ passes on O0, O1 and O2 and git grep shows one family definition per kind in Core. S4-S11, which collapse the compiler's internal per-width representation, are not required by c12's text and overlap #6851's type identity work."
+        },
+        {
+          "at": "2026-11-23",
+          "by": "Orchestrator",
+          "text": "c12 S2b decision: the parser keeps binding the standard size names (I8..F64) to the number types through a table generated from the Prelude alias declarations (checked against them by a generator check or guard), and leaves a Named type wherever the file declares, imports or type-parameters that name, so a shadowing type stays the user's; Sema resolves other aliases of a family through the alias. Chosen over a full Sema pre-resolution audit (about 850 JetSema and 300 JetIR sites, untestable before a build, self-host miscompile risk)."
+        },
+        {
+          "at": "2026-11-23",
+          "by": "Orchestrator",
+          "text": "Batch 9 landed c8f, c6r, c10r, c5r, c7 (dev 9597797b1b). Held: c1 (ui meta_ladder_marker_cannot_rewrite_without_a_compiler_value snapshot lacks the closing summary lines), c14 and c2 (cases meta_events_hear_marked_functions and meta_events_hear_resolved_calls passed in batch 7 and now stop with ArithmeticOrBoundsFailure). c10 stays open: generate_cancel_midway_leaves_no_partial_module fails (ComptimeFuelExhausted then UnknownFunction second_value)."
+        },
+        {
+          "at": "2026-11-23",
+          "by": "Orchestrator",
+          "text": "c12 S1: the private float storage is builtin.FloatWord<exponent, fraction> beside builtin.Word<bits>, because Core.rows type exports and the Core owner maps key on bare names and a jet_builtins Float export would become the bare owner of Float."
+        },
+        {
+          "at": "2026-11-23",
+          "by": "Orchestrator",
+          "text": "c12 S1 decisions: (1) the private integer storage in jet_builtins is spelled builtin.Word<bits> (floats builtin.Float<e, f>) because Bits is already the public bitset collection and Core types are bare-named; jet_builtins is Core's private door (D-CORE-BUILTINS1), so this is not user surface. (2) E0324 AliasWithoutParameters admits a parameterless alias whose target is an applied generic in any package (its own rationale: aliases shorten generic spellings), so I8: Signed<8> needs no Core-only exception; an alias of a plain non-generic type stays E0324."
+        },
+        {
+          "at": "2026-11-23",
+          "by": "Orchestrator",
+          "text": "c12 plan (D-CORE-NUMFAMILY1=A), ranked by site share (1557 Type.IntN/Float32 sites, 236 name-string sites): S1 Core families Bits<bits>/Float<e,f>, Signed/Unsigned/IEEE plus aliases and foundation_family_type (~3%, UI snapshot shows U8 for Unsigned<8>); S2 names resolve through Core aliases, width arms and IntegerKinds deleted (~8%); S3 from_<source> conversions from one family rule (~4%); S4 Foundation representation collapse to Type.Apply with accessors type_fixed_int/type_ieee (234 sites); S5-S8 Sema (~215 each); S9-S10 IR (323); S11 remaining packages (~140); S12 Core per-width impls to one impl per family. Proof each slice: golden Basics/ at o0/o1/o2 plus touched package unit tests. F16/BF16/I128/U128 stay on the paired card. Batch 7 landed c8r (b7986f520d), c9r (6bcfb66b1f), add_struct wording (d8063248ea); c6r and c10r fixture failures went back to the worker, c5r/c7 held behind them."
+        },
+        {
+          "at": "2026-11-23",
+          "by": "Orchestrator",
+          "text": "Rebased the Antigravity c11-c13 patch onto dev and split it. c11 (Toolchain/CompilerValueMethods.jet generator, its build.jet step and JetEval test; generator output equals the committed file) is in batch 3. c13 (generated modules load under jet check and jet run: InspectBuild.jet, Request.jet jet_cli_compile_prepared, EntityBuckets.case, build_fn_generated_modules_load_across_run_check_and_build) is held as $JET_SCRATCH_ROOT/tmp/orch/land/6846-c13.patch. It regresses 5 cases: jet_cli_compile_prepared now runs the entry package's build fn for every check, fix and explain, so the build fn's reports and pinned fetches fail  (program_info_effects_tell_the_written_row_from_the_solved_row, program_info_groups_a_two_module_package_into_one_package_record, program_info_uses_qualified_collision_free_type_function_and_method_identities, keep_going_trap_keys_failed_function_references, explain_effects_reaches_comptime_inputs; A/B: pass without it, fail with it). Fix direction: under check, fix and explain, fold in only the modules the build fn generates, without making its reports or input fetches the check's outcome."
+        },
+        {
+          "at": "2026-11-23",
+          "by": "Orchestrator",
+          "text": "Unlanded Antigravity work, saved 2026-11-23: c11-c13 patch $JET_SCRATCH_ROOT/tmp/parked_arch/parked_g1_6846_c11_c13.patch (InspectBuild, Request, JetEval CompilerValueMethods, build.jet, EntityBuckets case; conflicts with dev af651a6949, 7% present, needs a rebase) and its new files $JET_SCRATCH_ROOT/tmp/parked_arch/6846-untracked-goalsorder.tar (Compiler/Toolchain/CompilerValueMethods.jet, JetEval/Tests/CompilerValueMethods.jet, Tests/Cases/BuildEntry/build_fn_generated_modules_load_across_run_check_and_build)."
+        }
+      ],
+      "criteria": [
+        {
+          "n": 1,
+          "text": "A metaprogram action above marker expansion (adding declarations outside a marker, rewriting a body, making a type from text) needs a `Compiler` value, and each action checks its Meta cases (`Generate`, `Include`, `Rewrite`, `Types`, `Raw`) like any effect: denied by written code, otherwise allowed; without a `Compiler` value it is refused with a registered diagnostic and UI snapshot.",
+          "status": "met",
+          "metBy": "Orchestrator",
+          "verifiedBy": null,
+          "evidence": "jet test Compiler --profile ui --filter meta_ladder_: 11 PASS, 0 FAIL on the batch 11 compiler (dev 431de10934 + batch-11 stack; landed on dev as ea939e9553..7578d807e7, a1267a9894). Snapshots cover the Generate, Rewrite, Raw and Types denials and E0774 for a marker without a Compiler value; Meta.Include has no action on dev, so it has nothing to check.",
+          "at": "2026-11-23T23:02:20.370Z",
+          "proof": {
+            "profile": "ui",
+            "filter": "meta_ladder_"
+          }
+        },
+        {
+          "n": 2,
+          "text": "Standard mode allows complete read-only reflection and explicit checked generation and refuses operations above level 5 unless the package opts in (D-META-OPTIN2=A); `#run` runs at every tier, fn build runs only for artifacts, and a built artifact never re-runs `#run`; a pure cache hit keeps every observable effect (print count and order).",
+          "status": "met",
+          "metBy": "Orchestrator",
+          "verifiedBy": null,
+          "evidence": "jet test Compiler --profile cases --filter meta_ladder_levels: 2 PASS on the batch 11 compiler (dev 431de10934 + batch-11 stack; landed on dev as ea939e9553..7578d807e7, a1267a9894) (meta_ladder_levels_run_build_artifacts_and_cache_hits pins #run at check, test, run and build, fn build only for artifacts, no #run re-run in a built artifact, and #Memo cache hits keeping print count and order; compile-cache reuse is off by default).",
+          "at": "2026-11-23T23:02:21.265Z",
+          "proof": {
+            "profile": "cases",
+            "filter": "meta_ladder_levels"
+          }
+        },
+        {
+          "n": 3,
+          "text": "`meta.add_struct` takes each field's type as a TypeId (D-ADDSTRUCT-TYPE1=A, ratified 2026-11-13); the String form of CompilerField.type is gone in one cutover, and a computed name is still refused with its registered code.",
+          "status": "met",
+          "metBy": "Orchestrator",
+          "verifiedBy": null,
+          "evidence": "6e387d3e3b: CompilerField.type is TypeId (CoreRecordRows.jet); BuildEntry meta.add_struct cases (4/4) and meta_ladder_ UI snapshots (7/7) PASS",
+          "at": "2026-11-22T03:09:09.411Z",
+          "proof": {
+            "profile": "cases",
+            "filter": "meta_ladder_add_struct"
+          }
+        },
+        {
+          "n": 4,
+          "text": "Each generated declaration and rewrite carries a stable identity and its full producer and Compiler-handoff chain in `jet inspect`, `jet explain`, the editor and the CLI; diagnostics name the caller, handler, output or missing producer separately.",
+          "status": "met",
+          "metBy": "TowerKeeper-1",
+          "verifiedBy": null,
+          "evidence": "Landed on dev in c6d9e746f2 (the editor names what made a generated module, from .jet/build/receipt.json; its message records that inspect, explain and the CLI already carried the producer and handoff chain). Checked 2026-11-14 on dev 72a8142651 with the gate-p136 jet: `jet test Compiler --profile ui --filter meta_ladder_missing_producer` PASS 1.",
+          "at": "2026-11-15T02:18:23.687Z",
+          "proof": {
+            "profile": "cases",
+            "filter": "inspect_generated_identity"
+          }
+        },
+        {
+          "n": 5,
+          "text": "Each generation round, source identity, collision check, dependency edge, lock fact and rollback result is deterministic and source-provenanced: two runs, and runs with permuted, cold, warm and parallel schedules, give byte-identical output and provenance.",
+          "status": "met",
+          "metBy": "Orchestrator",
+          "verifiedBy": null,
+          "evidence": "Landed 01869d94a5 (c5r). Batch-9 -O1 compiler (dev 2541ece0b1 + 13 submissions), landed on dev 9597797b1b: cases generate_rounds_deterministic_across_cold_warm_parallel_and_permuted_runs PASS (with bubblewrap, no SKIP); Compiler/JetBuildSession/Tests/BuildGraphRules.jet --filter=generation_schedule 7/7; Compiler/JetCLI/Tests/InspectBuild.jet --filter=inspect_build 9/9.",
+          "at": "2026-11-23T21:22:19.013Z",
+          "proof": {
+            "profile": "cases",
+            "filter": "generate_rounds_deterministic"
+          }
+        },
+        {
+          "n": 6,
+          "text": "Shadowing, duplicate output, self and multi-node cycles, round exhaustion, outside-root paths and materialization failure each leave no partial module and report their registered code with what/why/fix text and a UI snapshot; each test fails if the code, span, message or cleanup path is bypassed.",
+          "status": "met",
+          "metBy": "Orchestrator",
+          "verifiedBy": null,
+          "evidence": "Landed afb50bc93c (c6r). Batch-9 -O1 compiler (dev 2541ece0b1 + 13 submissions), landed on dev 9597797b1b: cases generate_refusals_leave_no_partial_module PASS; ui --filter BuildGenerated 7/7 PASS and the Generate snapshots PASS (the one other FAIL is the pre-existing ForeignMetaCheckedBindings jetpack row); InspectBuild.jet --filter=inspect_build 9/9.",
+          "at": "2026-11-23T21:22:19.866Z",
+          "proof": {
+            "profile": "ui",
+            "filter": "Generate"
+          }
+        },
+        {
+          "n": 7,
+          "text": "`generate {}` helper values and inline `b.generate` are one mechanism with byte-identical output and source maps; handwritten code uses the generated items; a collision reports at the helper's line; opt-in in-tree materialization fails on drift; raw source strings are refused.",
+          "status": "met",
+          "metBy": "Orchestrator",
+          "verifiedBy": null,
+          "evidence": "Landed cbb8501201 (c7). Batch-9 -O1 compiler (dev 2541ece0b1 + 13 submissions), landed on dev 9597797b1b: cases generate_helper_ 4/4 PASS; BuildGraphRules.jet --filter=generation_schedule 7/7.",
+          "at": "2026-11-23T21:22:20.737Z",
+          "proof": {
+            "profile": "cases",
+            "filter": "generate_helper_"
+          }
+        },
+        {
+          "n": 8,
+          "text": "Generation follows a dependency-aware schedule (declared inputs, rounds, typed barriers, promised outputs); cycles and duplicate outputs are detected with registered codes.",
+          "status": "met",
+          "metBy": "Orchestrator",
+          "verifiedBy": null,
+          "evidence": "Landed 82406dbdd0 (c8f) on the c8r base. Batch-9 -O1 compiler (dev 2541ece0b1 + 13 submissions), landed on dev 9597797b1b with bubblewrap on PATH: cases generate_schedule_orders_producers_before_consumers and generate_schedule_refuses_cycles_duplicates_and_round_exhaustion 2/2 PASS; cases failed_step_report_shows_its_stderr PASS.",
+          "at": "2026-11-23T21:22:21.576Z",
+          "proof": {
+            "profile": "cases",
+            "filter": "generate_schedule_"
+          }
+        },
+        {
+          "n": 9,
+          "text": "When a promised generated output is missing, the error names its producer and its consumer, and an unrelated unknown name is not reported as a generation promise.",
+          "status": "met",
+          "metBy": "Orchestrator",
+          "verifiedBy": null,
+          "evidence": "Landed 6bcfb66b1f (c9r). Batch-7 -O1 compiler (dev 3019343199 + stack): jet test Compiler --profile ui passes Tests/UI/generate_promise_missing_names_producer_and_consumer.jet; ui suite 0 new failures from c9r.",
+          "at": "2026-11-23T20:41:52.881Z",
+          "proof": {
+            "profile": "ui",
+            "filter": "generate_promise_missing"
+          }
+        },
+        {
+          "n": 10,
+          "text": "Cancelling generation midway, or exhausting memory or steps during it, leaves no partly published declaration and no stale checked fact; the next run starts clean.",
+          "status": "met",
+          "metBy": "Orchestrator",
+          "verifiedBy": null,
+          "evidence": "jet test Compiler --profile cases --filter generate_cancel_: 1 PASS on the batch 11 compiler (dev 431de10934 + batch-11 stack; landed on dev as ea939e9553..7578d807e7, a1267a9894) (generate_cancel_midway_leaves_no_partial_module).",
+          "at": "2026-11-23T23:02:22.179Z",
+          "proof": {
+            "profile": "cases",
+            "filter": "generate_cancel_"
+          }
+        },
+        {
+          "n": 11,
+          "text": "The Compiler value's method list is generated from Core declarations: Compiler/JetEval/Source/CompilerValueMethods.jet no longer lists records and fields by hand, so a new field on `CompilerChecked` appears with no evaluator edit.",
+          "status": "met",
+          "metBy": "Orchestrator",
+          "verifiedBy": null,
+          "evidence": "Landed dev de08daf13a. On a dev-built compiler at de08daf13a: 'jet Toolchain/CompilerValueMethods.jet --check' (from Compiler/) prints 'compiler value methods check passed'; 'jet test JetEval/Tests/CompilerValueMethods.jet' 2 passed, 0 failed, including 'generated compiler value methods accept CoreRecordRows fields and project values'. build.jet's compiler-value-methods step regenerates the file from CoreRecordRows on every jet build Compiler, so a new Compiler record field needs no evaluator edit.",
+          "at": "2026-11-23T18:08:54.210Z",
+          "proof": {
+            "profile": "cases",
+            "filter": "compiler_value_new_field_visible"
+          }
+        },
+        {
+          "n": 12,
+          "text": "Each number family has one generic definition that compile-time code expands to the needed widths (D-CORE-NUMFAMILY1=A), replacing one hand-written type per size. Proof: `jet test Compiler --profile golden --filter Basics/` on O0, O1 and O2, and `git grep` shows one family definition per number kind in Core. The frozen #4570 holds the original item.",
+          "status": "met",
+          "metBy": "Orchestrator",
+          "verifiedBy": null,
+          "evidence": "dev d5f753f52c (number families landed in batch 12, 00815005b8): jet test Compiler --profile golden --filter Basics/ on the batch 12 compiler gives PASS 165 / FAIL 0, 55 on each of o0, o1 and o2. git grep -nE '^(Signed|Unsigned|IEEE)' -- Core gives one family definition per kind (Core/Prelude/Prelude.jet:21, 25, 29), with I8..F64 as alias lines at :37-46.",
+          "at": "2026-11-24T00:39:49.455Z"
+        },
+        {
+          "n": 13,
+          "text": "Modules a package's build: fn adds load the same way under jet run, jet check and jet build (I9): today only jet build loads them (found 2026-11-15 by GoalsA-1-4 on the EntityBuckets example, whose sidecar case runs jet build then the built program as a workaround). Proof: a case that adds a module from build: fn and runs it with jet run, jet check and jet build, with one output.",
+          "status": "met",
+          "metBy": "Orchestrator",
+          "verifiedBy": null,
+          "evidence": "Landed dev 50b6a396d2. On a dev-built compiler (dev 1422e2ebd7 + this patch): Tests/Cases/BuildEntry/build_fn_generated_modules_load_across_run_check_and_build.case PASS (one module added by a package's build: fn loads the same way under jet run, jet check and jet build), Examples/Metaprogramming/Reflection/EntityBuckets golden PASS at o0/o1/o2, and the program_info_*, keep_going_trap_keys_failed_function_references and explain_effects_reaches_comptime_inputs cases PASS; golden, ui and cases show no new failure from it.",
+          "at": "2026-11-23T19:42:17.206Z"
+        },
+        {
+          "n": 14,
+          "text": "meta.events handlers a package's build: fn registers (call watches, lint findings) run under jet check and jet run the same as under jet build (I9, the c13 rule for generated modules). Found 2026-11-23 on the batch-7 compiler: Examples/Modules/Packages/NoPrintInLib reports lints.NoPrintInLib in its golden, but jet check . prints OK and jet run . runs with no finding; a .Calls{to: helper} watch whose handler panics stops jet build but not jet check.",
+          "status": "met",
+          "metBy": "Orchestrator",
+          "verifiedBy": null,
+          "evidence": "jet test Compiler --profile cases --filter meta_events_: 5 PASS, and golden NoPrintInLib: 3 PASS (O0, O1, O2) on the batch 11 compiler (dev 431de10934 + batch-11 stack; landed on dev as ea939e9553..7578d807e7, a1267a9894); watches and lint findings run under jet check and jet run as under jet build.",
+          "at": "2026-11-23T23:02:23.106Z",
+          "proof": {
+            "profile": "cases",
+            "filter": "meta_events_run_under_check_and_run"
+          }
+        }
+      ],
+      "refs": [],
+      "tags": [
+        "meta",
+        "generation",
+        "metaprogramming"
+      ],
+      "parentId": null,
+      "needsAcceptance": false,
+      "created": "2026-11-15T02:10:41.959Z",
+      "updated": "2026-11-24T00:39:52.213Z",
+      "updatedBy": "Orchestrator",
+      "criteriaLastN": 14,
+      "completedAt": "2026-11-24T00:39:52.213Z",
+      "questions": [],
+      "retiredAt": "2026-11-27T01:36:21.292Z"
+    },
+    {
+      "id": "c0qtfr3u",
+      "num": 6931,
+      "title": "Value tags are enforced: `#PII String` in type position, tag facts flow through dataflow, and only `#Scrub` removes a tag",
+      "body": "Destination: D-QUAL4=A (a value tag in type position is written directly before the type, `#PII String`) and D-TAINT1=A (direct tag facts propagate through branches, containers and calls and are refused at the tag's denied destinations; D-TAG-SURFACE1 makes `#Scrub(Tag)` the only checked removal) are built, and secret provenance errors fire only on real secret leaks.\n\nWhy: a tag that drops silently through a container or a call is a false promise about where sensitive data can go.\n\nSource: #4268 c8, c9 and c25 (ratified contracts; #1333). Tag declarations as rows live on #6854 (G6).",
+      "kind": "feature",
+      "track": "epoch",
+      "epoch": "G4",
+      "milestoneId": null,
+      "phase": "done",
+      "priority": "P1",
+      "plan": null,
+      "checkSteps": null,
+      "probe": null,
+      "visualMedia": [],
+      "blockedBy": [],
+      "assignee": null,
+      "log": [
+        {
+          "at": "2026-11-24",
+          "by": "Orchestrator",
+          "text": "Burn-down ranking (2026-11-24, by remaining workload; G2Regressions read the open criteria against dev 8a8ea0ee0b): 1-2d. c1 behavior holds today: `#PII String` parses in type position and checks to the ownership stage. Only the Tags/d_qual4_contract case is missing (~45m). c2 needs taint propagation through branches, containers and calls plus `#Scrub` (TaggedValueDenied exists; its contract case and the taint_denied_sink_ UIs are missing), hours to a day. c3: crypto_secret_nested_provenance is KNOWN-FAILING (#6425 port: E0629 \"crypto is a module\" on `#Reviewed crypto.Secret.from_text`), hours."
+        }
+      ],
+      "criteria": [
+        {
+          "n": 1,
+          "text": "D-QUAL4=A: a value tag in type position parses directly before the type (`#PII String`).",
+          "status": "met",
+          "metBy": "Orchestrator",
+          "verifiedBy": null,
+          "evidence": "batch 14 compiler, dev 1e81eab0de: cases --filter Tags/d_qual4_contract PASS (landed b260424a3c).",
+          "at": "2026-11-24T02:11:26.598Z",
+          "proof": {
+            "profile": "cases",
+            "filter": "Tags/d_qual4_contract"
+          }
+        },
+        {
+          "n": 2,
+          "text": "D-TAINT1=A: tag facts propagate through branches, containers and calls, denied sinks refuse a tagged value with a registered error, and only a checked `#Scrub(Tag)` removes a tag. Proof: `jet test Compiler --profile cases --filter Tags/d_taint1_contract` and `jet test Compiler --profile ui --filter taint_denied_sink_`.",
+          "status": "met",
+          "metBy": "Orchestrator",
+          "verifiedBy": null,
+          "evidence": "batch 14 compiler, dev 1e81eab0de: cases --filter Tags/d_taint1_contract PASS and ui --filter taint_denied_sink_ 4/4 PASS (landed b260424a3c).",
+          "at": "2026-11-24T02:11:27.569Z"
+        },
+        {
+          "n": 3,
+          "text": "The crypto secret provenance errors (the E0311 family) fire only on a real secret leak, and the nested-provenance program checks clean.",
+          "status": "met",
+          "metBy": "Orchestrator",
+          "verifiedBy": null,
+          "evidence": "batch 14 compiler, dev 1e81eab0de: ui --filter crypto_secret_nested_provenance PASS (landed b260424a3c).",
+          "at": "2026-11-24T02:11:28.745Z",
+          "proof": {
+            "profile": "ui",
+            "filter": "crypto_secret_nested_provenance"
+          }
+        }
+      ],
+      "refs": [],
+      "tags": [
+        "authority",
+        "tags",
+        "taint"
+      ],
+      "parentId": null,
+      "needsAcceptance": false,
+      "created": "2026-11-15T04:40:53.816Z",
+      "updated": "2026-11-24T02:11:31.079Z",
+      "updatedBy": "Orchestrator",
+      "completedAt": "2026-11-24T02:11:31.079Z",
+      "questions": [],
+      "retiredAt": "2026-11-27T11:08:07.954Z"
     }
   ]
 }
