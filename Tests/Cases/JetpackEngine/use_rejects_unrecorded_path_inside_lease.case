@@ -1,119 +1,32 @@
 # HAND-PORT tests/jetpack_engine.rs:3632-3736 use_rejects_unrecorded_path_inside_lease
-# PENDING-GRAMMAR(batch-four) / PENDING-SAME-HEAD: source only.
 env: NO_COLOR=1
-refused: hangar-verified-realization
-# Verbatim original setup + ALL assertions, including the library observations. No passing reduced replacement.
-# #[test]
-# fn use_rejects_unrecorded_path_inside_lease() {
-#     let root = Scratch::new("lease-caller-confinement-root");
-#     let fixtures = Scratch::new("lease-caller-confinement-fixtures");
-#     write_native_lease_fixture(&fixtures.path);
-# 
-#     let prime = jetpack()
-#         .args([
-#             "use",
-#             "omp@releases#1.0.0",
-#             "-y",
-#             "--no-color",
-#             "--offline",
-#             "--fixtures",
-#         ])
-#         .arg(&fixtures.path)
-#         .args([
-#             "--",
-#             "sh",
-#             "-c",
-#             "true",
-#         ])
-#         .env("JETPACK_ROOT", &root.path)
-#         .env("JETPACK_FIXTURES", &fixtures.path)
-#         .output()
-#         .unwrap();
-#     assert!(
-#         prime.status.success(),
-#         "lease setup failed: {}",
-#         String::from_utf8_lossy(&prime.stderr)
-#     );
-# 
-#     let entry = jetpack::Store::find_by_reference(
-#         &jetpack::Store::Roots::at(root.path.clone()),
-#         "omp@releases#1.0.0",
-#     )
-#     .unwrap();
-#     // Keep the path valid after OS normalization. A bypassed Store lease
-#     // would execute the recorded `omp` member through this unrecorded form.
-#     let unrecorded = Path::new(&entry.out).join("bin/../bin/omp");
-# 
-#     let output = jetpack()
-#         .args([
-#             "use",
-#             "omp@releases#1.0.0",
-#             "-y",
-#             "--no-color",
-#             "--offline",
-#             "--fixtures",
-#         ])
-#         .arg(&fixtures.path)
-#         .args([
-#             "--",
-#             unrecorded.to_str().unwrap(),
-#         ])
-#         .env("JETPACK_ROOT", &root.path)
-#         .env("JETPACK_FIXTURES", &fixtures.path)
-#         .output()
-#         .unwrap();
-# 
-#     assert_eq!(
-#         output.status.code(),
-#         Some(126),
-#         "unrecorded lease path must fail before child launch: {}",
-#         String::from_utf8_lossy(&output.stderr)
-#     );
-#     let stderr = String::from_utf8_lossy(&output.stderr);
-#     assert!(stderr.contains("Error: Jet.JetpackCommandFailed:"), "stderr: {stderr}");
-#     assert!(stderr.contains("not a recorded member"), "stderr: {stderr}");
-#     assert!(!String::from_utf8_lossy(&output.stdout).contains("hello from jetpack"));
-# 
-#     #[cfg(unix)]
-#     {
-#         let alias = root.path.join("lease-output-alias");
-#         std::os::unix::fs::symlink(Path::new(&entry.out).join("bin"), &alias).unwrap();
-#         let aliased = alias.join("omp");
-#         let output = jetpack()
-#             .args([
-#                 "use",
-#                 "omp@releases#1.0.0",
-#                 "-y",
-#                 "--no-color",
-#                 "--offline",
-#                 "--fixtures",
-#             ])
-#             .arg(&fixtures.path)
-#             .args(["--", aliased.to_str().unwrap()])
-#             .env("JETPACK_ROOT", &root.path)
-#             .env("JETPACK_FIXTURES", &fixtures.path)
-#             .output()
-#             .unwrap();
-#         assert_eq!(
-#             output.status.code(),
-#             Some(126),
-#             "symlink alias into a lease must fail before child launch: {}",
-#             String::from_utf8_lossy(&output.stderr)
-#         );
-#         assert!(
-#             String::from_utf8_lossy(&output.stderr).contains("not a recorded member"),
-#             "stderr: {}",
-#             String::from_utf8_lossy(&output.stderr)
-#         );
-#         assert!(!String::from_utf8_lossy(&output.stdout).contains("hello from jetpack"));
-#     }
-# }
 env: JETPACK_ROOT={work}/root
+env: JETPACK_FIXTURES={work}/fixtures
+requires: os:unix
 mkdir: root
 mkdir: project
 mkdir: fixtures
-env: JETPACK_FIXTURES={work}/fixtures
+write: fixtures/omp-native-jetpack-fixture = "#!/bin/sh\necho hello from jetpack\n"
+chmod: fixtures/omp-native-jetpack-fixture 0755
+capture: artifact_sha = sha256 file fixtures/omp-native-jetpack-fixture
+write: fixtures/jetpackage-omp.json = "{\"tag\":\"v1.0.0\",\"version\":\"1.0.0\",\"sha256\":\"{cap:artifact_sha}\",\"artifact\":\"omp-native-jetpack-fixture\"}\n"
 step: jetpack use omp@releases#1.0.0 -y --no-color --offline --fixtures {work}/fixtures -- sh -c true
 cwd: project
 exit: 0
-
+step: jetpack explain omp --json --no-color
+cwd: project
+exit: 0
+capture: out stdout doc $.explain.entry.output_path
+step: jetpack use omp@releases#1.0.0 -y --no-color --offline --fixtures {work}/fixtures -- {cap:out}/bin/../bin/omp
+cwd: project
+exit: 126
+stderr: ~ "Error: Jet.JetpackCommandFailed:" # original contains predicate
+stderr: ~ "not a recorded member" # original contains predicate
+stdout: !~ "hello from jetpack" # original negative contains predicate
+step: ln -s {cap:out}/bin {work}/root/lease-output-alias
+exit: 0
+step: jetpack use omp@releases#1.0.0 -y --no-color --offline --fixtures {work}/fixtures -- {work}/root/lease-output-alias/omp
+cwd: project
+exit: 126
+stderr: ~ "not a recorded member" # original contains predicate
+stdout: !~ "hello from jetpack" # original negative contains predicate

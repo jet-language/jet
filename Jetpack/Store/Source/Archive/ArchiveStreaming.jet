@@ -1,0 +1,861 @@
+// Streaming file-backed Hangar archive export and import.
+//
+// Uses the exact `jet-hangar-archive-v1` wire format and HMAC-SHA256 trailer
+// as HangarArchiveFormat.jet / ArchiveTransfer.jet, while streaming file
+// payloads in 64 KiB chunks so closures over 1 GiB export and import into an
+// empty Hangar with bounded memory and disk.
+use {
+    crypto: core.crypto
+    files: core.files
+    process: core.process
+    sys: core.sys
+}
+
+STORE_MAX_STREAMING_ARCHIVE_BYTES: 17179869184
+
+STORE_ARCHIVE_MAX_STREAMING_NODE_BYTES: 2147483648
+
+STORE_ARCHIVE_STREAM_CHUNK: 65536
+
+STORE_HMAC_BLOCK_BYTES: 64
+
+// Incremental RFC 2104 HMAC-SHA256 backed by StreamingSHA256 so multi-GiB
+// archives authenticate in O(1) memory with bit-for-bit parity to TrustKey.sign.
+StreamingHMACSHA256: struct {
+    priv inner: StreamingSHA256,
+    priv opad: [U8],
+
+    new: fn(secret: [U8]) -> StreamingHMACSHA256 Never! {
+        ^k0: if secret.len() > STORE_HMAC_BLOCK_BYTES -> {
+            ^h: StreamingSHA256.new()
+            h.update(secret)
+            store_archive_hex_to_bytes(h.finalize_hex())
+        } else -> {
+            secret.copy()
+        }
+        loop k0.len() < STORE_HMAC_BLOCK_BYTES -> k0.push(U8{0})
+        ^ipad: [U8]{}
+        ^opad: [U8]{}
+        loop byte in k0 {
+            ipad.push(byte ~ U8{0x36})
+            opad.push(byte ~ U8{0x5C})
+        }
+        ^inner: StreamingSHA256.new()
+        inner.update(ipad)
+        StreamingHMACSHA256{inner: inner, opad: opad}
+    }
+
+    update: fn(^self, data: [U8]) Never! {
+        if data.len() > 0 -> self.inner.update(data)
+    }
+
+    finalize_hex: fn(self) -> String Never! {
+        inner_bytes: store_archive_hex_to_bytes(self.inner.finalize_hex())
+        ^outer: StreamingSHA256.new()
+        outer.update(self.opad)
+        outer.update(inner_bytes)
+        outer.finalize_hex()
+    }
+}
+
+store_archive_hex_to_bytes: fn(hex: String) -> [U8] Never! {
+    raw: hex.bytes()
+    ^out: [U8]{}
+    ^index: 0
+    loop index + 1 < raw.len() {
+        high: store_archive_hex_value(raw[index]) ?? 0
+        low: store_archive_hex_value(raw[index + 1]) ?? 0
+        out.push(U8{(high << 4) | low})
+        index += 2
+    }
+    out
+}
+
+// Metadata for one streamed archive node. File nodes carry `source_path` and
+// `size` rather than buffered file bytes.
+HangarArchiveStreamNode: struct {
+    path: String,
+    kind: HangarArchiveNodeKind,
+    mode: Int,
+    size: Int,
+    source_path: String,
+    link_bytes: [U8],
+}
+
+// Metadata for one streamed archive record or output tree.
+HangarArchiveStreamObject: struct {
+    id: String,
+    digest: String,
+    meta: String,
+    root_mode: Int,
+    nodes: [HangarArchiveStreamNode],
+}
+
+// Buffered writer feeding an optional streaming HMAC for all unsigned bytes.
+HangarArchiveStreamWriter: struct {
+    priv out: FileWriter,
+    priv hmac: StreamingHMACSHA256?,
+    priv written: Int,
+    priv limit: Int,
+
+    write_bytes: fn(^self, data: [U8], sign: Bool) StoreError! {
+        if data.len() == 0 {
+            return
+        }
+        if self.written + data.len() > self.limit {
+            return Err(StoreError.InvalidData("archive exceeds the streaming size limit"))
+        }
+        self.out.write_bytes(data)
+        self.written += data.len()
+        if sign {
+            if self.hmac.in_place() == {
+                .Val(h) -> { h.update(data) }
+                .None -> {}
+            }
+        }
+    }
+
+    write_u8: fn(^self, value: Int, sign: Bool) StoreError! {
+        self.write_bytes([U8]{U8{value & 255}}, sign)
+    }
+
+    write_raw_u32: fn(^self, value: Int, sign: Bool) StoreError! {
+        ^buf: [U8]{}
+        store_archive_put_raw_u32(buf, value)
+        self.write_bytes(buf, sign)
+    }
+
+    write_u32: fn(^self, value: Int, sign: Bool) StoreError! {
+        ^buf: [U8]{}
+        store_archive_put_u32(buf, value)
+        self.write_bytes(buf, sign)
+    }
+
+    write_u64: fn(^self, value: Int, sign: Bool) StoreError! {
+        ^buf: [U8]{}
+        store_archive_put_u64(buf, value)
+        self.write_bytes(buf, sign)
+    }
+
+    write_string: fn(^self, value: String, sign: Bool) StoreError! {
+        ^buf: [U8]{}
+        store_archive_put_string(buf, value)
+        self.write_bytes(buf, sign)
+    }
+
+    stream_file: fn(^self, source_path: String, expected_size: Int) StoreError! {
+        ^reader: files.open(source_path, links: .Refuse)
+        ^total: 0
+        loop {
+            chunk: reader.read_bytes(STORE_ARCHIVE_STREAM_CHUNK)
+            if chunk.len() == 0 -> break
+            total += chunk.len()
+            if total > expected_size {
+                return Err(StoreError.InvalidData("archive file `{source_path}` grew while streaming"))
+            }
+            self.write_bytes(chunk, true)
+        }
+        if total != expected_size {
+            return Err(StoreError.InvalidData("archive file `{source_path}` shrank while streaming"))
+        }
+    }
+
+    finalize_sig_hex: fn(self) -> String? Never! {
+        if self.hmac == {
+            .Val(h) -> Val(h.finalize_hex())
+            .None -> None
+        }
+    }
+
+    fsync: fn(^self) StoreError! { self.out.fsync() }
+}
+
+// Streaming reader feeding an optional streaming HMAC for all unsigned bytes.
+HangarArchiveStreamReader: struct {
+    priv reader: FileReader,
+    priv total_read: Int,
+    priv limit: Int,
+    priv hmac: StreamingHMACSHA256?,
+
+    next_chunk: fn(^self, max_len: Int, sign: Bool) -> [U8] StoreError! {
+        req: if max_len < STORE_ARCHIVE_STREAM_CHUNK -> max_len else -> STORE_ARCHIVE_STREAM_CHUNK
+        chunk: self.reader.read_bytes(req)
+        if chunk.len() == 0 -> return Err(StoreError.InvalidData("archive is truncated"))
+        self.total_read += chunk.len()
+        if sign {
+            if self.hmac.in_place() == {
+                .Val(h) -> { h.update(chunk) }
+                .None -> {}
+            }
+        }
+        Ok(chunk)
+    }
+
+    take_bytes: fn(^self, len: Int, sign: Bool) -> [U8] StoreError! {
+        if len < 0 -> return Err(StoreError.InvalidData("archive length overflows"))
+        if len > STORE_ARCHIVE_MAX_FIELD_BYTES {
+            return Err(StoreError.InvalidData("archive field is too large"))
+        }
+        if self.total_read + len > self.limit {
+            return Err(StoreError.InvalidData("archive exceeds the streaming size limit"))
+        }
+        ^out: [U8]{}
+        ^needed: len
+        loop needed > 0 {
+            chunk: self.next_chunk(needed, sign)
+            loop byte in chunk -> out.push(byte)
+            needed -= chunk.len()
+        }
+        Ok(out)
+    }
+
+    byte: fn(^self, sign: Bool) -> U8 StoreError! {
+        taken: self.take_bytes(1, sign)
+        Ok(taken[0])
+    }
+
+    u32: fn(^self, sign: Bool) -> Int StoreError! {
+        taken: self.take_bytes(4, sign)
+        ^value: 0
+        loop index in 0..<4 -> value = (value) | (Int{taken[index]} << (8 * index))
+        Ok(value)
+    }
+
+    u64: fn(^self, sign: Bool) -> Int StoreError! {
+        taken: self.take_bytes(8, sign)
+        ^value: 0
+        loop index in 0..<8 -> value = (value) | (Int{taken[index]} << (8 * index))
+        Ok(value)
+    }
+
+    string: fn(^self, sign: Bool) -> String StoreError! {
+        len: self.u32(sign)
+        if len > STORE_ARCHIVE_MAX_FIELD_BYTES {
+            return Err(StoreError.InvalidData("archive field is too large"))
+        }
+        raw: self.take_bytes(len, sign)
+        text: String.from_bytes(raw) ?? return Err(StoreError.InvalidData("archive field is not UTF-8"))
+        Ok(text)
+    }
+
+    copy_to_file: fn(^self, length: Int, dest_path: String, mode: Int, sign: Bool) StoreError! {
+        if length < 0 || length > STORE_ARCHIVE_MAX_STREAMING_NODE_BYTES {
+            return Err(StoreError.InvalidData("archive node exceeds the streaming file limit"))
+        }
+        if self.total_read + length > self.limit {
+            return Err(StoreError.InvalidData("archive exceeds the streaming size limit"))
+        }
+        parent: files.dirname(dest_path)
+        if parent != "" -> files.create_dir_all(parent)
+        ^out: files.create(dest_path, if_exists: .Refuse, mode: None)
+        ^remaining: length
+        loop remaining > 0 {
+            chunk: self.next_chunk(remaining, sign)
+            out.write_bytes(chunk)
+            remaining -= chunk.len()
+        }
+        out.fsync()
+        store_archive_set_mode(dest_path, mode)
+    }
+
+    ensure_eof: fn(^self) StoreError! {
+        extra: self.reader.read_bytes(1)
+        if extra.len() != 0 -> return Err(StoreError.InvalidData("archive has trailing bytes"))
+    }
+
+    finalize_sig_hex: fn(self) -> String? Never! {
+        if self.hmac == {
+            .Val(h) -> Val(h.finalize_hex())
+            .None -> None
+        }
+    }
+}
+
+// Stream-export a package closure directly to `destination` without buffering
+// output file payloads in memory.
+store_export_archive_to_file: fn(verification: StoreVerification, roots: HangarRoots, target: String, include_closure: Bool, destination: String, key: String?, unsigned: Bool) -> HangarArchiveReport StoreError! {
+    _lock: env_runtime_lock(roots.root, "hangar")
+    plan: store_archive_plan_stream_unlocked(verification, roots, target, include_closure, false)
+    signer: if unsigned -> TrustKey?{None} else -> Val(store_archive_signing_key(roots, key, true))
+    parent: files.dirname(destination)
+    if parent != "" -> files.create_dir_all(parent)
+    if store_archive_lstat_ok(destination) == {
+        .Val(existing) -> {
+            if existing.is_symlink {
+                return Err(StoreError.InvalidData("archive destination may not be a symlink"))
+            }
+        }
+        .None -> {}
+    }
+    partial: store_archive_with_extension(destination, "jet-partial-{process.current_pid()}-{store_archive_unique_suffix()}")
+    report: store_archive_stream_write_partial(partial, destination, plan.root_id, plan.objects, signer) ?? {
+        files.remove(partial).drop("the failed partial archive may never have been created")
+        return Err(err)
+    }
+    if parent != "" -> files.fsync(parent)
+    Ok(report)
+}
+
+store_archive_stream_write_partial: fn(partial: String, destination: String, root_id: String, objects: [HangarArchiveStreamObject], signer: TrustKey?) -> HangarArchiveReport StoreError! {
+    out_file: files.create(partial, if_exists: .Refuse, mode: None)
+    hmac: if signer == {
+        .Val(k) -> Val(StreamingHMACSHA256.new(k.secret))
+        .None -> None
+    }
+    ^writer: HangarArchiveStreamWriter{out: out_file, hmac: hmac, written: 0, limit: STORE_MAX_STREAMING_ARCHIVE_BYTES}
+    writer.write_bytes(store_archive_magic(), true)
+    writer.write_string(root_id, true)
+    writer.write_u32(objects.len(), true)
+    ^output_count: 0
+    ^total_bytes: 0
+    loop object in objects {
+        if object.meta == "" -> output_count += 1
+        writer.write_string(object.id, true)
+        writer.write_string(object.digest, true)
+        writer.write_string(object.meta, true)
+        writer.write_raw_u32(object.root_mode, true)
+        writer.write_u32(object.nodes.len(), true)
+        loop node in object.nodes {
+            writer.write_u8(node.kind.to_int(), true)
+            writer.write_string(node.path, true)
+            writer.write_raw_u32(node.mode, true)
+            if node.kind == {
+                .Directory -> { writer.write_u64(0, true) }
+                .File -> {
+                    writer.write_u64(node.size, true)
+                    writer.stream_file(node.source_path, node.size)
+                    total_bytes += node.size
+                }
+                .Symlink | .Hardlink -> {
+                    writer.write_u64(node.link_bytes.len(), true)
+                    writer.write_bytes(node.link_bytes, true)
+                    total_bytes += node.link_bytes.len()
+                }
+            }
+        }
+    }
+    if signer == {
+        .Val(k) -> {
+            sig_hex: writer.finalize_sig_hex() ?? panic("streaming signer has HMAC state")
+            writer.write_u8(1, false)
+            writer.write_string(k.key_id, false)
+            writer.write_string(k.algorithm, false)
+            writer.write_string(sig_hex, false)
+        }
+        .None -> writer.write_u8(0, false)
+    }
+    writer.fsync()
+    files.rename(partial, destination)
+    Ok(HangarArchiveReport{objects: output_count, bytes: total_bytes, signed: signer != None, root: root_id})
+}
+
+store_archive_plan_stream_unlocked: fn(verification: StoreVerification, roots: HangarRoots, target: String, include_closure: Bool, allow_nix_absolute_symlinks: Bool) -> {root_id: String, objects: [HangarArchiveStreamObject]} StoreError! {
+    hangar: roots.hangar_dir()
+    store_require_real_directory(hangar, "Hangar root")
+    entry: store_archive_select_entry_unlocked(verification, roots, target)
+    store_archive_verify_live_entry_unlocked(verification, roots, entry)
+    objects_dir: files.join(hangar, "objects")
+    store_require_real_directory(objects_dir, "Hangar object pool")
+    graph: store_closure_graph_structure_unlocked(verification, roots)
+    root_digest: entry.envelope.output_hash
+    ^digests: if include_closure -> graph.closure(root_digest) else -> [String]{root_digest}
+    if digests.len() == 0 -> digests.push(root_digest.copy())
+    loop output in entry.named_outputs {
+        digests.push(output.value.copy())
+        if include_closure {
+            loop dep in graph.closure(output.value) -> digests.push(dep)
+        }
+    }
+    digests = store_archive_sorted_unique(digests)
+
+    ^selected: [String:StoreEntry]{}
+    selected[entry.id] = entry
+    loop candidate in store_list_unlocked(roots) {
+        ^owns: digests.contains(candidate.envelope.output_hash)
+        loop output in candidate.named_outputs {
+            if digests.contains(output.value) -> owns = true
+        }
+        if owns -> selected[candidate.id] = candidate
+    }
+
+    canonical_objects: files.canonicalize(objects_dir) ?? objects_dir
+    ^objects: [HangarArchiveStreamObject]{}
+    loop digest in digests {
+        object: graph.objects.get(digest) ?? return Err(StoreError.InvalidData("closure object `{digest}` is absent from the Hangar graph"))
+        if !store_archive_is_under(object.path, canonical_objects) {
+            return Err(StoreError.InvalidData("closure object `{digest}` is outside the local Hangar object pool"))
+        }
+        objects.push(
+            HangarArchiveStreamObject{
+                id: digest.copy(),
+                digest: digest,
+                meta: "",
+                root_mode: files.stat(object.path).mode,
+                nodes: store_archive_collect_stream_nodes(object.path, allow_nix_absolute_symlinks),
+            },
+        )
+    }
+    loop id in store_archive_sorted_unique(selected.keys().to_list()) {
+        candidate: selected[id]
+        primary: candidate.envelope.output_hash
+        if !digests.contains(primary) -> next
+        objects.push(HangarArchiveStreamObject{id: candidate.id, digest: primary, meta: candidate.meta_json(), root_mode: 0, nodes: [HangarArchiveStreamNode]{}})
+    }
+    objects.sort_by(fn(object) { object.digest })
+    objects.sort_by(fn(object) { object.id })
+    ^output_ids: [String]{}
+    ^package_ids: [String]{}
+    loop object in objects {
+        if object.meta == "" {
+            if output_ids.contains(object.digest) {
+                return Err(StoreError.InvalidData("archive contains duplicate output records"))
+            }
+            output_ids.push(object.digest)
+        } else {
+            if package_ids.contains(object.id) {
+                return Err(StoreError.InvalidData("archive contains duplicate package records"))
+            }
+            package_ids.push(object.id)
+        }
+    }
+    Ok({root_id: entry.id, objects: objects})
+}
+
+store_archive_collect_stream_nodes: fn(root: String, allow_nix_absolute_symlinks: Bool) -> [HangarArchiveStreamNode] StoreError! {
+    observed: store_archive_lstat(root)
+    metadata: observed ?? return Err(StoreError.InvalidData("output `{root}` is missing"))
+    if metadata.is_symlink {
+        if !allow_nix_absolute_symlinks {
+            return Err(StoreError.InvalidData("Hangar output root may not be a symlink"))
+        }
+        target: files.read_link(root)
+        if target == "" || target.contains("\\") || store_archive_has_ascii_control(target.bytes()) {
+            return Err(StoreError.InvalidData("symlink target is not portable"))
+        }
+        pkg_validate_nix_store_symlink_target(target) ?? return Err(StoreError.InvalidData(err.message()))
+        return Ok([HangarArchiveStreamNode]{HangarArchiveStreamNode{path: ".", kind: HangarArchiveNodeKind.Symlink, mode: metadata.mode, size: target.bytes().len(), source_path: "", link_bytes: target.bytes()}})
+    }
+    canonical_root: files.canonicalize(root)
+    ^hardlinks: [String:String]{}
+    ^nodes: [HangarArchiveStreamNode]{}
+    store_archive_collect_stream_nodes_at(root, "", canonical_root, hardlinks, nodes, allow_nix_absolute_symlinks)
+    nodes.sort_by(fn(node) { node.path })
+    Ok(nodes)
+}
+
+store_archive_collect_stream_nodes_at: fn(path: String, relative: String, canonical_root: String, hardlinks: ^[String:String], out: ^[HangarArchiveStreamNode], allow_nix_absolute_symlinks: Bool) StoreError! {
+    if out.len() >= STORE_ARCHIVE_MAX_NODES_PER_OBJECT {
+        return Err(StoreError.InvalidData("output tree contains too many nodes"))
+    }
+    metadata: files.stat(path)
+    if {
+        metadata.is_dir -> {
+            if relative != "" {
+                out.push(HangarArchiveStreamNode{path: store_archive_portable_path(relative), kind: HangarArchiveNodeKind.Directory, mode: metadata.mode, size: 0, source_path: "", link_bytes: [U8]{}})
+            }
+            loop child in files.list_dir(path) {
+                child_relative: if relative == "" -> child.name else -> "{relative}/{child.name}"
+                store_archive_collect_stream_nodes_at(child.path, child_relative, canonical_root, hardlinks, out, allow_nix_absolute_symlinks)
+            }
+        }
+        metadata.is_file -> {
+            if metadata.size > STORE_ARCHIVE_MAX_STREAMING_NODE_BYTES {
+                return Err(StoreError.InvalidData("archive file exceeds the streaming file limit"))
+            }
+            node_path: if relative == "" -> "." else -> store_archive_portable_path(relative)
+            identity: "{metadata.id.device}:{metadata.id.inode}"
+            if relative != "" && metadata.links > 1 {
+                if hardlinks.get(identity) == {
+                    .Val(first) -> {
+                        first_bytes: first.bytes()
+                        out.push(HangarArchiveStreamNode{path: node_path, kind: HangarArchiveNodeKind.Hardlink, mode: metadata.mode, size: first_bytes.len(), source_path: "", link_bytes: first_bytes})
+                        return
+                    }
+                    .None -> hardlinks[identity] = node_path
+                }
+            }
+            out.push(HangarArchiveStreamNode{path: node_path, kind: HangarArchiveNodeKind.File, mode: metadata.mode, size: metadata.size, source_path: path.copy(), link_bytes: [U8]{}})
+        }
+        metadata.is_symlink -> {
+            target: files.read_link(path)
+            if target == "" || target.contains("\\") || store_archive_has_ascii_control(target.bytes()) {
+                return Err(StoreError.InvalidData("symlink target is not portable"))
+            }
+            if target.starts_with("/") {
+                if !allow_nix_absolute_symlinks {
+                    return Err(StoreError.InvalidData("absolute symlinks are not portable Hangar archive nodes"))
+                }
+            } else if allow_nix_absolute_symlinks {
+                link_path: files.join(canonical_root, relative)
+                store_archive_link_target(canonical_root, link_path, target.bytes(), true)
+            } else {
+                resolved: files.canonicalize(path) ?? return Err(StoreError.InvalidData("symlink `{path}` is dangling or cyclic: {StoreError.IO(err).message()}"))
+                if !store_archive_is_under(resolved, canonical_root) {
+                    return Err(StoreError.InvalidData("symlink target escapes the Hangar output root"))
+                }
+            }
+            target_bytes: target.bytes()
+            out.push(HangarArchiveStreamNode{path: store_archive_portable_path(relative), kind: HangarArchiveNodeKind.Symlink, mode: metadata.mode, size: target_bytes.len(), source_path: "", link_bytes: target_bytes})
+        }
+        else -> return Err(StoreError.InvalidData("special files are not portable Hangar archive nodes"))
+    }
+}
+
+// Deferred non-file node materialized after files are streamed for one object.
+HangarArchiveDeferredNode: struct {
+    path: String,
+    kind: HangarArchiveNodeKind,
+    mode: Int,
+    bytes: [U8],
+}
+
+// Verify `path` is a regular, non-symlink archive file within the streaming limit.
+store_check_archive_input_file: fn(path: String) StoreError! {
+    metadata: files.stat(path)
+    if metadata.is_symlink {
+        return Err(StoreError.InvalidData("archive input may not be a symlink"))
+    }
+    if !metadata.is_file || metadata.size > STORE_MAX_STREAMING_ARCHIVE_BYTES {
+        return Err(StoreError.InvalidData("archive input is not a regular file within the size limit"))
+    }
+}
+
+// Stream-import a canonical Hangar archive file into `roots` without buffering
+// the archive in memory. Every object is staged, re-hashed, and signature-
+// verified before the live Hangar object pool or closure WAL is touched.
+store_import_archive_file: fn(verification: StoreVerification, roots: HangarRoots, path: String, key: String?, allow_unsigned: Bool) -> HangarArchiveReport StoreError! {
+    store_import_archive_file_with_options(verification, roots, path, key, allow_unsigned, false)
+}
+
+store_import_archive_file_with_options: fn(verification: StoreVerification, roots: HangarRoots, path: String, key: String?, allow_unsigned: Bool, allow_nix_absolute_symlinks: Bool) -> HangarArchiveReport StoreError! {
+    store_check_archive_input_file(path)
+    ^loaded_key: TrustKey?{None}
+    ^key_error: StoreError?{None}
+    if store_archive_signing_key(roots, key, false) == {
+        .Ok(found) -> { loaded_key = Val(found) }
+        .Err(error) -> key_error = Val(error)
+    }
+    hangar: roots.hangar_dir()
+    store_ensure_real_directory(hangar, "Hangar root")
+    archive_stage: files.join(hangar, STORE_ARCHIVE_STAGE)
+    store_ensure_real_directory(archive_stage, "Hangar archive staging")
+    stage: files.join(archive_stage, "stream-{process.current_pid()}-{store_archive_unique_suffix()}")
+    stage_objects: files.join(stage, "objects")
+    files.create_dir_all(stage_objects)
+    report: store_import_archive_file_staged(verification, roots, path, loaded_key, key_error, allow_unsigned, allow_nix_absolute_symlinks, stage, stage_objects) ?? {
+        store_archive_remove_tree(stage).drop("an abandoned streaming archive stage is swept by Hangar recovery")
+        return Err(err)
+    }
+    store_archive_remove_tree(stage).drop("an abandoned streaming archive stage is swept by Hangar recovery")
+    Ok(report)
+}
+
+store_import_archive_file_staged: fn(verification: StoreVerification, roots: HangarRoots, path: String, loaded_key: TrustKey?, key_error: StoreError?, allow_unsigned: Bool, allow_nix_absolute_symlinks: Bool, stage: String, stage_objects: String) -> HangarArchiveReport StoreError! {
+    file_reader: files.open(path, links: .Refuse)
+    hmac: if loaded_key == {
+        .Val(k) -> Val(StreamingHMACSHA256.new(k.secret))
+        .None -> None
+    }
+    ^reader: HangarArchiveStreamReader{reader: file_reader, total_read: 0, limit: STORE_MAX_STREAMING_ARCHIVE_BYTES, hmac: hmac}
+    magic: store_archive_magic()
+    if reader.take_bytes(magic.len(), true) != magic {
+        return Err(StoreError.InvalidData("archive has an unknown format"))
+    }
+    root_id: reader.string(true)
+    store_archive_validate_id(root_id)
+    count: reader.u32(true)
+    if count > STORE_ARCHIVE_MAX_OBJECTS {
+        return Err(StoreError.InvalidData("archive contains too many records"))
+    }
+    hangar: roots.hangar_dir()
+    ^package_records: [StoreEntry]{}
+    ^package_ids: [String]{}
+    ^seen_digests: [String]{}
+    ^root_named: false
+    ^report_root: root_id.copy()
+    ^total_bytes: 0
+
+    loop _ in 0..<count {
+        id: reader.string(true)
+        digest: reader.string(true)
+        meta: reader.string(true)
+        store_archive_validate_id(id)
+        store_archive_validate_digest(digest)
+        if id == root_id -> root_named = true
+        root_mode: reader.u32(true)
+        node_count: reader.u32(true)
+        if node_count > STORE_ARCHIVE_MAX_NODES_PER_OBJECT {
+            return Err(StoreError.InvalidData("archive output has too many nodes"))
+        }
+        if meta != "" {
+            parsed: pkg_parse_meta(meta) ?? return Err(StoreError.InvalidData("archive contains malformed package metadata"))
+            if package_ids.contains(id) {
+                return Err(StoreError.InvalidData("archive contains duplicate package records"))
+            }
+            package_ids.push(id.copy())
+            if node_count != 0 {
+                return Err(StoreError.InvalidData("archive package record unexpectedly contains output nodes"))
+            }
+            entry: store_archive_portable_entry(roots, HangarArchiveObject{id: id.copy(), digest: digest.copy(), meta: meta, root_mode: 0, nodes: [HangarArchiveNode]{}}, parsed)
+            if entry.envelope.output_hash != digest {
+                return Err(StoreError.InvalidData("package record `{entry.id}` names `{digest}` but its primary output is `{entry.envelope.output_hash}`"))
+            }
+            if id == root_id -> report_root = entry.id.copy()
+            package_records.push(entry)
+            next
+        }
+        if id != digest || seen_digests.contains(digest) {
+            return Err(StoreError.InvalidData("archive contains duplicate or mismatched output records"))
+        }
+        seen_digests.push(digest.copy())
+        output_root: files.join(stage_objects, digest)
+        object_bytes: store_archive_stream_unpack_object(reader, output_root, root_mode, node_count, allow_nix_absolute_symlinks)
+        total_bytes += object_bytes
+        actual: store_archive_output_hash(output_root, hangar, allow_nix_absolute_symlinks)
+        if actual != digest {
+            return Err(StoreError.InvalidData("archive output `{digest}` re-hashes as `{actual}`"))
+        }
+    }
+
+    trailer: Int{reader.byte(false)}
+    ^signature_tag: trailer
+    if trailer == STORE_ARCHIVE_NIX_MANIFEST_TRAILER {
+        // Feed the trailer tag and manifest bytes into the signed HMAC stream.
+        if reader.hmac.in_place() == {
+            .Val(h) -> { h.update([U8]{U8{trailer}}) }
+            .None -> {}
+        }
+        store_archive_stream_skip_nix_manifest(reader)
+        signature_tag = Int{reader.byte(false)}
+    }
+    if signature_tag != 0 && signature_tag != 1 {
+        return Err(StoreError.InvalidData("archive has an unknown signature trailer"))
+    }
+    ^signed: false
+    if signature_tag == 0 {
+        if !allow_unsigned {
+            return Err(StoreError.InvalidData("unsigned Hangar archives are refused by default"))
+        }
+    } else {
+        signed = true
+        sig_key_id: reader.string(false)
+        sig_alg: reader.string(false)
+        sig_hex: reader.string(false)
+        key: loaded_key ?? return Err(key_error ?? StoreError.InvalidData("archive signer key is unavailable; pass `--key <file>`"))
+        if key.key_id != sig_key_id {
+            return Err(StoreError.InvalidData("archive signer `{sig_key_id}` is not the configured key `{key.key_id}`"))
+        }
+        if key.algorithm != sig_alg {
+            return Err(StoreError.InvalidData("archive uses unsupported signature algorithm `{sig_alg}`"))
+        }
+        expected: reader.finalize_sig_hex() ?? panic("loaded key implies streaming HMAC")
+        if !crypto.constant_time_equal_bytes(expected.bytes(), sig_hex.bytes()) {
+            return Err(StoreError.InvalidData("Hangar archive signature verification failed"))
+        }
+    }
+    reader.ensure_eof()
+    if !root_named {
+        return Err(StoreError.InvalidData("archive root does not name an archived record or output"))
+    }
+
+    seen_digests = store_archive_sorted_unique(seen_digests)
+    loop entry in package_records {
+        if !seen_digests.contains(entry.envelope.output_hash) {
+            return Err(StoreError.InvalidData("package record `{entry.id}` has no archived primary output"))
+        }
+        loop reference in entry.references {
+            if !seen_digests.contains(reference) {
+                return Err(StoreError.InvalidData("package record `{entry.id}` references missing output `{reference}`"))
+            }
+        }
+        loop output in entry.named_outputs {
+            if !seen_digests.contains(output.value) {
+                return Err(StoreError.InvalidData("package record `{entry.id}` names a missing output"))
+            }
+        }
+    }
+
+    // Publish under the Hangar lock with rollback on any error.
+    _lock: env_runtime_lock(roots.root, "hangar")
+    objects_dir: files.join(hangar, "objects")
+    store_ensure_real_directory(objects_dir, "Hangar object pool")
+    store_archive_validate_import_destinations(roots, package_records, seen_digests, allow_nix_absolute_symlinks)
+
+    ^incoming_bytes: 0
+    loop digest in seen_digests {
+        if store_archive_lstat_ok(files.join(objects_dir, digest)) == None {
+            incoming_bytes = store_admission_size(stage_objects)
+            break
+        }
+    }
+    store_ensure_hangar_capacity(verification, roots, store_admission_reservation(incoming_bytes), Val(stage))
+
+    ^moved: [HangarArchiveMove]{}
+    store_archive_publish_staged_objects(verification, roots, seen_digests, package_records, stage_objects, objects_dir, allow_nix_absolute_symlinks, moved) ?? {
+        ^failure: err
+        if store_archive_rollback_import_moves(verification, moved, hangar) == {
+            .Err(rollback) -> {
+                failure = StoreError.Other("{err.message()}; archive import rollback failed: {rollback.message()}")
+            }
+            .Ok(_) -> {}
+        }
+        return Err(failure)
+    }
+    Ok(HangarArchiveReport{objects: seen_digests.len(), bytes: total_bytes, signed: signed, root: report_root})
+}
+
+store_archive_publish_staged_objects: fn(verification: StoreVerification, roots: HangarRoots, seen_digests: [String], package_records: [StoreEntry], stage_objects: String, objects_dir: String, allow_nix_absolute_symlinks: Bool, moved: ^[HangarArchiveMove]) StoreError! {
+    hangar: roots.hangar_dir()
+    loop digest in seen_digests {
+        staged: files.join(stage_objects, digest)
+        destination: files.join(objects_dir, digest)
+        if store_archive_lstat_ok(destination) == {
+            .Val(existing) -> {
+                if existing.is_symlink && !allow_nix_absolute_symlinks {
+                    return Err(StoreError.InvalidData("existing Hangar object `{digest}` is a symlink"))
+                }
+                actual: store_verified_output_hash_persistent(verification, destination, Val(hangar), false)
+                if actual != digest {
+                    return Err(StoreError.InvalidData("existing Hangar object `{digest}` has a conflicting digest"))
+                }
+                store_archive_remove_tree(staged)
+            }
+            .None -> {
+                store_archive_make_tree_writable(staged)
+                files.rename(staged, destination)
+                moved.push(HangarArchiveMove{destination: destination, staged: staged})
+                store_archive_seal_tree(destination)
+                if !allow_nix_absolute_symlinks {
+                    store_share_tree_files(verification, roots, destination, false)
+                }
+                store_write_seal(verification, destination, hangar, digest)
+            }
+        }
+    }
+    store_sync_store_directory(objects_dir)
+    store_register_entries_unlocked(verification, roots, package_records)
+}
+
+store_archive_stream_unpack_object: fn(reader: ^HangarArchiveStreamReader, root: String, root_mode: Int, node_count: Int, allow_nix_absolute_symlinks: Bool) -> Int StoreError! {
+    ^kinds: [String:HangarArchiveNodeKind]{}
+    ^deferred: [HangarArchiveDeferredNode]{}
+    ^directories: [HangarArchiveDeferredNode]{}
+    ^total_bytes: 0
+    ^root_leaf: false
+
+    loop index in 0..<node_count {
+        kind_code: Int{reader.byte(true)}
+        path: reader.string(true)
+        mode: reader.u32(true)
+        size: reader.u64(true)
+        if size < 0 || size > STORE_ARCHIVE_MAX_STREAMING_NODE_BYTES {
+            return Err(StoreError.InvalidData("archive node exceeds the streaming file limit"))
+        }
+        kind: HangarArchiveNodeKind.from_int(kind_code) ?? return Err(StoreError.InvalidData("archive contains an unknown node kind"))
+        is_leaf: node_count == 1 && path == "." && (kind == HangarArchiveNodeKind.File || kind == HangarArchiveNodeKind.Symlink)
+        if is_leaf {
+            root_leaf = true
+            if kind == HangarArchiveNodeKind.File {
+                effective_mode: if mode != 0 -> mode else -> root_mode
+                reader.copy_to_file(size, root, effective_mode, true)
+                total_bytes += size
+                return Ok(total_bytes)
+            }
+            if !allow_nix_absolute_symlinks {
+                return Err(StoreError.InvalidData("Hangar output root may not be a symlink"))
+            }
+            link_bytes: reader.take_bytes(size, true)
+            target: String.from_bytes(link_bytes) ?? return Err(StoreError.InvalidData("archive symlink target is not UTF-8"))
+            pkg_validate_nix_store_symlink_target(target) ?? return Err(StoreError.InvalidData(err.message()))
+            files.create_dir_all(files.dirname(root))
+            files.symlink(target, root)
+            total_bytes += size
+            return Ok(total_bytes)
+        }
+        if index == 0 -> files.create_dir_all(root)
+        store_archive_validate_relative(path)
+        if kinds.get(path) != None {
+            return Err(StoreError.InvalidData("archive contains duplicate output paths"))
+        }
+        kinds[path] = kind
+        dest: files.join(root, path)
+        if !store_archive_is_under(dest, root) {
+            return Err(StoreError.InvalidData("archive node escapes its output root"))
+        }
+        if kind == {
+            .Directory -> {
+                if size != 0 {
+                    return Err(StoreError.InvalidData("archive directory node has a payload"))
+                }
+                files.create_dir_all(dest)
+                directories.push(HangarArchiveDeferredNode{path: path, kind: kind, mode: mode, bytes: [U8]{}})
+            }
+            .File -> {
+                reader.copy_to_file(size, dest, mode, true)
+                total_bytes += size
+            }
+            .Hardlink | .Symlink -> {
+                payload: reader.take_bytes(size, true)
+                total_bytes += size
+                deferred.push(HangarArchiveDeferredNode{path: path, kind: kind, mode: mode, bytes: payload})
+            }
+        }
+    }
+    if node_count == 0 -> files.create_dir_all(root)
+    if !root_leaf {
+        loop entry in kinds {
+            components: entry.key.split("/").to_list()
+            loop i in 1..<components.len() {
+                ancestor: components[0..<i].join("/")
+                if kinds.get(ancestor) == .Val(anc_kind) {
+                    if anc_kind != HangarArchiveNodeKind.Directory {
+                        return Err(StoreError.InvalidData("archive contains a file/link path collision"))
+                    }
+                }
+            }
+        }
+        loop node in deferred {
+            if node.kind != HangarArchiveNodeKind.Hardlink -> next
+            dest: files.join(root, node.path)
+            target: store_archive_hardlink_target(root, node.bytes)
+            if !files.is_file(target) {
+                return Err(StoreError.InvalidData("archive hardlink target is not a regular file"))
+            }
+            files.create_dir_all(files.dirname(dest))
+            files.hard_link(target, dest)
+        }
+        loop node in deferred {
+            if node.kind != HangarArchiveNodeKind.Symlink -> next
+            dest: files.join(root, node.path)
+            target: String.from_bytes(node.bytes) ?? return Err(StoreError.InvalidData("archive symlink target is not UTF-8"))
+            store_archive_link_target(root, dest, node.bytes, allow_nix_absolute_symlinks)
+            files.create_dir_all(files.dirname(dest))
+            files.symlink(target, dest)
+        }
+        directories.sort_by(fn(node) { 0 - store_archive_separator_count(node.path) })
+        loop node in directories -> store_archive_set_mode(files.join(root, node.path), node.mode)
+        if root_mode != 0 -> store_archive_set_mode(root, root_mode)
+    }
+    Ok(total_bytes)
+}
+
+store_archive_stream_skip_nix_manifest: fn(reader: ^HangarArchiveStreamReader) StoreError! {
+    _: reader.string(true)
+    _: reader.string(true)
+    _: reader.string(true)
+    _: reader.string(true)
+    count: reader.u32(true)
+    if count > STORE_ARCHIVE_MAX_OBJECTS {
+        return Err(StoreError.InvalidData("Nix closure manifest contains too many members"))
+    }
+    loop _ in 0..<count {
+        _: reader.string(true)
+        _: reader.string(true)
+        _: reader.u64(true)
+        ref_count: reader.u32(true)
+        if ref_count > STORE_ARCHIVE_MAX_OBJECTS {
+            return Err(StoreError.InvalidData("Nix closure manifest member contains too many references"))
+        }
+        loop _ in 0..<ref_count -> _: reader.string(true)
+    }
+}

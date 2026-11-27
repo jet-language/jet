@@ -193,12 +193,16 @@ cli_cmd_env_project: fn(verification: StoreVerification, cache: ^WorkspaceDeclar
     if hook == .Val(hook_hash) -> env.vars[ENV_HOOK_ACTIVE_HASH_VAR] = hook_hash
     cli_env_timing_mark(timing, ready_started, "env-composed")
     if flags.prep {
+        env.release_leases()
         cli_auto_clean_after_success(verification, theme, roots)
         cli_record_env_entry_receipt(theme, project_dir, roots, fingerprints.definition, secret_identity ?? "", stats) ?? theme.detail("couldn't record env entry: {err.message()}")
         return EXIT_OK
     }
     entry: cli_find_project_entry(project_dir)
-    cli_run_lifecycle_hooks(verification, cache, theme, parsed, roots, project_dir, entry, env, plan.environment.lifecycle.on_enter, "on_enter") ?? return cli_exit_for(theme, err)
+    cli_run_lifecycle_hooks(verification, cache, theme, parsed, roots, project_dir, entry, env, plan.environment.lifecycle.on_enter, "on_enter") ?? {
+        env.release_leases()
+        return cli_exit_for(theme, err)
+    }
     cli_env_timing_mark(timing, ready_started, "lifecycle-hooks")
     cli_announce_env_ready(theme, project_dir, roots, warm_reused, time.elapsed(ready_started), fingerprints.definition, secret_identity ?? "", stats) ?? theme.detail("couldn't record env entry: {err.message()}")
     cli_env_timing_mark(timing, ready_started, "announced")
@@ -208,6 +212,7 @@ cli_cmd_env_project: fn(verification: StoreVerification, cache: ^WorkspaceDeclar
         command.len() > 0 -> env.run_command(command)
         else -> env.enter(theme, ShellKind.detect())
     }
+    env.release_leases()
     if code == 0 {
         cli_auto_clean_after_success(verification, theme, roots)
         // A warm entry reused its exact receipt; its stats realized nothing,
@@ -468,7 +473,9 @@ cli_cmd_dev: fn(verification: StoreVerification, theme: Theme, parsed: CLIParsed
     if parsed.command == .Val(words) {
         loop word in words -> command.push(word.copy())
     }
-    env.run_command(command)
+    code: env.run_command(command)
+    env.release_leases()
+    code
 }
 
 // `jet env fetch-toolchain`: put this jet's C toolchain pack in the Hangar
@@ -603,10 +610,12 @@ cli_enter_foreign_flake: fn(verification: StoreVerification, theme: Theme, proje
     theme.status("entering native projection of foreign shell: {theme.bold(flake_path)}")
     ^env: cli_compose_env(verification, theme, pkg_resolve_roots(), parsed.flags, plan) ?? return cli_exit_for(theme, err)
     command: parsed.command ?? [String]{}
-    if {
+    code: if {
         command.len() > 0 && parsed.flags.pure -> env.run_clean_command(command)
         command.len() > 0 -> env.run_command(command)
         parsed.flags.pure -> env.enter_clean(theme, ShellKind.detect())
         else -> env.enter(theme, ShellKind.detect())
     }
+    env.release_leases()
+    code
 }

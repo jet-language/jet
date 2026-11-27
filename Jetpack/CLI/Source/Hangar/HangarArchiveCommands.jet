@@ -56,22 +56,16 @@ cli_hangar_archive: fn(verification: StoreVerification, theme: Theme, parsed: CL
             if !(cli_hangar_confirm_apply(theme, parsed, action.label()) ?? return cli_status_encoding_error(err)) {
                 return EXIT_OK
             }
-            if parsed.flags.archive_unsigned {
-                bytes: store_export_unsigned_archive(verification, roots, entry, !parsed.flags.archive_no_deps) ?? return cli_hangar_archive_error(theme, parsed, action, err)
-                store_write_archive_file(destination, bytes) ?? return cli_hangar_archive_error(theme, parsed, action, err)
-                return cli_hangar_archive_done(theme, parsed, action, HangarArchiveReport{objects: 1, bytes: bytes.len(), signed: false, root: entry})
-            }
-            exported: store_export_archive(verification, roots, entry, !parsed.flags.archive_no_deps, key) ?? return cli_hangar_archive_error(theme, parsed, action, err)
-            store_write_archive_file(destination, exported.bytes) ?? return cli_hangar_archive_error(theme, parsed, action, err)
-            cli_hangar_archive_done(theme, parsed, action, exported.report)
+            report: store_export_archive_to_file(verification, roots, entry, !parsed.flags.archive_no_deps, destination, key, parsed.flags.archive_unsigned) ?? return cli_hangar_archive_error(theme, parsed, action, err)
+            cli_hangar_archive_done(theme, parsed, action, report)
         }
         .Import -> {
             source: target ?? return cli_hangar_archive_usage(theme, parsed, "`hangar import` needs an archive path", "jetpack hangar import <archive.hangar> --yes")
-            bytes: store_read_archive_file(source) ?? return cli_hangar_archive_error(theme, parsed, action, err)
+            store_check_archive_input_file(source) ?? return cli_hangar_archive_error(theme, parsed, action, err)
             if !(cli_hangar_confirm_apply(theme, parsed, action.label()) ?? return cli_status_encoding_error(err)) {
                 return EXIT_OK
             }
-            report: store_import_archive(verification, roots, bytes, key, parsed.flags.archive_allow_unsigned) ?? return cli_hangar_archive_error(theme, parsed, action, err)
+            report: store_import_archive_file(verification, roots, source, key, parsed.flags.archive_allow_unsigned) ?? return cli_hangar_archive_error(theme, parsed, action, err)
             cli_hangar_archive_done(theme, parsed, action, report)
         }
         .Dump -> {

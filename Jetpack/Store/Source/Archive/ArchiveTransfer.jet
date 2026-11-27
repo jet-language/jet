@@ -435,6 +435,12 @@ store_archive_build_unlocked: fn(verification: StoreVerification, roots: HangarR
     root_digest: entry.envelope.output_hash
     ^digests: if include_closure -> graph.closure(root_digest) else -> [String]{root_digest}
     if digests.len() == 0 -> digests.push(root_digest.copy())
+    loop output in entry.named_outputs {
+        digests.push(output.value.copy())
+        if include_closure {
+            loop dep in graph.closure(output.value) -> digests.push(dep)
+        }
+    }
     digests = store_archive_sorted_unique(digests)
 
     ^selected: [String:StoreEntry]{}

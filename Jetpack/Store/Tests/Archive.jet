@@ -259,3 +259,167 @@ store_archive_test_cleanup: fn(root: String) Never! {
     archive: HangarArchive{root_id: out_digest, objects: objects, nix_manifest: Val(manifest), signature: None}
     store_nix_cas_validate_bundle(archive, None) ?? panic("validate bundle without self-reference")
 }
+
+#Test("Store/closure_export_import_offline") {
+    // 1. Streaming HMAC-SHA256 matches TrustKey.sign bit-for-bit across short and >64-byte keys.
+    short_key: TrustKey.from_secret(store_archive_test_bytes(11, 32)) ?? panic("short trust key")
+    ^short_hmac: StreamingHMACSHA256.new(short_key.secret)
+    short_hmac.update("part-one-".bytes())
+    short_hmac.update("part-two-streaming".bytes())
+    assert_eq(short_hmac.finalize_hex(), short_key.sign("part-one-part-two-streaming".bytes()).sig_hex)
+
+    long_key: TrustKey.from_secret(store_archive_test_bytes(19, 80)) ?? panic("long trust key")
+    ^long_hmac: StreamingHMACSHA256.new(long_key.secret)
+    long_hmac.update("long-key-".bytes())
+    long_hmac.update("multi-chunk".bytes())
+    assert_eq(long_hmac.finalize_hex(), long_key.sign("long-key-multi-chunk".bytes()).sig_hex)
+
+    // 2. Build a multi-package closure with a shared dependency and real executables.
+    root: store_archive_test_root("closure-offline")
+    src_roots: HangarRoots.at(files.join(root, "src-hangar"))
+    dest_roots: HangarRoots.at(files.join(root, "dest-hangar"))
+    ^verification: StoreVerification.new()
+
+    shared_src: files.join(root, "stage-shared")
+    files.create_dir_all(files.join(shared_src, "bin")) ?? panic("shared bin")
+    files.create_dir_all(files.join(shared_src, "lib")) ?? panic("shared lib")
+    files.write(files.join(shared_src, "lib/shared.dat"), "shared-runtime-payload\n") ?? panic("shared dat")
+    shared_bin: files.join(shared_src, "bin/runtime-check")
+    files.write(shared_bin, "#!/bin/sh\nprintf 'runtime-replayed\\n'\n") ?? panic("shared bin write")
+    if sys.is_unix() -> files.chmod(shared_bin, 0o755) ?? panic("chmod shared bin")
+    shared_obj: store_ingest_tree(
+        verification,
+        src_roots,
+        IngestRequest{
+            name: "shared-runtime",
+            version: "1.0.0",
+            reference: "shared-runtime@offline",
+            cache_identity: store_test_identity(),
+            references: [String]{},
+            outputs: [String:String]{"out": shared_src},
+            signature: "",
+            provenance: "offline-closure-test",
+            platform_artifact_kind: "",
+        },
+    ) ?? panic("ingest shared-runtime")
+    shared_digest: shared_obj.entry.envelope.output_hash
+
+    dup_payload: store_archive_test_bytes(42, 4096)
+    tool_a_src: files.join(root, "stage-tool-a")
+    files.create_dir_all(files.join(tool_a_src, "bin")) ?? panic("tool-a bin")
+    files.create_dir_all(files.join(tool_a_src, "share")) ?? panic("tool-a share")
+    files.write_bytes(files.join(tool_a_src, "share/dup.bin"), dup_payload) ?? panic("tool-a dup")
+    tool_a_bin: files.join(tool_a_src, "bin/tool-a")
+    files.write(tool_a_bin, "#!/bin/sh\nprintf 'tool-a-replayed\\n'\n") ?? panic("tool-a bin write")
+    if sys.is_unix() -> files.chmod(tool_a_bin, 0o755) ?? panic("chmod tool-a bin")
+    tool_a_obj: store_ingest_tree(
+        verification,
+        src_roots,
+        IngestRequest{
+            name: "tool-a",
+            version: "1.0.0",
+            reference: "tool-a@offline",
+            cache_identity: store_test_identity(),
+            references: [String]{shared_digest},
+            outputs: [String:String]{"out": tool_a_src},
+            signature: "",
+            provenance: "offline-closure-test",
+            platform_artifact_kind: "",
+        },
+    ) ?? panic("ingest tool-a")
+    tool_a_digest: tool_a_obj.entry.envelope.output_hash
+
+    tool_b_src: files.join(root, "stage-tool-b")
+    files.create_dir_all(files.join(tool_b_src, "bin")) ?? panic("tool-b bin")
+    files.create_dir_all(files.join(tool_b_src, "share")) ?? panic("tool-b share")
+    files.write_bytes(files.join(tool_b_src, "share/dup.bin"), dup_payload) ?? panic("tool-b dup")
+    tool_b_bin: files.join(tool_b_src, "bin/tool-b")
+    files.write(tool_b_bin, "#!/bin/sh\nprintf 'tool-b-replayed\\n'\n") ?? panic("tool-b bin write")
+    if sys.is_unix() -> files.chmod(tool_b_bin, 0o755) ?? panic("chmod tool-b bin")
+    tool_b_obj: store_ingest_tree(
+        verification,
+        src_roots,
+        IngestRequest{
+            name: "tool-b",
+            version: "1.0.0",
+            reference: "tool-b@offline",
+            cache_identity: store_test_identity(),
+            references: [String]{shared_digest, tool_a_digest},
+            outputs: [String:String]{"out": tool_b_src},
+            signature: "",
+            provenance: "offline-closure-test",
+            platform_artifact_kind: "",
+        },
+    ) ?? panic("ingest tool-b")
+    tool_b_digest: tool_b_obj.entry.envelope.output_hash
+
+    // 3. Stream-export the full closure and verify exact wire parity with in-memory export.
+    key_path: files.join(root, "offline.key")
+    files.write_bytes(key_path, store_archive_test_bytes(23, 32)) ?? panic("write key")
+    archive_path: files.join(root, "closure.hangar")
+    exported_report: store_export_archive_to_file(verification, src_roots, tool_b_obj.entry.id, true, archive_path, Val(key_path), false) ?? panic("stream export")
+    assert_eq(exported_report.objects, 3)
+    assert(exported_report.signed)
+
+    mem_exported: store_export_archive(verification, src_roots, tool_b_obj.entry.id, true, Val(key_path)) ?? panic("memory export")
+    streamed_bytes: files.read_bytes(archive_path) ?? panic("read streamed archive")
+    assert_eq(streamed_bytes, mem_exported.bytes)
+
+    // 4. Tampered archive fails closed before mutating the empty destination Hangar.
+    tampered_path: files.join(root, "tampered.hangar")
+    ^tampered_bytes: streamed_bytes.copy()
+    flip_at: tampered_bytes.len() - 4
+    tampered_bytes[flip_at] = tampered_bytes[flip_at] ~ U8{1}
+    files.write_bytes(tampered_path, tampered_bytes) ?? panic("write tampered archive")
+    assert(store_import_archive_file(verification, dest_roots, tampered_path, Val(key_path), false) == .Err(_))
+    dest_objects_dir: files.join(dest_roots.hangar_dir(), STORE_OBJECTS_DIR)
+    if files.exists(dest_objects_dir) {
+        assert_eq((files.list_dir(dest_objects_dir) ?? panic("list dest objects")).len(), 0)
+    }
+
+    // 5. Stream-import into the empty Hangar and prove shared objects are stored once.
+    imported_report: store_import_archive_file(verification, dest_roots, archive_path, Val(key_path), false) ?? panic("stream import")
+    assert_eq(imported_report.objects, 3)
+    assert(imported_report.signed)
+    assert_eq((files.list_dir(dest_objects_dir) ?? panic("list dest objects after import")).len(), 3)
+    assert(files.is_dir(files.join(dest_objects_dir, shared_digest)))
+    assert(files.is_dir(files.join(dest_objects_dir, tool_a_digest)))
+    assert(files.is_dir(files.join(dest_objects_dir, tool_b_digest)))
+    if sys.is_unix() {
+        dup_a: files.join(files.join(dest_objects_dir, tool_a_digest), "share/dup.bin")
+        dup_b: files.join(files.join(dest_objects_dir, tool_b_digest), "share/dup.bin")
+        assert(files.samefile(dup_a, dup_b) ?? false)
+    }
+    // Re-importing is idempotent and keeps exactly 3 objects.
+    reimported: store_import_archive_file(verification, dest_roots, archive_path, Val(key_path), false) ?? panic("reimport")
+    assert_eq(reimported.objects, 3)
+    assert_eq((files.list_dir(dest_objects_dir) ?? panic("list dest objects after reimport")).len(), 3)
+
+    // 6. Real binaries run after offline replay through verified CacheLeases.
+    if sys.is_unix() {
+        ^dest_ver: StoreVerification.new()
+        ^replayed_tool: (if store_find_verified_by_reference(dest_ver, dest_roots, "tool-b@offline", store_test_expectation(files.join(dest_objects_dir, tool_b_digest))) == {
+            .Ok(found) -> found
+            .Err(error) -> panic("find replayed tool-b: {error.message()}")
+        }) ?? panic("tool-b must verify")
+        ^tool_lease: replayed_tool.lease.move()
+        tool_exec: tool_lease.executable("tool-b") ?? panic("tool-b executable")
+        tool_out: store_test_run_leased(tool_lease, [LeaseText]{tool_exec}, None)
+        assert(tool_out.success)
+        assert_eq(tool_out.output, "tool-b-replayed\n")
+        tool_lease.release()
+
+        ^replayed_rt: (if store_find_verified_by_reference(dest_ver, dest_roots, "shared-runtime@offline", store_test_expectation(files.join(dest_objects_dir, shared_digest))) == {
+            .Ok(found) -> found
+            .Err(error) -> panic("find replayed shared-runtime: {error.message()}")
+        }) ?? panic("shared-runtime must verify")
+        ^rt_lease: replayed_rt.lease.move()
+        rt_exec: rt_lease.executable("runtime-check") ?? panic("runtime-check executable")
+        rt_out: store_test_run_leased(rt_lease, [LeaseText]{rt_exec}, None)
+        assert(rt_out.success)
+        assert_eq(rt_out.output, "runtime-replayed\n")
+        rt_lease.release()
+    }
+
+    store_archive_test_cleanup(root)
+}

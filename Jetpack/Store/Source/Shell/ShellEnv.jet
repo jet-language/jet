@@ -63,6 +63,16 @@ ShellEnv: struct {
     // renders them, for a child its leases were passed to.
     lease_vars: [String:LeaseText]{[String:LeaseText]{}},
 
+    // Release every held cache lease. A lease whose launched descendant still
+    // holds the inherited lock stays intact for recovery; idle leases are
+    // removed immediately.
+    release_leases: fn(^self) Never! {
+        loop {
+            lease: self.cache_leases.pop() ?? break
+            lease.release()
+        }
+    }
+
     // Leased bin dirs, then our bin dirs, then `base_path`, deduped in
     // first-seen order.
     composed_path: fn(self, base_path: String) -[Env]> LeaseText Never! {

@@ -37,6 +37,7 @@ cli_cmd_use: fn(verification: StoreVerification, theme: Theme, parsed: CLIParsed
     composed: cli_compose_env_scoped_with_warm(verification, theme, roots, parsed.flags, plan, RealizeScope.Use, true, warm, false) ?? return cli_exit_for(theme, err)
     ^env: composed.env.move()
     if parsed.flags.prep {
+        env.release_leases()
         cli_auto_clean_after_success(verification, theme, roots)
         return EXIT_OK
     }
@@ -49,6 +50,7 @@ cli_cmd_use: fn(verification: StoreVerification, theme: Theme, parsed: CLIParsed
         command.len() > 0 -> env.run_command(command)
         else -> env.enter(theme, ShellKind.detect())
     }
+    env.release_leases()
     if code == 0 -> cli_auto_clean_after_success(verification, theme, roots)
     code
 }
