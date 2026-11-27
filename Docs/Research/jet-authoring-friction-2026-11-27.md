@@ -11,8 +11,9 @@
 > - **#7046 [P0]:** `B10` Part 2 (Unified unquoted `Type{...}` / `Type{{{...}}}` `DSL` trait: type-owned `parse`, hole spans, LSP Semantic Tokens `highlight`, `jet fmt`, cutover of `SQL`/`HTML`/`Sh`/`Regex`/`Path`/`URL`/`DateTime`/`Grammar`/`Complex`/`Quaternion` + FFI foundation, delete magic `i`/`j`/`k` suffixes)
 > - **#7047 [P0]:** Option 1 (`!` / `!(context)` / `!!` exclusively for Fallible `T E!`, reserving `?` / `?.` / `??` strictly for Optional `T?`, superseding `#7034`'s `?` failure-mark spelling)
 > - **#7048 [P0]:** `A3` (`task {}` return inference), `A4` (chained pattern guards + guard extraction), `A5` (uniform `{}` arms + `L0514` at 2+ distinct variants), `A6` (`E0078` span on `loop`), `A7` (non-moving `_: expr` discard + `.drop` for linear), `A8` (rename loop `next` -> `skip`)
+> - **#7049 [P0]:** `A2` + **Jet Composition Laws** (drop `->` on `if`/`loop`, `[loop ...]` comprehensions, zero postfix markers + stacked `#[A, B]` slots + in-body markers, flow-binding pattern algebra, `T?` finite `break val` loops, 3-class jump boundaries, full surface coverage), `B9` (`Type{...}` in `if`/`loop` headers), `B17` (binary `^` and `Int / Int` hints)
 >
-> **Remaining in this TODO list for owner discussion & decision:** **31 items** (`A2`, `B9`, `B11`, `B13`, `B16–B17`, `C18–C19`, `C22`, `C24–C25`, `D27–D30`, `E31`, `E33`, `E51–E53`, `F34`, `F36`, `F38`, `G39–G40`, `G42–G43`, `H45`, `I46–I47`, `J48–J50`). Item numbers are kept stable as items are removed.
+> **Remaining in this TODO list for owner discussion & decision:** **28 items** (`B11`, `B13`, `B16`, `C18–C19`, `C22`, `C24–C25`, `D27–D30`, `E31`, `E33`, `E51–E53`, `F34`, `F36`, `F38`, `G39–G40`, `G42–G43`, `H45`, `I46–I47`, `J48–J50`). Item numbers are kept stable as items are removed.
 
 ---
 
@@ -20,9 +21,8 @@
 
 1. [The Bottom Line: Would Fixing These Make Jet Near-Perfect?](#1-the-bottom-line-would-fixing-these-make-jet-near-perfect)
 2. [Productive Friction Worth Keeping (What Forces *Good* Code)](#2-productive-friction-worth-keeping-what-forces-good-code)
-3. [Remaining TODO Items to Discuss & Decide (31 Items)](#3-remaining-todo-items-to-discuss--decide-31-items)
-   - [A. Control Flow, Patterns & Matching (`A2`)](#a-control-flow-patterns--matching)
-   - [B. Syntax, Braces, Literals & Strings (`B9`, `B11`, `B13`, `B16–B17`)](#b-syntax-braces-literals--strings)
+3. [Remaining TODO Items to Discuss & Decide (28 Items)](#3-remaining-todo-items-to-discuss--decide-28-items)
+   - [B. Syntax, Braces, Literals & Strings (`B11`, `B13`, `B16`)](#b-syntax-braces-literals--strings)
    - [C. Types, Structs, Enums, Generics & Signatures (`C18–C19`, `C22`, `C24–C25`)](#c-types-structs-enums-generics--signatures)
    - [D. Ownership, Borrowing & Copying (`D27–D30`)](#d-ownership-borrowing--copying)
    - [E. Error Handling & Jet-vs-Go Remaining Items (`E31`, `E33`, `E51–E53`)](#e-error-handling--jet-vs-go-remaining-items)
@@ -75,7 +75,7 @@ All three agents **explicitly asked Jet to KEEP** these guardrails — annoying 
 
 ---
 
-## 3. Remaining TODO Items to Discuss & Decide (31 Items)
+## 3. Remaining TODO Items to Discuss & Decide (28 Items)
 
 Legend:
 - `COUNTERPRODUCTIVE` = actively pushes authors to write *worse* code.
@@ -85,42 +85,23 @@ Legend:
 
 ---
 
-### A. Control Flow, Patterns & Matching
-
-#### A2. Dropping `->` on `if` and `loop` & the Jet Composition Laws — `ADVERSARIAL REVIEW IN PROGRESS`
-- **Owner direction:** Drop `->` on `if` and `loop` completely (always `{ ... }`, keeping `->` strictly for function signatures, match/table arms, computed fields, and state transitions).
-- **Next step:** Review fresh adversarial audit of the Jet Composition Laws before confirming and carding as P0.
-
----
-
 ### B. Syntax, Braces, Literals & Strings
-
-#### B9. Casts and struct literals (`Int{x}`, `Float{0.0}`, `Type.Named{...}`) collide with `if`/`loop` `{` blocks — `COUNTERPRODUCTIVE`
-- **What happens:** Because `Int{x}`, `U8{x}`, `Float{0.0}`, and `Type.Named{name: "Unit"}` all use `{...}`, writing `if Int{bytes[i]} == 126 { ... }` or `if ret_ty != Type.Named{name: "Unit"} { ... }` parses `{` as starting the `if`/`loop` body! Jet has `E0637` (`TypedLiteralInHeader`) for `if a > I32{0}`, **but misses the left-hand side** and emits *"This line computes a value but doesn't do anything with it / found `==`"*.
-- **Proposed fixes / ideas:**
-  - **Best fix:** Disambiguate `TypeName{...}` inside `if`/`loop` headers in the parser when `{...}` is followed by an operator (`==`, `<`, `&&`, `||`, `.`), `->`, or `{`.
-  - **Minimum fix:** Extend `E0637` to fire on *all* positions in `if`/`loop` headers with a 1-click parenthesizing fix-it.
 
 #### B11. Every `"..."` string interpolates `{...}`, turning JSON, tests & `\u{...}` into `{{{{` soup — `ACCIDENTAL FRICTION`
 - **What happens:** `"if true {"` fails to compile (*unterminated `{`*). `"\\u{7f}"` fails with *"f isn't a unit in scope"* (because `{7f}` parses as `7` with suffix `f`!). JSON becomes `"{{\"textDocument\":{{\"uri\":{uri}}}}}"`. Backtick raw strings `` `...` `` skip `{...}` interpolation, **but** cannot contain `\n`, `\t`, or `\u{...}`, and you cannot nest backticks inside backtick strings.
 - **Proposed fixes / ideas:**
-  - Support a clean non-interpolating escaped string (e.g. `r"..."` or `#"..."#` / multi-backtick raw delimiters `` ``...`` ``), OR opt-in interpolation syntax (`$"..."`), so JSON, regexes, and code-generating tests never need `{{{{` escaping.
+  - Keep `"..."` interpolating + fix the `\u{...}` escape bug + support multi-backtick raw strings (`` ``...`` `` and multi-line dedented ```` ```...``` ````) alongside `#7046` unquoted DSLs (`JSON{...}`, `HTML{...}`, `Regex{...}`).
 
-#### B13. No ASCII byte literal syntax (`b'\n'`, `b'#'`, `b'['`) — `ACCIDENTAL FRICTION`
+#### B13. No ASCII byte literal syntax (`U8{'\n'}`, `U8{'#'}`, `U8{'\\'}`) — `ACCIDENTAL FRICTION`
 - **What happens:** Parsers, lexers, terminal decoders, and binary encoders are full of unreadable ASCII magic numbers: `U8{10}`, `U8{13}`, `U8{27}`, `U8{92}`, `b2 == 51`, `(Int{bytes[i]}) == 46`.
 - **Proposed fixes / ideas:**
-  - Add byte literals (`b'\n'`, `b'#'`, `b'\\'` of type `U8`) or `U8{'#'}` char-to-byte constant folding.
+  - Compile-time char-to-ASCII-byte folding via `U8{'\n'}`, `U8{'#'}`, `U8{'\\'}` (uses Jet's one `Type{...}` constructor; compile error on non-ASCII chars).
 
-#### B16. No inclusive range `1..=N` or reverse range `(0..<n).rev()` — `ACCIDENTAL FRICTION`
-- **What happens:** `loop i in 1..=20` fails with `Expected a value, found =` (no hint to use `..<`), and iterating backwards requires manual `^i: n - 1; loop i >= 0 { ...; i -= 1 }`.
+#### B16. Reverse range `(0..<n).rev()` & crisp hint for Rust-style `1..=N` — `ACCIDENTAL FRICTION`
+- **What happens:** Jet's `..` is **already inclusive** (`1..5`) and `..<` is exclusive (`0..<5`), so someone writing `1..=20` gets a generic `Expected a value, found =` with no hint; and iterating backwards requires manual `^i: n - 1; loop i >= 0 { ...; i -= 1 }`.
 - **Proposed fixes / ideas:**
-  - Either support `..=` directly or emit a targeted hint (*"Jet ranges are exclusive (`..<`); write `1..<21`"*).
-  - Add `.rev()` and `.step(k)` range helpers (`loop i in (0..<n).rev()`).
-
-#### B17. Unhelpful error when writing `^` for bitwise XOR (actually `~`) or `/` on `Int` (actually `/%`) — `TOOLING QUICK WIN`
-- **What happens:** Writing `bits ^ 0x8000` prints `Expected } to close a typed literal, found ^` with zero hint that bitwise XOR in Jet is `~`. Writing `10 / 3` silently turns into a `Fraction` until a downstream type mismatch appears.
-- **Proposed fixes / ideas:**
-  - Emit a crisp targeted hint whenever `^` appears in binary-operator position (*"Bitwise XOR in Jet is `~`; `^` is the write mark"*) and suggest `/%` when a `Fraction` from `Int / Int` meets an `Int` slot.
+  - Emit a crisp hint on `..=` (*"Jet's `..` is already inclusive (`1..20`); use `..<` for exclusive"*).
+  - Add `.rev()` (and `.step(k)` / descending stride support) on ranges (`loop i in (0..<n).rev()`).
 
 ---
 
