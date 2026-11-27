@@ -13,8 +13,9 @@
 > - **#7048 [P0]:** `A3` (`task {}` return inference), `A4` (chained pattern guards + guard extraction), `A5` (uniform `{}` arms + `L0514` at 2+ distinct variants), `A6` (`E0078` span on `loop`), `A7` (non-moving `_: expr` discard + `.drop` for linear), `A8` (rename loop `next` -> `skip`)
 > - **#7049 [P0]:** `A2` + **Jet Composition Laws** (drop `->` on `if`/`loop`, `[loop ...]` comprehensions, zero postfix markers + stacked `#[A, B]` slots + in-body markers, flow-binding pattern algebra, `T?` finite `break val` loops, 3-class jump boundaries, full surface coverage), `B9` (`Type{...}` in `if`/`loop` headers), `B17` (binary `^` and `Int / Int` hints)
 > - **#7050 [P0]:** `B11` (`\u{H}` lexer fix + multi/triple-backtick raw strings), `B13` (`U8{'\n'}` ASCII byte folding), `B16` (`..=` hint + range `.rev()` / descending stride)
+> - **#7051 [P0]:** `C18-A` (`Type{expr}` ascription), `C19` (named enum patterns `.Click{x, y}`), `C22` (canonical `Float`/`Int` `From` ranking), `C24` (generic receiver closure inference like `sort_by`), `C25` (`Name<T>: struct` & `*` call-site label hints)
 >
-> **Remaining in this TODO list for owner discussion & decision:** **25 items** (`C18–C19`, `C22`, `C24–C25`, `D27–D30`, `E31`, `E33`, `E51–E53`, `F34`, `F36`, `F38`, `G39–G40`, `G42–G43`, `H45`, `I46–I47`, `J48–J50`). Item numbers are kept stable as items are removed.
+> **Remaining in this TODO list for owner discussion & decision:** **20 items** (`D27–D30`, `E31`, `E33`, `E51–E53`, `F34`, `F36`, `F38`, `G39–G40`, `G42–G43`, `H45`, `I46–I47`, `J48–J50`). Item numbers are kept stable as items are removed.
 
 ---
 
@@ -22,8 +23,7 @@
 
 1. [The Bottom Line: Would Fixing These Make Jet Near-Perfect?](#1-the-bottom-line-would-fixing-these-make-jet-near-perfect)
 2. [Productive Friction Worth Keeping (What Forces *Good* Code)](#2-productive-friction-worth-keeping-what-forces-good-code)
-3. [Remaining TODO Items to Discuss & Decide (25 Items)](#3-remaining-todo-items-to-discuss--decide-25-items)
-   - [C. Types, Structs, Enums, Generics & Signatures (`C18–C19`, `C22`, `C24–C25`)](#c-types-structs-enums-generics--signatures)
+3. [Remaining TODO Items to Discuss & Decide (20 Items)](#3-remaining-todo-items-to-discuss--decide-20-items)
    - [D. Ownership, Borrowing & Copying (`D27–D30`)](#d-ownership-borrowing--copying)
    - [E. Error Handling & Jet-vs-Go Remaining Items (`E31`, `E33`, `E51–E53`)](#e-error-handling--jet-vs-go-remaining-items)
    - [F. Collections, Strings, Bytes & Stdlib Ergonomics (`F34`, `F36`, `F38`)](#f-collections-strings-bytes--stdlib-ergonomics)
@@ -75,43 +75,13 @@ All three agents **explicitly asked Jet to KEEP** these guardrails — annoying 
 
 ---
 
-## 3. Remaining TODO Items to Discuss & Decide (25 Items)
+## 3. Remaining TODO Items to Discuss & Decide (20 Items)
 
 Legend:
 - `COUNTERPRODUCTIVE` = actively pushes authors to write *worse* code.
 - `ACCIDENTAL FRICTION` = costs time/readability while preventing zero bugs.
 - `BUG / COMPILER GAP` = genuine defect or incomplete implementation.
 - `TOOLING QUICK WIN` = CLI/test/diagnostic improvement with zero language risk.
-
----
-
-### C. Types, Structs, Enums, Generics & Signatures
-
-#### C18. No general binding type-ascription syntax (`name: Type = expr`) — `COUNTERPRODUCTIVE`
-- **What happens:** `^items: [Int]{}` works for literals/containers, but `job: Task<Int DomainError!> = task { parse(x) }` fails to parse. Whenever an expression needs an expected type (`task { ... }`, `Ok(...)`, `Err(...)`, closures, empty lists), authors must invent **dummy single-use helper functions** purely to supply a return type.
-- **Proposed fixes / ideas:**
-  - Support a clean local typed-binding or expression ascription form aligned with Jet's `:` declaration law.
-
-#### C19. Named-field enum construction vs. positional pattern matching mismatch — `ACCIDENTAL FRICTION`
-- **What happens:** Many enums construct with named fields (`TExprKind.Lambda{value: v}`, `Type.List{element: Type.Int}`) yet match positionally (`.Lambda(v)`), while other variants construct positionally (`Val(x)`). There's no visual rule telling you which one a variant uses until `UnknownArgumentLabel` fires.
-- **Proposed fixes / ideas:**
-  - Support named-field destructuring in patterns (`.Lambda{value: v}`, `.IntLit{..}`) AND document/enforce one clear convention for positional vs. named enum payloads.
-
-#### C22. Single-argument `Type{x}` conversion hits `AmbiguousCall` with two numeric `From` impls — `BUG / COMPILER GAP`
-- **What happens:** Giving `F16` both `impl From(Float)` and `impl From(F32)` made `F16{1.5}` fail with `Jet.AmbiguousCall` because the literal matched both candidates instead of preferring `Float`.
-- **Proposed fixes / ideas:**
-  - Rank canonical default numeric types (`Float` over `F32`, `Int` over `I64`/`I32`) when resolving `From` overloads on untyped literals.
-
-#### C24. Closure parameter types not inferred in generic methods like `sort_by` — `ACCIDENTAL FRICTION`
-- **What happens:** `edits.sort_by(fn(left, right) { ... })` forced repeating a 5-field anonymous record type three times (`LSPFootprint.jet`) because `sort_by` didn't propagate the list's element type into the closure's parameters.
-- **Proposed fixes / ideas:**
-  - Propagate generic method parameter types from the receiver (`List<T>.sort_by`) into closure arguments during type inference.
-
-#### C25. Generic placement (`Endpoint: struct<Q, R>`) & `*` keyword-only call hints — `ACCIDENTAL FRICTION`
-- **What happens:** Writing `Endpoint<Q, R>: struct` instead of `Endpoint: struct<Q, R>` trips muscle memory constantly; calling a function with parameters after `*` requires guessing which arguments must be labeled.
-- **Proposed fixes / ideas:**
-  - Add a tailored parser recovery hint for `Name<T>: struct` / `name<T>: fn(...)` showing the canonical `Name: struct<T>` form.
-  - Include a copy-pasteable call-site fix-it in `E0104` / `E0769` naming the exact required labels.
 
 ---
 
