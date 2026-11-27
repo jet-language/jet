@@ -1,0 +1,8 @@
+Error: Jet.RepeatableKeyUnstable: The `#Repeatable(key: ...)` key on `charge_unstable` reaches `Rand`, so retries would not produce the same key
+  --> Tests/UI/Effects/repeatable_key_unstable_is_e0779.jet:5:37
+    |
+  5 | #Repeatable(key: "order:{order_id}:{make_nonce()}")
+    |                                     ^^^^^^^^^^
+ Why: An idempotency key deduplicates retries only when every try computes the same key from the call's parameters and constants; randomness or clock time changes on each retry
+ Fix: Build `key:` from parameters and constants without calling `Rand` or `Time`
+More: jet-lang.dev/e/Jet.RepeatableKeyUnstable

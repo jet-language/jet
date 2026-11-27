@@ -1028,12 +1028,12 @@ priv status_page: fn(status: Int) -> HTTPResponse Never! { response(status, stat
     response_body(status, payload, fields)
 }
 
-static_file: fn(path: String, content_type: String) -[Net, FS.Read]> HTTPResponse HTTPError! {
+static_file: fn(path: String, content_type: String) -[FS.Read]> HTTPResponse HTTPError! {
     bytes: file_read(path) ?? return Err(.IO{operation: "static file `{path}` could not be opened with held identity"})
     Ok(bytes_response(200, bytes, content_type))
 }
 
-static_file_range: fn(request: HTTPRequest, path: String, content_type: String) -[Net, FS.Read]> HTTPResponse HTTPError! {
+static_file_range: fn(request: HTTPRequest, path: String, content_type: String) -[FS.Read]> HTTPResponse HTTPError! {
     bytes: file_read(path) ?? return Err(.IO{operation: "static file `{path}` could not be opened with held identity"})
     spec: request.header("range") ?? return Ok(bytes_response(200, bytes, content_type))
     span: range_spec(spec, bytes.len()) ?? return Ok(response(416, "range not satisfiable"))

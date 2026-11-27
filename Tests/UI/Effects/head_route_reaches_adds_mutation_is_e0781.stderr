@@ -1,0 +1,8 @@
+Error: Jet.GetRouteReachesMutation: HEAD route `/journal` reaches `Journal.Append` (`Adds`), which modifies kept state
+  --> Tests/UI/Effects/head_route_reaches_adds_mutation_is_e0781.jet:24:29
+    |
+ 24 |     _: mux.head("/journal", fn(_req: HTTPRequest) {
+    |                             ^^^^^^^^^^^^^^^^^^^^^^^
+ Why: HTTP GET and HEAD requests must be safe and read-only so proxies, browsers, and retries can repeat them without modifying kept state
+ Fix: Move this mutation to a `POST`, `PUT`, `PATCH`, or `DELETE` route, or keep the HEAD handler read-only
+More: jet-lang.dev/e/Jet.GetRouteReachesMutation

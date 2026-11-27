@@ -1,0 +1,10 @@
+append_line: fn(path: String) -[FS.Write]> Int Never! { path.len() }
+
+#Repeatable
+bad_sync: fn(path: String) -[FS.Write]> Int Never! {
+    append_line(path)
+}
+
+run: fn() -[FS.Write]> {
+    _: bad_sync("a.txt")
+}

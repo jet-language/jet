@@ -14,7 +14,6 @@ use jet_foundation.[
     EFFECT_VOCABULARY_ROOTS,
     EFFECT_VOCABULARY_ROWS,
     EffectAccess,
-    Expr,
     JET_FRAME_ALLOWANCE,
     MARKER_MEMO,
     MARKER_REPEATABLE,
@@ -382,6 +381,17 @@ SemaEffectLambdaBound: struct {
     span: Span,
 }
 
+// A GET or HEAD HTTP route handler lambda: its solved effects must not reach
+// any non-transport effect that adds or replaces kept state (E0781 at `span`).
+SemaEffectGetRoute: struct {
+    verb: String,
+    path: String,
+    direct: [String],
+    call_edges: [String],
+    maximal: Bool,
+    span: Span,
+}
+
 // A lambda handed the root's `Compiler` value: one that takes it, or the
 // `CompilerEvent` it hears (`taken`, the type's name), as a `meta.events`
 // handler does. Its own row is held to launch no process once every row is
@@ -661,6 +671,8 @@ SemaEffectNodeRare: struct {
     // Transient stack of effect tokens discharged by currently open `#Context`
     // blocks during the body walk.
     active_discharges: [String]{[String]{}},
+    // The GET and HEAD HTTP route handlers registered in this body (E0781).
+    get_routes: [SemaEffectGetRoute]{[SemaEffectGetRoute]{}},
 }
 
 SemaEffectDischargedCall: struct {
@@ -4363,19 +4375,7 @@ sema_effect_record_callback_bound: fn(nodes: ^[SemaEffectNode], node_by_key: Sem
 // appended to `nodes` for the walk and removed again. A lambda handed the
 // root's `Compiler` value (a `meta.events` handler) records the same as a
 // compiler hook (sema_effect_check_compiler_hooks).
-sema_effect_record_lambda_bound: fn(nodes: ^[SemaEffectNode], node_index: Int, facts: SemaEffectCallIndex, caller: SemaEffectCaller, tree: BodyTree, lambda: BodyLambda, ty: Type, span: Span) {
-    row: sema_effect_callback_row(ty)
-    hook: sema_effect_compiler_hook_param(if ty == .Fn(params, _, _, _, _, _) -> params else -> [Type]{})
-    if row == None && hook == None {
-        return
-    }
-    // The adapter the compiler writes around an App handler
-    // (sema_app_handler_adapter) is no function value the program passes:
-    // the function registering the handler already carries the handler's
-    // effects, so the App's internal handler slot holds it to no row.
-    if lambda.source_params.len() == 1 && lambda.source_params[0] == SEMA_APP_ADAPTER_PARAM {
-        return
-    }
+sema_effect_walk_isolated_lambda: fn(nodes: ^[SemaEffectNode], node_index: Int, facts: SemaEffectCallIndex, caller: SemaEffectCaller, tree: BodyTree, lambda: BodyLambda) -> SemaEffectNode {
     // copy: the lambda node starts from its owner's facts and spans; the
     // owner node stays in the graph.
     ^lambda_node: nodes[node_index].copy()
@@ -4389,6 +4389,7 @@ sema_effect_record_lambda_bound: fn(nodes: ^[SemaEffectNode], node_index: Int, f
         rare.callback_bounds = [SemaEffectCallbackBound]{}
         rare.lambda_bounds = [SemaEffectLambdaBound]{}
         rare.hook_lambdas = [SemaEffectHookLambda]{}
+        rare.get_routes = [SemaEffectGetRoute]{}
     }
     nodes.push(lambda_node)
     lambda_index: nodes.len() - 1
@@ -4397,6 +4398,50 @@ sema_effect_record_lambda_bound: fn(nodes: ^[SemaEffectNode], node_index: Int, f
     sema_effect_walk_lambda_children(SemaEffectWalk.LambdaBody{node_index: lambda_index}, nodes, facts, [SemaCallSiteFact]{}, ignored, caller, tree, lambda)
     ^walked: nodes.pop() ?? panic("the lambda's row node left the graph")
     sema_effect_node_settle_edges(walked)
+    walked
+}
+
+sema_effect_body_str_literal: fn(node: BodyNode) -> String? Never! {
+    if node.kind == .StrLit(parts) && parts.len() == 1 {
+        if parts[0] == .Literal(text) -> return Val(text)
+    }
+    None
+}
+
+// Records a GET or HEAD route handler lambda registered via `__http_route*`
+// or `HTTPRouter.__route` so post-solve checking can reject mutations (E0781).
+sema_effect_record_get_route: fn(nodes: ^[SemaEffectNode], node_index: Int, facts: SemaEffectCallIndex, caller: SemaEffectCaller, tree: BodyTree, method_name: String, args: [BodyCallArg]) {
+    if method_name != "__http_route" && method_name != "__http_route_dynamic" && method_name != "__http_route_custom" && method_name != "__route" {
+        return
+    }
+    if args.len() < 3 -> return
+    verb: sema_effect_body_str_literal(body_node(tree, args[0].value)) ?? return
+    if verb != "GET" && verb != "HEAD" -> return
+    handler_node: body_node(tree, args[2].value)
+    if handler_node.kind == .Lambda(lambda) {
+        path: sema_effect_body_str_literal(body_node(tree, args[1].value)) ?? "<dynamic>"
+        ^walked: sema_effect_walk_isolated_lambda(nodes, node_index, facts, caller, tree, lambda)
+        sema_effect_node_rare_open(nodes[node_index])
+        if nodes[node_index].rare.in_place() == .Val(rare) {
+            rare.get_routes.push(SemaEffectGetRoute{verb: verb, path: path, direct: walked.direct.move(), call_edges: walked.call_edges.move(), maximal: walked.maximal, span: handler_node.span})
+        }
+    }
+}
+
+sema_effect_record_lambda_bound: fn(nodes: ^[SemaEffectNode], node_index: Int, facts: SemaEffectCallIndex, caller: SemaEffectCaller, tree: BodyTree, lambda: BodyLambda, ty: Type, span: Span) {
+    row: sema_effect_callback_row(ty)
+    hook: sema_effect_compiler_hook_param(if ty == .Fn(params, _, _, _, _, _) -> params else -> [Type]{})
+    if row == None && hook == None {
+        return
+    }
+    // The adapter the compiler writes around an App handler
+    // (sema_app_handler_adapter) is no function value the program passes:
+    // the function registering the handler already carries the handler's
+    // effects, so the App's internal handler slot holds it to no row.
+    if lambda.source_params.len() == 1 && lambda.source_params[0] == SEMA_APP_ADAPTER_PARAM {
+        return
+    }
+    ^walked: sema_effect_walk_isolated_lambda(nodes, node_index, facts, caller, tree, lambda)
     sema_effect_node_rare_open(nodes[node_index])
     if nodes[node_index].rare.in_place() == .Val(rare) {
         if hook == .Val(taken) {
@@ -5187,7 +5232,8 @@ sema_effect_walk_expr_enter: fn(nodes: ^[SemaEffectNode], node_index: Int, tree:
             }
             sema_effect_record_function_arguments(nodes, facts, node_index, tree, args)
         }
-        .MethodCall(_, _, _, _) -> {
+        .MethodCall(_, method, _, args) -> {
+            sema_effect_record_get_route(nodes, node_index, facts, caller, tree, method.name, args)
             if !sema_effect_in_assume_det(nodes[node_index], node.span) && sema_effect_walk_record_call_node(nodes, node_index, tree, node, facts, module_facts, diagnostics, caller) {
                 return true
             }
@@ -8040,6 +8086,7 @@ sema_effects_check_modules: fn(modules: ^[SemaGraphModuleResult], inputs: [SemaE
     sema_effect_trace_step(trace_sink, "sema.effects.solve", "sema.effects.nodes")
     sema_effect_check_nodes_parallel(nodes, inputs, solved, secret_reach, library_reach, dispatch_reach, threads, diagnostics, pure_nodes, pure_rows)
     sema_effect_check_repeatable_and_retries(nodes, inputs, calls.node_by_key, solved, diagnostics)
+    sema_effect_check_get_routes(nodes, inputs, calls.node_by_key, solved, diagnostics)
     loop node_index in 0..<nodes.len() {
         rare: nodes[node_index].rare ?? next
         if rare.callback_bounds.len() == 0 && rare.lambda_bounds.len() == 0 -> next
@@ -9160,7 +9207,11 @@ sema_effect_walk_enter: fn(walk: SemaEffectWalk, nodes: ^[SemaEffectNode], facts
                     sema_effect_record_value_reads(nodes, facts, node_index, tree, expression, node)
                     sema_effect_record_callback_bound(nodes, facts.node_by_key, node_index, symbol_key(facts.symbols, tree.symbols, symbol), body_type(facts.interner, tree, expression), node.span)
                 }
-                .FnValue(_) | .MethodCall(_, _, _, _) -> {
+                .FnValue(_) -> {
+                    sema_effect_record_value_reads(nodes, facts, node_index, tree, expression, node)
+                }
+                .MethodCall(_, method, _, args) -> {
+                    sema_effect_record_get_route(nodes, node_index, facts, caller, tree, method.name, args)
                     sema_effect_record_value_reads(nodes, facts, node_index, tree, expression, node)
                 }
                 .RequireStop(_, _, _) | .Never(_, _) | .Slice(_, _, _, _, _) -> {
@@ -10517,3 +10568,92 @@ sema_effect_check_repeatable_and_retries: fn(nodes: [SemaEffectNode], inputs: [S
     }
 }
 
+sema_effect_access_label: fn(access: EffectAccess) -> String Never! {
+    if access == {
+        .Reads -> "Reads"
+        .Adds -> "Adds"
+        .Replaces -> "Replaces"
+    }
+}
+
+sema_effect_library_written_name: fn(effect_name: String, library_effects: [SemaLibraryEffectName]) -> String? Never! {
+    loop entry in library_effects {
+        if entry.token == effect_name -> return Val(entry.written)
+    }
+    None
+}
+
+// Checks every GET and HEAD HTTP route handler against EffectAccess once
+// function rows are solved: reaching any non-transport effect that adds or
+// replaces kept state is E0781 (`Jet.GetRouteReachesMutation`).
+sema_effect_check_get_routes: fn(nodes: [SemaEffectNode], inputs: [SemaEffectModuleInput], node_by_key: SemaEffectNodeKeys, solved: [[String]], diagnostics: ^[Diagnostic]) {
+    loop node_index in 0..<nodes.len() {
+        rare: nodes[node_index].rare ?? next
+        if rare.get_routes.len() == 0 -> next
+        library: inputs[nodes[node_index].module_index].library_effects
+        ^route_diagnostics: [Diagnostic]{}
+        loop route in rare.get_routes {
+            ^inferred: [String]{}
+            sema_effect_set_union(inferred, route.direct)
+            ^offender_name: ""
+            ^offender_access: EffectAccess.Reads
+            ^seen_targets: [Int]{}
+            ^queue: [Int]{}
+            loop edge in route.call_edges {
+                if edge == "__jet_panic__" -> next
+                target: sema_effect_node_index(node_by_key, edge) ?? next
+                sema_effect_set_union(inferred, solved[target])
+                if !seen_targets.contains(target) {
+                    seen_targets.push(target)
+                    queue.push(target)
+                }
+            }
+            ^cursor: 0
+            loop cursor < queue.len() {
+                current: queue[cursor]
+                cursor += 1
+                if nodes[current].rare == .Val(target_rare) {
+                    loop row in target_rare.library_rows {
+                        if row.access != EffectAccess.Reads {
+                            if offender_name == "" || row.access == EffectAccess.Replaces {
+                                offender_name = row.written
+                                offender_access = row.access
+                            }
+                        }
+                    }
+                }
+                loop next_target in nodes[current].call_targets {
+                    if next_target >= 0 && !seen_targets.contains(next_target) {
+                        seen_targets.push(next_target)
+                        queue.push(next_target)
+                    }
+                }
+            }
+            loop effect_name in inferred {
+                if effect_name == "Net" -> next
+                access: sema_effect_access(effect_name, library)
+                if access == EffectAccess.Reads -> next
+                if offender_name == "" || (offender_access != EffectAccess.Replaces && access == EffectAccess.Replaces) {
+                    offender_name = sema_effect_library_written_name(effect_name, library) ?? effect_name
+                    offender_access = access
+                    if access == EffectAccess.Replaces -> break
+                }
+            }
+            if offender_name != "" {
+                access_text: sema_effect_access_label(offender_access)
+                route_diagnostics.push(
+                    sema_error(
+                        "E0781",
+                        route.span,
+                        "{route.verb} route `{route.path}` reaches `{offender_name}` (`{access_text}`), which modifies kept state",
+                        "HTTP GET and HEAD requests must be safe and read-only so proxies, browsers, and retries can repeat them without modifying kept state",
+                        "move this mutation to a `POST`, `PUT`, `PATCH`, or `DELETE` route, or keep the {route.verb} handler read-only",
+                    ),
+                )
+            }
+        }
+        if route_diagnostics.len() > 0 {
+            sema_effect_publish_diagnostics(diagnostics, inputs[nodes[node_index].module_index].source_segments, route_diagnostics)
+        }
+    }
+}

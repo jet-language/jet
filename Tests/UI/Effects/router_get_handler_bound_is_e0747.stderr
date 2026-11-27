@@ -1,0 +1,9 @@
+Error: Jet.CallbackEffectBoundExceeded: This callback uses the effect `FS.Read`, which the parameter doesn't allow
+  --> Tests/UI/Effects/router_get_handler_bound_is_e0747.jet:14:22
+    |
+ 14 |     router.get("/r", fn(_req: HTTPRequest) {
+    |                      ^^^^^^^^^^^^^^^^^^^^^^^
+ Why: The parameter is `fn(…) -[Net]>`, so the callback may use only those effects; `FS.Read` is outside that bound
+ Fix: Pass a callback within `-[Net]>`, or add `FS.Read` to the parameter's bound
+ Denial: invocation
+More: jet-lang.dev/e/Jet.CallbackEffectBoundExceeded

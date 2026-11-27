@@ -1,0 +1,17 @@
+use {
+    app
+}
+
+send_push: fn(id: Int) -[Net]> Int Never! { id }
+
+Mailer: struct {
+    #App.Job(retries: 3)
+    notify: fn(self, id: Int) -[Net]> Int Never! {
+        send_push(id)
+    }
+}
+
+run: fn() -[Net]> {
+    mailer: Mailer{}
+    _: mailer.notify(1)
+}

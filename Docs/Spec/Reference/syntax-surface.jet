@@ -540,6 +540,35 @@ with_fs: fn() {
     }
 }
 
+// Effect access classes (`EffectAccess.Reads | .Adds | .Replaces`) and
+// checked repeatability (`#Repeatable`, `#Repeatable("reason")`, `#Repeatable(key: expr)`).
+#FX(FS.Read, FS.Write)
+Journal: enum {
+    Read,
+    Append,
+    Reset,
+
+    impl Effect {
+        access: fn(self) -> EffectAccess {
+            if {
+                self == .Read -> .Reads
+                self == .Append -> .Adds
+                else -> .Replaces
+            }
+        }
+        irreversible: fn(self) -> Bool { self != .Read }
+    }
+}
+
+#Repeatable("overwriting the same snapshot path is idempotent")
+write_snapshot: fn(path: String) -[FS.Write]> { }
+
+#Repeatable
+sync_snapshot: fn(path: String) -[FS.Write]> { write_snapshot(path) }
+
+#Repeatable(key: "order:{order_id}")
+charge_once: fn(order_id: Int) -[Net]> { }
+
 
 // ============================================================================
 // LOW-LEVEL / UNSAFE TIER  (#Unsafe, *T, p.*)

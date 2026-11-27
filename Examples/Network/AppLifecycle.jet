@@ -63,7 +63,7 @@ run: fn() (HTTPError | NetError | TaskFailure)! {
     if !(pool.ready() ?? false) -> panic("the pool is not ready")
     print("1. pool ready before bind")
 
-    app: web.app().get("/order", fn(_req: HTTPRequest) { place_order(pool.copy()) })
+    app: web.app().post("/order", fn(_req: HTTPRequest) { place_order(pool.copy()) })
     listening: app.bind("127.0.0.1:0")
     addr: listening.local_addr()
     print("2. bound, not serving yet: readiness {listening.readiness()}")
@@ -76,7 +76,7 @@ run: fn() (HTTPError | NetError | TaskFailure)! {
     print("3. serving: readiness {listening.readiness()}, probe {probe(addr)}")
 
     client: net.tcp_connect(addr)
-    client.write_bytes("GET /order HTTP/1.1{crlf()}Host: local{crlf()}{crlf()}".bytes())
+    client.write_bytes("POST /order HTTP/1.1{crlf()}Host: local{crlf()}{crlf()}".bytes())
     polls = 0
     loop pool.receipt().leased == 0 && polls < 400 {
         time.sleep(5ms)

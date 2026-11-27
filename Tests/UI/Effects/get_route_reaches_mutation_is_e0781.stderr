@@ -1,0 +1,8 @@
+Error: Jet.GetRouteReachesMutation: GET route `/x` reaches `FS.Write` (`Replaces`), which modifies kept state
+  --> Tests/UI/Effects/get_route_reaches_mutation_is_e0781.jet:14:22
+    |
+ 14 |     _: mux.get("/x", fn(_req: HTTPRequest) {
+    |                      ^^^^^^^^^^^^^^^^^^^^^^^
+ Why: HTTP GET and HEAD requests must be safe and read-only so proxies, browsers, and retries can repeat them without modifying kept state
+ Fix: Move this mutation to a `POST`, `PUT`, `PATCH`, or `DELETE` route, or keep the GET handler read-only
+More: jet-lang.dev/e/Jet.GetRouteReachesMutation

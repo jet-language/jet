@@ -11376,6 +11376,112 @@ ExpertEffectNotHeld: struct {
     }
 }
 
+RepeatableReachesNonRepeatable: struct {
+    fn_name: String,
+    callee: String,
+
+    impl Diagnostic {
+        code: "E0778",
+        safety_class: .Soundness,
+        safety_reason: "Calling a `#Repeatable` function twice must leave kept data the same as calling it once, so reaching an unrepeatable mutation would break retry idempotency.",
+        expert_path: "audit leaf idempotency with `#Repeatable(\"reason\")` or supply a stable `#Repeatable(key: ...)` key",
+        meaning: "A `#Repeatable` function calls an operation that is not repeatable",
+        fix_next: "Provide a stable key, mark the leaf repeatable if safe, or remove `#Repeatable`",
+
+        what: fn(self) -> String {
+            "`{self.fn_name}` is marked `#Repeatable`, but calls `{self.callee}`, which is not repeatable"
+        }
+
+        why: fn(self) -> String {
+            "Calling a `#Repeatable` function twice must leave kept data the same as calling it once, so every non-read call it reaches must be `#Repeatable`, keyed with `#Repeatable(key: ...)`, or deferred with `app.enqueue`"
+        }
+
+        fix: fn(self) -> String {
+            "Mark `{self.callee}` as `#Repeatable` when safe, supply a stable `#Repeatable(key: ...)` key, defer the call with `app.enqueue`, or remove `#Repeatable` from `{self.fn_name}`"
+        }
+    }
+}
+
+RepeatableKeyUnstable: struct {
+    fn_name: String,
+    effect_name: String,
+
+    impl Diagnostic {
+        code: "E0779",
+        safety_class: .Soundness,
+        safety_reason: "An idempotency key that depends on randomness or wall-clock time produces a different key on every retry and fails to deduplicate repeated side effects.",
+        expert_path: "none: derive the key from stable parameters and constants",
+        meaning: "A `#Repeatable(key: ...)` key depends on `Rand` or `Time`",
+        fix_next: "Derive the idempotency key from stable parameters and constants",
+
+        what: fn(self) -> String {
+            "The `#Repeatable(key: ...)` key on `{self.fn_name}` reaches `{self.effect_name}`, so retries would not produce the same key"
+        }
+
+        why: fn(self) -> String {
+            "An idempotency key deduplicates retries only when every try computes the same key from the call's parameters and constants; randomness or clock time changes on each retry"
+        }
+
+        fix: fn(self) -> String {
+            "Build `key:` from parameters and constants without calling `Rand` or `Time`"
+        }
+    }
+}
+
+RetryReachesUnkeyedIrreversible: struct {
+    fn_name: String,
+    callee: String,
+
+    impl Diagnostic {
+        code: "E0780",
+        safety_class: .Soundness,
+        safety_reason: "Retrying a job that reaches an unkeyed irreversible operation will replay external side effects that cannot be rolled back.",
+        expert_path: "mark the job `#App.Job(at_least_once: true)` when duplicate delivery is acceptable, or set `retries: 0`",
+        meaning: "A retried `#App.Job` reaches an irreversible operation that is not repeatable or keyed",
+        fix_next: "Key the irreversible operation with `#Repeatable(key: ...)`, defer it, or opt into `at_least_once: true`",
+
+        what: fn(self) -> String {
+            "Retried job `{self.fn_name}` reaches irreversible `{self.callee}` without `#Repeatable`, an idempotency key, or `at_least_once: true`"
+        }
+
+        why: fn(self) -> String {
+            "When a retried job fails and runs again, an irreversible call that is neither repeatable nor keyed will run more than once and leave duplicate external side effects"
+        }
+
+        fix: fn(self) -> String {
+            "Wrap the call in a `#Repeatable(key: ...)` operation, defer it with `app.enqueue`, set `retries: 0`, or mark the job `#App.Job(at_least_once: true)` if duplicate delivery is acceptable"
+        }
+    }
+}
+
+GetRouteReachesMutation: struct {
+    verb: String,
+    path: String,
+    effect_name: String,
+    access: String,
+
+    impl Diagnostic {
+        code: "E0781",
+        safety_class: .Soundness,
+        safety_reason: "HTTP GET and HEAD handlers are assumed safe and read-only by browsers, proxies, and retries; reaching a state-mutating effect violates that contract.",
+        expert_path: "none: register mutating handlers with `POST`, `PUT`, `PATCH`, or `DELETE`",
+        meaning: "A GET or HEAD HTTP route reaches an effect that adds or replaces kept state",
+        fix_next: "Move the state mutation to a POST, PUT, PATCH, or DELETE route, or keep the GET/HEAD handler read-only",
+
+        what: fn(self) -> String {
+            "{self.verb} route `{self.path}` reaches `{self.effect_name}` (`{self.access}`), which modifies kept state"
+        }
+
+        why: fn(self) -> String {
+            "HTTP GET and HEAD requests must be safe and read-only so proxies, browsers, and retries can repeat them without modifying kept state"
+        }
+
+        fix: fn(self) -> String {
+            "Move this mutation to a `POST`, `PUT`, `PATCH`, or `DELETE` route, or keep the {self.verb} handler read-only"
+        }
+    }
+}
+
 NonSwappableEffectContext: struct {
     effect_name: String,
 

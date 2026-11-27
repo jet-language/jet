@@ -1,0 +1,18 @@
+package: {
+    name: "get_route_reaches_mutation"
+    authority: { allow: [FS.Read, FS.Write, Mem.Alloc, Net] }
+}
+
+use {
+    files: core.files
+    http_server: core.http.server
+    web: core.web
+}
+
+run: fn() {
+    mux: web.app()
+    _: mux.get("/x", fn(_req: HTTPRequest) {
+        files.remove("x") ?? ()
+        Ok(http_server.response(200, "gone"))
+    })
+}

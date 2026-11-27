@@ -1,0 +1,12 @@
+make_nonce: fn() -[Rand]> Int Never! { 7 }
+
+charge_card: fn(order_id: Int) -[Net]> Int Never! { order_id }
+
+#Repeatable(key: "order:{order_id}:{make_nonce()}")
+charge_unstable: fn(order_id: Int) -[Net]> Int Never! {
+    charge_card(order_id)
+}
+
+run: fn() -[Net]> {
+    _: charge_unstable(42)
+}

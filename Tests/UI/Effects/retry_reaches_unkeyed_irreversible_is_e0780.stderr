@@ -1,0 +1,8 @@
+Error: Jet.RetryReachesUnkeyedIrreversible: Retried job `notify` reaches irreversible `send_push` without `#Repeatable`, an idempotency key, or `at_least_once: true`
+  --> Tests/UI/Effects/retry_reaches_unkeyed_irreversible_is_e0780.jet:10:9
+    |
+ 10 |         send_push(id)
+    |         ^^^^^^^^^
+ Why: When a retried job fails and runs again, an irreversible call that is neither repeatable nor keyed will run more than once and leave duplicate external side effects
+ Fix: Wrap the call in a `#Repeatable(key: ...)` operation, defer it with `app.enqueue`, set `retries: 0`, or mark the job `#App.Job(at_least_once: true)` if duplicate delivery is acceptable
+More: jet-lang.dev/e/Jet.RetryReachesUnkeyedIrreversible

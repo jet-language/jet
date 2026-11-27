@@ -1,0 +1,28 @@
+package: {
+    name: "head_route_reaches_adds"
+    authority: { allow: [FS.Read, FS.Write, Mem.Alloc, Net] }
+}
+
+use {
+    http_server: core.http.server
+    web: core.web
+}
+
+#FX(FS.Write)
+Journal: enum {
+    Append,
+
+    impl Effect {
+        access: fn(self) -> EffectAccess { .Adds }
+    }
+}
+
+append_entry: fn() -[Journal.Append]> Int Never! { 1 }
+
+run: fn() {
+    mux: web.app()
+    _: mux.head("/journal", fn(_req: HTTPRequest) {
+        _: append_entry()
+        Ok(http_server.response(200, "ok"))
+    })
+}

@@ -532,6 +532,24 @@ The ambient Prelude trait `Describe` (`public() -> String Never!` and `detail() 
 
 See [`Examples/ErrorsAndEffects/Errors/TwoAudienceErrors.jet`](../../../Examples/ErrorsAndEffects/Errors/TwoAudienceErrors.jet).
 
+### Effect access classes and repeatability (`EffectAccess`, `#Repeatable`)
+
+Every Prelude and library effect declares its access class through `impl Effect { access: fn(self) -> EffectAccess { ... } }` alongside `irreversible: fn(self) -> Bool`:
+
+- `EffectAccess.Reads` — inspects kept state or records observational telemetry (`FS.Read`, `DB.Read`, `IO`, `Log`, `Time`, `Rand`, `Exec.Args`, `GPU`).
+- `EffectAccess.Adds` — creates new kept data without overwriting existing records.
+- `EffectAccess.Replaces` — overwrites, removes, or mutates existing kept state (`FS.Write`, `DB.Write`, `Net`, `Env`, `Exec.Exit`, `FFI.*`, `Browser`).
+
+Repeatability is checked separately through the `#Repeatable` marker (`Compiler/Prelude/Markers.jet`):
+
+- Read-only functions (`EffectAccess.Reads`) are automatically repeatable.
+- Leaf mutating operations audit their idempotency promise with `#Repeatable("reason")`.
+- Checked `#Repeatable` functions are verified against every reached callee (`E0778` if a non-repeatable callee is reached).
+- `#Repeatable(key: expr)` deduplicates retries using a stable idempotency key derived from parameters and constants (`E0779` if the key reaches `Rand` or `Time`).
+- Retried `#App.Job` methods (`retries > 0`) must guard reached irreversible operations with `#Repeatable`, `#Repeatable(key: ...)`, or `app.enqueue`, unless opted into `at_least_once: true` (`E0780`).
+- HTTP `GET` and `HEAD` routes enforce their declared handler effect row (`E0747`) and refuse non-transport `Adds`/`Replaces` mutations (`E0781`); `#Transact` refuses irreversible effects (`E0746`).
+- Compile-time reflection exposes `EffectInfo.access`, `EffectInfo.open_world`, and `FunctionInfo.repeatable`; `jet run --preview` and `jet inspect rights --json` derive MCP `ToolAnnotations` from the same checked effect metadata.
+
 ### Writing Core in Jet
 
 Jet source packages under [`Core/`](../../../Core/) are compiled by the Jet

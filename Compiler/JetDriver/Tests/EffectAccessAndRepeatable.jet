@@ -3,7 +3,11 @@
 // - Retried `#App.Job` unkeyed irreversible refusal (E0780) + `at_least_once: true` / `retries: 0` / keyed pass
 // - Unified `EffectAccess` reader, library-effect access resolution, and reflection (`EffectInfo.access`, `EffectInfo.open_world`, `FunctionInfo.repeatable`)
 use {
-    jet_cli.[jet_cli_driver_request]
+    test_files: core.files
+    jet_cli.[
+        jet_cli_compile_check,
+        jet_cli_driver_request,
+    ]
     jet_driver.[
         JetDriverAuthorizedSourceFile,
         JetDriverAuthorizedSourceRoot,
@@ -16,6 +20,7 @@ use {
         jet_driver_core_text,
     ]
     jet_foundation.[
+        BuildSettingOverride,
         Diagnostic,
         EffectAccess,
         TComptimeValue,
@@ -288,4 +293,175 @@ marked_fn: fn() -[FS.Write]> Int Never! { 1 }
     assert(sema_comptime_reflection_func_repeatable(read_fn, Val([String]{"FS.Read"})))
     assert(!sema_comptime_reflection_func_repeatable(write_fn, Val([String]{"FS.Write"})))
     assert(sema_comptime_reflection_func_repeatable(marked_fn, Val([String]{"FS.Write"})))
+}
+
+effect_access_check_real_file: fn(file: String) -> String {
+    source: test_files.read(file) ?? panic("read {file}: {err}")
+    out: jet_cli_compile_check(file, source, false, false, Val(1), false, false, false, [BuildSettingOverride]{}, "", false, None, false)
+    out.stderr
+}
+
+effect_access_check_real_source: fn(source: String) -> String {
+    dir: test_files.temp_dir("effect-access-real") ?? panic("temp_dir: {err}")
+    file: "{dir.path}/main.jet"
+    test_files.write(file, source) ?? panic("write: {err}")
+    effect_access_check_real_file(file)
+}
+
+#Test("effect_access_get_route_enforces_handler_bound_and_refuses_mutations") {
+    bad_mux_get: effect_access_check_real_source(
+        `package: {
+    name: "bad_mux_get"
+    authority: { allow: [FS.Read, FS.Write, IO, Mem.Alloc, Net] }
+}
+
+use {
+    files: core.files
+    http_server: core.http.server
+    web: core.web
+}
+
+run: fn() {
+    mux: web.app()
+    _: mux.get("/x", fn(_req: HTTPRequest) {
+        files.remove("x") ?? ()
+        Ok(http_server.response(200, "gone"))
+    })
+}
+`,
+    )
+    assert(bad_mux_get.contains("Jet.GetRouteReachesMutation"), "expected E0781 on mux.get reaching FS.Write, got:\n{bad_mux_get}")
+
+    bad_mux_get_bound: effect_access_check_real_source(
+        `package: {
+    name: "bad_mux_get_bound"
+    authority: { allow: [FS.Read, Mem.Alloc, Net, Rand] }
+}
+
+use {
+    http_server: core.http.server
+    random: core.math.random
+    web: core.web
+}
+
+run: fn() {
+    mux: web.app()
+    _: mux.get("/rand", fn(_req: HTTPRequest) {
+        _: random.int(1, 10)
+        Ok(http_server.response(200, "ok"))
+    })
+}
+`,
+    )
+    assert(bad_mux_get_bound.contains("Jet.CallbackEffectBoundExceeded"), "expected E0747 on mux.get reaching Rand outside handler bound, got:\n{bad_mux_get_bound}")
+    assert(!bad_mux_get_bound.contains("Jet.GetRouteReachesMutation"), "Rand is Reads and must not trigger E0781, got:\n{bad_mux_get_bound}")
+
+    bad_custom_adds: effect_access_check_real_source(
+        `package: {
+    name: "bad_custom_adds"
+    authority: { allow: [FS.Read, FS.Write, Mem.Alloc, Net] }
+}
+
+use {
+    http_server: core.http.server
+    web: core.web
+}
+
+#FX(FS.Write)
+Journal: enum {
+    Append,
+
+    impl Effect {
+        access: fn(self) -> EffectAccess { .Adds }
+    }
+}
+
+append_entry: fn() -[Journal.Append]> Int Never! { 1 }
+
+run: fn() {
+    mux: web.app()
+    _: mux.head("/journal", fn(_req: HTTPRequest) {
+        _: append_entry()
+        Ok(http_server.response(200, "ok"))
+    })
+}
+`,
+    )
+    assert(bad_custom_adds.contains("Jet.GetRouteReachesMutation"), "expected E0781 on HEAD route reaching Adds effect, got:\n{bad_custom_adds}")
+
+    bad_router_get: effect_access_check_real_source(
+        `package: {
+    name: "bad_router_get"
+    authority: { allow: [FS.Read, FS.Write, Mem.Alloc, Net] }
+}
+
+use {
+    files: core.files
+    http: core.http
+    http_server: core.http.server
+}
+
+run: fn() {
+    router: http.router()
+    router.get("/r", fn(_req: HTTPRequest) {
+        _: files.read("a.txt") ?? ""
+        Ok(http_server.response(200, "ok"))
+    })
+}
+`,
+    )
+    assert(bad_router_get.contains("Jet.CallbackEffectBoundExceeded"), "expected E0747 on http.router().get reaching FS.Read outside -[Net]>, got:\n{bad_router_get}")
+    assert(!bad_router_get.contains("Jet.GetRouteReachesMutation"), "FS.Read must not trigger E0781, got:\n{bad_router_get}")
+
+    good_routes: effect_access_check_real_source(
+        `package: {
+    name: "good_routes"
+    authority: { allow: [FS.Read, FS.Write, Mem.Alloc, Net] }
+}
+
+use {
+    files: core.files
+    http_server: core.http.server
+    web: core.web
+}
+
+run: fn() {
+    mux: web.app()
+    _: mux.get("/file", fn(req: HTTPRequest) {
+        Ok(http_server.static_file_range(req, "a.txt", "text/plain") ?? http_server.response(500, "err"))
+    })
+    _: mux.post("/delete", fn(_req: HTTPRequest) {
+        files.remove("x") ?? ()
+        Ok(http_server.response(200, "gone"))
+    })
+}
+`,
+    )
+    assert(!good_routes.contains("Error:"), "expected good_routes to pass cleanly, got:\n{good_routes}")
+}
+
+#Test("effect_access_transact_refuses_irreversible_effects_and_accepts_reads") {
+    bad_tx: effect_access_check_real_source(
+        `use { files: core.files }
+
+run: fn() {
+    #Transact(tx) {
+        files.write("x", "done") ?? ()
+    }
+}
+`,
+    )
+    assert(bad_tx.contains("Jet.IrreversibleEffectInTransaction"), "expected E0746 on #Transact reaching FS.Write, got:\n{bad_tx}")
+
+    good_tx: effect_access_check_real_source(
+        `use { files: core.files }
+
+run: fn() {
+    #Transact(tx) {
+        _: files.read("x")
+    }
+}
+`,
+    )
+    assert(!good_tx.contains("Error:"), "expected good_tx to pass cleanly, got:\n{good_tx}")
 }

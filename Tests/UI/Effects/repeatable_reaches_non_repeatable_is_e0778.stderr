@@ -1,0 +1,8 @@
+Error: Jet.RepeatableReachesNonRepeatable: `bad_sync` is marked `#Repeatable`, but calls `append_line`, which is not repeatable
+  --> Tests/UI/Effects/repeatable_reaches_non_repeatable_is_e0778.jet:5:5
+    |
+  5 |     append_line(path)
+    |     ^^^^^^^^^^^
+ Why: Calling a `#Repeatable` function twice must leave kept data the same as calling it once, so every non-read call it reaches must be `#Repeatable`, keyed with `#Repeatable(key: ...)`, or deferred with `app.enqueue`
+ Fix: Mark `append_line` as `#Repeatable` when safe, supply a stable `#Repeatable(key: ...)` key, defer the call with `app.enqueue`, or remove `#Repeatable` from `bad_sync`
+More: jet-lang.dev/e/Jet.RepeatableReachesNonRepeatable

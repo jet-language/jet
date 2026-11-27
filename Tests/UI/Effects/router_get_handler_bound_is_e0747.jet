@@ -1,0 +1,18 @@
+package: {
+    name: "router_get_handler_bound"
+    authority: { allow: [FS.Read, Mem.Alloc, Net] }
+}
+
+use {
+    files: core.files
+    http: core.http
+    http_server: core.http.server
+}
+
+run: fn() {
+    router: http.router()
+    router.get("/r", fn(_req: HTTPRequest) {
+        _: files.read("a.txt") ?? ""
+        Ok(http_server.response(200, "ok"))
+    })
+}
