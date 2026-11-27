@@ -1,0 +1,32 @@
+# A `#Test` whose body hits a failed check (`assert` or `assert_eq`) reports
+# that stop as its own failure on -O0, -O1 and -O2, never a lost edge or a pass.
+fixture: Fixtures/StopIsTestFailureCheck
+env: NO_COLOR=1
+env: JET_STORE_DIR={work}/cache
+step o0: jet test -O0 check_test.jet --color=never
+exit: 1
+stdout: ~ "assert_fails: FAIL" # assert failure recorded
+stdout: ~ "assert_eq_fails: FAIL" # assert_eq failure recorded
+stdout: ~ "0 passed, 2 failed, 0 skipped" # exact failure summary
+stdout: !~ "1 passed" # never a pass
+stdout: !~ "2 passed" # never a pass
+stderr: ~ "Stop: Jet.Panic: `panic: check condition failed`" # assert stop report
+stderr: ~ "Stop: Jet.Panic: `panic: expected: 2, got: 1`" # assert_eq stop report
+step o1: jet test -O1 check_test.jet --color=never
+exit: 1
+stdout: ~ "assert_fails: FAIL" # assert failure recorded
+stdout: ~ "assert_eq_fails: FAIL" # assert_eq failure recorded
+stdout: ~ "0 passed, 2 failed, 0 skipped" # exact failure summary
+stdout: !~ "1 passed" # never a pass
+stdout: !~ "2 passed" # never a pass
+stderr: ~ "Stop: Jet.Panic: `panic: check condition failed`" # assert stop report
+stderr: ~ "Stop: Jet.Panic: `panic: expected: 2, got: 1`" # assert_eq stop report
+step o2: jet test -O2 check_test.jet --color=never
+exit: 1
+stdout: ~ "assert_fails: FAIL" # assert failure recorded
+stdout: ~ "assert_eq_fails: FAIL" # assert_eq failure recorded
+stdout: ~ "0 passed, 2 failed, 0 skipped" # exact failure summary
+stdout: !~ "1 passed" # never a pass
+stdout: !~ "2 passed" # never a pass
+stderr: ~ "Stop: Jet.Panic: `panic: check condition failed`" # assert stop report
+stderr: ~ "Stop: Jet.Panic: `panic: expected: 2, got: 1`" # assert_eq stop report

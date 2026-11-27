@@ -1,0 +1,23 @@
+# A `#Test` whose body stops on a cancelled task reports that stop as its own
+# failure on -O0, -O1 and -O2, never a lost edge or a pass.
+fixture: Fixtures/StopIsTestFailureCancelledTask
+env: NO_COLOR=1
+env: JET_STORE_DIR={work}/cache
+step o0: jet test -O0 cancelled_task_test.jet --color=never
+exit: 1
+stdout: ~ "cancelled_task_stops: FAIL" # cancelled task failure recorded
+stdout: ~ "0 passed, 1 failed, 0 skipped" # exact failure summary
+stdout: !~ "1 passed" # never a pass
+stderr: ~ "Stop: Jet.Panic: `panic: task stopped: Canceled`" # cancelled task stop report
+step o1: jet test -O1 cancelled_task_test.jet --color=never
+exit: 1
+stdout: ~ "cancelled_task_stops: FAIL" # cancelled task failure recorded
+stdout: ~ "0 passed, 1 failed, 0 skipped" # exact failure summary
+stdout: !~ "1 passed" # never a pass
+stderr: ~ "Stop: Jet.Panic: `panic: task stopped: Canceled`" # cancelled task stop report
+step o2: jet test -O2 cancelled_task_test.jet --color=never
+exit: 1
+stdout: ~ "cancelled_task_stops: FAIL" # cancelled task failure recorded
+stdout: ~ "0 passed, 1 failed, 0 skipped" # exact failure summary
+stdout: !~ "1 passed" # never a pass
+stderr: ~ "Stop: Jet.Panic: `panic: task stopped: Canceled`" # cancelled task stop report

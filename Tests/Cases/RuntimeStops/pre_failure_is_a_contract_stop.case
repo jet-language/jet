@@ -1,0 +1,32 @@
+# A failed `#Pre` contract reports as its own contract stop
+# (`Jet.ContractFailed` / E3005), never as `Jet.Panic` (E3001), on -O0, -O1,
+# -O2 and in a built binary.
+fixture: Fixtures/PreFailureIsAContractStop
+env: NO_COLOR=1
+env: JET_STORE_DIR={work}/cache
+step o0: jet run -O0 pre_stop.jet
+exit: 70
+stdout: empty
+stderr: ~ "Stop: Jet.ContractFailed: #Pre contract failed: n must be positive" # contract stop heading
+stderr: ~ "--> pre_stop.jet:5" # caller file and line
+stderr: !~ "Jet.Panic" # never reported as E3001 panic
+step o1: jet run -O1 pre_stop.jet
+exit: 70
+stdout: empty
+stderr: ~ "Stop: Jet.ContractFailed: #Pre contract failed: n must be positive" # contract stop heading
+stderr: ~ "--> pre_stop.jet:5" # caller file and line
+stderr: !~ "Jet.Panic" # never reported as E3001 panic
+step o2: jet run -O2 pre_stop.jet
+exit: 70
+stdout: empty
+stderr: ~ "Stop: Jet.ContractFailed: #Pre contract failed: n must be positive" # contract stop heading
+stderr: ~ "--> pre_stop.jet:5" # caller file and line
+stderr: !~ "Jet.Panic" # never reported as E3001 panic
+step build: jet build pre_stop.jet
+exit: 0
+step aot: {work}/.jet/build/pre_stop
+exit: 70
+stdout: empty
+stderr: ~ "Stop: Jet.ContractFailed: #Pre contract failed: n must be positive" # contract stop heading
+stderr: ~ "--> pre_stop.jet:5" # caller file and line
+stderr: !~ "Jet.Panic" # never reported as E3001 panic

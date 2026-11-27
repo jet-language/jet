@@ -1,0 +1,15 @@
+use core.time
+
+worker: fn() -> Int {
+    time.sleep(time.duration_ms(500))
+    1
+}
+
+#Test("cancelled_task_stops") {
+    task.group g {
+        child: task worker()
+        child.cancel()
+        v: child.join() ?? panic("task stopped: {err}")
+        print(v)
+    }
+}

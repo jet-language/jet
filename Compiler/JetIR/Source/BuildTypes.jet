@@ -5536,8 +5536,9 @@ ir_fixed_in_range: fn(m: ^IRModule, b: ^IRBuilder, value: Int, t_signed: Bool, t
     if t_bits == 64 && t_signed == !source_u64 -> ir_emit(b.f, IROp.Const, fits, 1, -1, -1, b.line) else if t_bits == 64 {
         zero: ir_const_like(m, b, wide, 0)
         ir_emit(b.f, IROp.Ge, fits, wide, zero, -1, b.line)
-    } else if !t_signed {
-        // One unsigned compare: a word below 0 reads at or above 2^63.
+    } else if !t_signed || source_u64 {
+        // One unsigned compare: a word below 0 reads at or above 2^63, and a
+        // U64 source is nonnegative so it fits a narrow signed target iff <= highest.
         u64_row: ir_type_row(m, Type.IntN{signed: false, bits: 64}) ?? 0
         magnitude: ir_copy_word(m, b, wide, u64_row)
         high: ir_const_like(m, b, magnitude, highest)
@@ -5612,6 +5613,23 @@ ir_fixed_fit_word: fn(m: ^IRModule, b: ^IRBuilder, value: Int, t_signed: Bool, t
         assert_eq(tested, 1)
         assert_eq(cold, if t_signed -> 1 else -> 2)
     }
+}
+
+#Test("U64 narrowing to a narrow signed type uses an unsigned upper-bound check") {
+    ^m: ir_module_new()
+    u64_row: ir_scalar_type_row(m, Type.IntN{signed: false, bits: 64})
+    ^f: ir_function_new("narrow_u64_i8", "test:narrow.jet.narrow_u64_i8", "", "narrow.jet", 1)
+    ^b: ir_builder_new(f)
+    x: ir_new_slot(b, u64_row, IRSlotKind.Param, ir_intern_name(m, "x"))
+    _: ir_fixed_in_range(m, b, x, true, 8)
+    ^unsigned_le: 0
+    ^signed_ge: 0
+    loop (at, op) in b.f.op {
+        if op == .Le && !m.types[b.f.slot_type[b.f.a[at]]].signed -> unsigned_le += 1
+        if op == .Ge && m.types[b.f.slot_type[b.f.a[at]]].signed -> signed_ge += 1
+    }
+    assert_eq(unsigned_le, 1)
+    assert_eq(signed_ge, 0)
 }
 
 // `value` as a word of the fixed-width row `row`, emitted where ir_fixed_fits

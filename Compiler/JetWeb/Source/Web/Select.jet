@@ -1152,7 +1152,7 @@ web_word_binary: fn(e: ^WebEmitter, st: ^WebState, m: IRModule, f: IRFunction, t
             web_if(e)
             web_i64(e, if op == .Shl -> 0 else -> 1)
             web_get(e, right)
-            web_i64(e, if unsigned -> 1 else -> 0)
+            web_i64(e, if m.types[f.slot_type[f.b[at]]].signed -> 0 else -> 1)
             web_i64(e, bits)
             web_text(e, st, tables, f.source_file)
             web_i64(e, ir_code_line_source(f.code_line[at]))

@@ -1,0 +1,23 @@
+# A `#Test` whose body panics reports that stop as its own failure on -O0, -O1
+# and -O2, never a lost edge or a pass.
+fixture: Fixtures/StopIsTestFailurePanic
+env: NO_COLOR=1
+env: JET_STORE_DIR={work}/cache
+step o0: jet test -O0 panic_test.jet --color=never
+exit: 1
+stdout: ~ "panic_stops: FAIL" # panic failure recorded
+stdout: ~ "0 passed, 1 failed, 0 skipped" # exact failure summary
+stdout: !~ "1 passed" # never a pass
+stderr: ~ "Stop: Jet.Panic: `panic: body panicked`" # panic stop report
+step o1: jet test -O1 panic_test.jet --color=never
+exit: 1
+stdout: ~ "panic_stops: FAIL" # panic failure recorded
+stdout: ~ "0 passed, 1 failed, 0 skipped" # exact failure summary
+stdout: !~ "1 passed" # never a pass
+stderr: ~ "Stop: Jet.Panic: `panic: body panicked`" # panic stop report
+step o2: jet test -O2 panic_test.jet --color=never
+exit: 1
+stdout: ~ "panic_stops: FAIL" # panic failure recorded
+stdout: ~ "0 passed, 1 failed, 0 skipped" # exact failure summary
+stdout: !~ "1 passed" # never a pass
+stderr: ~ "Stop: Jet.Panic: `panic: body panicked`" # panic stop report

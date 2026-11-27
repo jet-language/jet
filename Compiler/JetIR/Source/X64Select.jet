@@ -29,7 +29,7 @@
 // hot path proved them inline. Eq and Ne against a constant compare words.
 use {
     core.collections.[Rows]
-    jet_foundation.[Type]
+    jet_foundation.[Type, compiler_threads_single]
     jet_backend.[
         X64Alu,
         X64CallArgument,
@@ -2909,7 +2909,7 @@ ir_x64_word_division: fn(e: ^IRX64Emitter, f: IRFunction, tables: IRX64FunctionT
 // Fixed-width Shl, Shr of rax by rcx (cl) into rax. A constant count inside
 // 0..<bits cannot stop, so only another count gets the checked slow path
 // (and links jet_rt_fixed_shift_stop).
-ir_x64_word_shift: fn(e: ^IRX64Emitter, f: IRFunction, al: IRX64Allocation, at: Int, ty: IRX64Shape) Never! {
+ir_x64_word_shift: fn(e: ^IRX64Emitter, m: IRModule, f: IRFunction, al: IRX64Allocation, at: Int, ty: IRX64Shape) Never! {
     op: f.op[at]
     bits: ir_x64_bits(ty)
     ^checked: f.c[at] != IR_OVERFLOW_WRAP
@@ -2922,7 +2922,7 @@ ir_x64_word_shift: fn(e: ^IRX64Emitter, f: IRFunction, al: IRX64Allocation, at: 
         ^cold: ir_x64_cold(IRX64ColdKind.ShiftStop, [Int]{x64_jcc_rel32(e.code, X64Cond.AE)})
         cold.right = f.b[at]
         cold.direction = if op == .Shl -> 0 else -> 1
-        cold.unsigned = if ty.signed -> 0 else -> 1
+        cold.unsigned = if m.types[f.slot_type[f.b[at]]].signed -> 0 else -> 1
         cold.width = bits
         cold.symbol = f.source_file
         cold.line = ir_code_line_source(f.code_line[at])
@@ -3156,7 +3156,7 @@ ir_x64_word_binary: fn(e: ^IRX64Emitter, m: IRModule, f: IRFunction, al: IRX64Al
     if op == {
         .Add | .Sub | .Mul -> ir_x64_word_arithmetic(e, f, tables, at, ty, other, imm)
         .Div | .Rem | .FloorDiv | .Mod -> ir_x64_word_division(e, f, tables, at, ty, ir_x64_type(m, f, f.a[at]).kind == .Int)
-        .Shl | .Shr -> ir_x64_word_shift(e, f, al, at, ty)
+        .Shl | .Shr -> ir_x64_word_shift(e, m, f, al, at, ty)
         .BitAnd | .BitOr | .BitXor -> {
             alu: if op == .BitAnd -> X64Alu.And else if op == .BitOr -> X64Alu.Or else -> X64Alu.Xor
             if imm == .Val(value) -> x64_alu_ri(e.code, alu, X64_RAX, value) else {
@@ -6827,6 +6827,72 @@ ir_x64_compile_body: fn(m: IRModule, f: IRFunction, tables: IRX64FunctionTables,
             assert_eq(found, signed)
         }
     }
+}
+
+#Test("Mixed-sign fixed-width shifts pass the shift count's own signedness to jet_rt_fixed_shift_stop") {
+    ^m: ir_module_new()
+    u8_row: ir_type_row(m, Type.IntN{signed: false, bits: 8}) ?? panic("no U8 row")
+    i8_row: ir_type_row(m, Type.IntN{signed: true, bits: 8}) ?? panic("no I8 row")
+    u64_row: ir_type_row(m, Type.IntN{signed: false, bits: 64}) ?? panic("no U64 row")
+    // Case 1: U8 << I8 -> count is signed (rdx = 0)
+    ^f_signed_count: ir_function_new("shl_u8_i8", "test:shift.jet.shl_u8_i8", "", "shift.jet", 1)
+    v1: ir_slot(f_signed_count, u8_row, IRSlotKind.Param, ir_intern_name(m, "v"), 1)
+    c1: ir_slot(f_signed_count, i8_row, IRSlotKind.Param, ir_intern_name(m, "c"), 1)
+    f_signed_count.result = u8_row
+    r1: ir_slot(f_signed_count, u8_row, IRSlotKind.Temp, -1, 0)
+    ^_: ir_emit(f_signed_count, IROp.Shl, r1, v1, c1, IR_OVERFLOW_TRAP, 2)
+    ^_: ir_emit(f_signed_count, IROp.Return, -1, r1, -1, -1, 2)
+    m.functions.push(f_signed_count)
+    // Case 2: I8 << U64 -> count is unsigned (rdx = 1)
+    ^f_unsigned_count: ir_function_new("shl_i8_u64", "test:shift.jet.shl_i8_u64", "", "shift.jet", 1)
+    v2: ir_slot(f_unsigned_count, i8_row, IRSlotKind.Param, ir_intern_name(m, "v"), 1)
+    c2: ir_slot(f_unsigned_count, u64_row, IRSlotKind.Param, ir_intern_name(m, "c"), 1)
+    f_unsigned_count.result = i8_row
+    r2: ir_slot(f_unsigned_count, i8_row, IRSlotKind.Temp, -1, 0)
+    ^_: ir_emit(f_unsigned_count, IROp.Shl, r2, v2, c2, IR_OVERFLOW_TRAP, 2)
+    ^_: ir_emit(f_unsigned_count, IROp.Return, -1, r2, -1, -1, 2)
+    m.functions.push(f_unsigned_count)
+    assert_eq(ir_lint_module(m, "mixed-sign-shift", compiler_threads_single()).len(), 0)
+    tables: ir_x64_tables(m)
+    code_signed: ir_x64_compile_function(m, tables, 0).function.code
+    code_unsigned: ir_x64_compile_function(m, tables, 1).function.code
+    // In ShiftStop cold stub: mov rdx, count_unsigned; mov rcx, 8 (width).
+    ^want_signed: x64_code()
+    x64_mov_ri(want_signed, X64_RDX, 0)
+    x64_mov_ri(want_signed, X64_RCX, 8)
+    ^want_unsigned: x64_code()
+    x64_mov_ri(want_unsigned, X64_RDX, 1)
+    x64_mov_ri(want_unsigned, X64_RCX, 8)
+    ^has_signed: false
+    loop start in 0..<(code_signed.len() - want_signed.bytes.len() + 1) {
+        ^same: true
+        loop k in 0..<want_signed.bytes.len() {
+            if code_signed[start + k] != want_signed.bytes[k] {
+                same = false
+                break
+            }
+        }
+        if same {
+            has_signed = true
+            break
+        }
+    }
+    ^has_unsigned: false
+    loop start in 0..<(code_unsigned.len() - want_unsigned.bytes.len() + 1) {
+        ^same: true
+        loop k in 0..<want_unsigned.bytes.len() {
+            if code_unsigned[start + k] != want_unsigned.bytes[k] {
+                same = false
+                break
+            }
+        }
+        if same {
+            has_unsigned = true
+            break
+        }
+    }
+    assert(has_signed, "U8 << I8 ShiftStop stub must pass count_unsigned = 0")
+    assert(has_unsigned, "I8 << U64 ShiftStop stub must pass count_unsigned = 1")
 }
 
 // store(data) writes a U8 0 at data and an I64 5 at data + 8: each constant

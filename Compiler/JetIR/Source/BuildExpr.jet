@@ -2199,10 +2199,11 @@ ir_expr_slot_in: fn(m: ^IRModule, p: IRProgram, b: ^IRBuilder, expression: Int, 
             }
             if ir_binary_chain_level(m, p, b, lhs) -> return ir_binary_chain(m, p, b, expression)
             left: ir_expr(m, p, b, lhs)
-            right: ir_expr(m, p, b, rhs)
-            if ir_failed(b) -> return -1
             lhs_ty: ir_ty(m, p, b, lhs)
-            rhs_ty: ir_ty(m, p, b, rhs)
+            rhs_node: ir_shift_count_node(m, p, b, op, lhs_ty, rhs, span)
+            right: ir_expr(m, p, b, rhs_node)
+            if ir_failed(b) -> return -1
+            rhs_ty: ir_ty(m, p, b, rhs_node)
             result: ir_binary(m, p, b, op, overflow, line, lhs_ty, left, right, rhs_ty, span)
             ir_release(m, b, left)
             ir_release(m, b, right)
@@ -2865,10 +2866,11 @@ ir_binary_chain: fn(m: ^IRModule, p: IRProgram, b: ^IRBuilder, expression: Int) 
     loop index >= 0 {
         node: ir_body_node(p, b, levels[index])
         if node.kind == .Binary(op, overflow, line, lhs, rhs) {
-            right: ir_expr(m, p, b, rhs)
-            if ir_failed(b) -> return -1
             lhs_ty: ir_ty(m, p, b, lhs)
-            rhs_ty: ir_ty(m, p, b, rhs)
+            rhs_node: ir_shift_count_node(m, p, b, op, lhs_ty, rhs, node.span)
+            right: ir_expr(m, p, b, rhs_node)
+            if ir_failed(b) -> return -1
+            rhs_ty: ir_ty(m, p, b, rhs_node)
             result: ir_binary(m, p, b, op, overflow, line, lhs_ty, left, right, rhs_ty, node.span)
             if b.assert_captures.len() > 0 && result >= 0 && index > 0 {
                 ir_assert_capture_record(m, p, b, levels[index], result)
@@ -2880,6 +2882,25 @@ ir_binary_chain: fn(m: ^IRModule, p: IRProgram, b: ^IRBuilder, expression: Int) 
         index -= 1
     }
     left
+}
+
+// A fixed-width shift's right operand may carry a sema-inserted FixedNarrow or
+// CastAs conversion to match the left operand's type (tagged with the shift's
+// own span). Lowering that narrowing before the shift would trap with "Value
+// doesn't fit in destination type" or lose the count's signedness instead of
+// reaching the shift's own out-of-range check. Keep any fixed-width integer
+// count in its original type so the shift checks and reports it accurately.
+ir_shift_count_node: fn(m: ^IRModule, p: IRProgram, b: IRBuilder, op: BinOp, lhs_ty: Type, rhs: Int, span: Span) -> Int Never! {
+    if op != .Shl && op != .Shr -> return rhs
+    if !(ir_untag(lhs_ty) == .IntN(_, _)) -> return rhs
+    node: ir_body_node(p, b, rhs)
+    if node.span != span -> return rhs
+    if node.kind == .NumericMethod(receiver, operation) {
+        if operation == .FixedNarrow(.Stop, _) || operation == .CastAs(_) {
+            if ir_untag(ir_ty(m, p, b, receiver)) == .IntN(_, _) -> return receiver
+        }
+    }
+    rhs
 }
 
 // `*x`: the address of variable `x`'s value. An aggregate variable is its

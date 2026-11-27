@@ -1,0 +1,59 @@
+# A stop raised inside Core names the caller's file and line, never a Core
+# (`<corelib>/...`) location, on -O0, -O1, -O2 and in a built binary. Covers
+# both a Core `.jet` function panic (`core.math.clamp_float`) and a runtime
+# Core conversion stop (`Int{Fraction}`).
+fixture: Fixtures/CoreStopNamesCaller
+env: NO_COLOR=1
+env: JET_STORE_DIR={work}/cache
+step clamp_o0: jet run -O0 core_clamp.jet
+exit: 70
+stdout: empty
+stderr: ~ "Stop: Jet.Panic: `panic: min > max, or either was NaN`" # Core panic message
+stderr: ~ "--> core_clamp.jet:4" # caller file and line
+stderr: !~ "<corelib>/" # never a Core source path
+step clamp_o1: jet run -O1 core_clamp.jet
+exit: 70
+stdout: empty
+stderr: ~ "Stop: Jet.Panic: `panic: min > max, or either was NaN`" # Core panic message
+stderr: ~ "--> core_clamp.jet:4" # caller file and line
+stderr: !~ "<corelib>/" # never a Core source path
+step clamp_o2: jet run -O2 core_clamp.jet
+exit: 70
+stdout: empty
+stderr: ~ "Stop: Jet.Panic: `panic: min > max, or either was NaN`" # Core panic message
+stderr: ~ "--> core_clamp.jet:4" # caller file and line
+stderr: !~ "<corelib>/" # never a Core source path
+step clamp_build: jet build core_clamp.jet
+exit: 0
+step clamp_aot: {work}/.jet/build/core_clamp
+exit: 70
+stdout: empty
+stderr: ~ "Stop: Jet.Panic: `panic: min > max, or either was NaN`" # Core panic message
+stderr: ~ "--> core_clamp.jet:4" # caller file and line
+stderr: !~ "<corelib>/" # never a Core source path
+step fraction_o0: jet run -O0 fraction_int.jet
+exit: 70
+stdout: empty
+stderr: ~ "Stop: Jet.ArithmeticOrBoundsFailure: `Int{x} needs a whole Fraction" # Core conversion stop message
+stderr: ~ "--> fraction_int.jet:3" # caller file and line
+stderr: !~ "<corelib>/" # never a Core source path
+step fraction_o1: jet run -O1 fraction_int.jet
+exit: 70
+stdout: empty
+stderr: ~ "Stop: Jet.ArithmeticOrBoundsFailure: `Int{x} needs a whole Fraction" # Core conversion stop message
+stderr: ~ "--> fraction_int.jet:3" # caller file and line
+stderr: !~ "<corelib>/" # never a Core source path
+step fraction_o2: jet run -O2 fraction_int.jet
+exit: 70
+stdout: empty
+stderr: ~ "Stop: Jet.ArithmeticOrBoundsFailure: `Int{x} needs a whole Fraction" # Core conversion stop message
+stderr: ~ "--> fraction_int.jet:3" # caller file and line
+stderr: !~ "<corelib>/" # never a Core source path
+step fraction_build: jet build fraction_int.jet
+exit: 0
+step fraction_aot: {work}/.jet/build/fraction_int
+exit: 70
+stdout: empty
+stderr: ~ "Stop: Jet.ArithmeticOrBoundsFailure: `Int{x} needs a whole Fraction" # Core conversion stop message
+stderr: ~ "--> fraction_int.jet:3" # caller file and line
+stderr: !~ "<corelib>/" # never a Core source path
