@@ -235,7 +235,7 @@ jet_cli_context_choices: fn(functions: [FnBody], out: ^[JetCLIChoice]) Never! {
                 named: if call == {
                     .ContextRead(field) -> if field == "scratch" -> "" else -> "`{field}`"
                     .ContextGet(key, _, _) -> jet_cli_context_key_name(key)
-                    .EffectCall(_, _, trait_name, _, _, _) -> "`{symbol_key_leaf(trait_name)}`"
+                    .EffectCall(_, _, trait_name, _, _, _, _) -> "`{symbol_key_leaf(trait_name)}`"
                     .Method(_, _, _) | .CellGuardProject(_, _, _, _, _) | .OptionProbe(_, _) | .TupleIndex(_, _) | .SwitchSubjectValue | .YieldSend(_) | .NumericBounds(_, _) | .ComptimeInput(_, _, _) | .MemoStats(_, _) | .DebugTrace(_) -> ""
                 }
                 if named != "" && !read.contains(named) -> read.push(named)

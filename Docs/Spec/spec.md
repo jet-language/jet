@@ -5105,6 +5105,62 @@ or variables run concurrently without interference. A program that spells
 `context.dir`, `context.env`, `#Context(dir: ...)`, or `#Context(env: ...)`
 loads `core.sys`.
 
+### Effect provider traits (`#Effect`)
+
+A service can declare its operations and its effect name in one trait marked
+`#Effect`:
+
+```jet
+#FX(Time)
+#Effect(access: .Reads, action: "reads the clock", default: SystemClock)
+Clock: trait {
+    now_ms: fn(self) -> Int,
+    monotonic_ns: fn(self) -> Int,
+}
+```
+
+- **Metadata fields**: `#Effect` accepts optional `parent:` (an open effect or
+  package effect), `leaf:` (dotted leaf name under `parent`), `access:`
+  (`.Reads`, `.Adds`, or `.Replaces`), `irreversible: Bool`, `swappable: Bool`
+  (default `true`), `deny_only: Bool`, `expert: Bool`, `action: String`
+  (plain-English phrase for notices and authority prompts), and `default:`
+  (a zero-field provider struct implementing the trait used when no `#Context`
+  override is active).
+- **Ambient dispatch**: calling `Clock.now_ms()` on an `#Effect` trait charges
+  `Clock` to the enclosing function's effect row and dispatches to the
+  innermost `#Context(Clock: handler)` on the current task's context chain,
+  falling back to the trait's `default:` provider when no override is active.
+- **Installation and static discharge**: `#Context(Clock: handler) { ... }`
+  installs any value implementing `Clock` (passing a non-implementing type is
+  **E0762**), restores the enclosing handler on every exit (normal exit,
+  `return`, `?`, or stop), and transforms the block's effect row:
+  - A concrete handler `H` discharges `Clock` and substitutes the concrete
+    effect row of `impl Clock for H` (so a pure `FixedClock` discharges
+    `-[Clock]>` to `-[]>`, while a `TracingClock` whose `now_ms` uses `-[IO]>`
+    substitutes `-[IO]>`).
+  - An opaque trait-object handler preserves the trait's effect ceiling so a
+    denied effect can never be laundered.
+  - Non-swappable structural/deny-only effects (`Unsafe`, `Panic`, `FFI.*`,
+    `Meta.*`, `Mem.Rc`/`Stack`/`Gc`, or any `#Effect(swappable: false)` trait)
+    cannot be installed in `#Context` (**E0782**).
+- **Owned vs borrowed handlers and concurrency safety**:
+  - `self`-only `#Effect` traits (including all `core.effects` service traits)
+    accept owned installs `#Context(Clock: FixedClock{at_ms: 1000})` and are
+    safely inherited by spawned tasks.
+  - Stateful `^self` traits and borrowed installs `#Context(AuditLog: ^buf)`
+    pin the borrowed local for the block (**E0204** on move/alias) and cannot
+    escape into a spawned task or returned closure (**E0783**).
+- **Core service providers (`core.effects`)**: `core.effects` provides
+  `#Effect` traits, host default providers, and pure deterministic test fakes
+  for `Clock` (`SystemClock`, `FixedClock`, `SteppingClock`), `FileSystem`
+  (`HostFS`, `MemoryFS`), `Random` (`SystemRandom`, `SeededRandom`),
+  `Environment` (`HostEnvironment`, `MemoryEnvironment`), `Console`
+  (`HostConsole`, `BufferConsole`), `Logger` (`HostLogger`, `BufferLogger`),
+  `Network` (`HostNetwork`, `StubNetwork`), `Database` (`HostDatabase`,
+  `MemoryDatabase`), and `ProcessRunner` (`HostProcessRunner`,
+  `StubProcessRunner`). See
+  [`Examples/ErrorsAndEffects/Effects/EffectProviderTraits.jet`](../../Examples/ErrorsAndEffects/Effects/EffectProviderTraits.jet).
+
 ### Breadcrumb frames (`#Frame`)
 
 `#Frame(text: String) { ... }` pushes one task-inherited breadcrumb frame onto

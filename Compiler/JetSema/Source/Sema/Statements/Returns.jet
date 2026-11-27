@@ -275,8 +275,8 @@ sema_stmt_check_return_value: fn(value: Expr, return_type: Type?, check: ^SemaBo
     diagnostic_start: check.diagnostics.len()
     checked: sema_stmt_check_return_value_typed(value, return_type, check)
     if checked == .Val(returned) {
-        if check.state.context_borrows.len() > 0 && returned.kind == .Lambda(lambda) {
-            sema_ownership_check_context_borrow_escape(lambda, expr_span(value), check.state, check.diagnostics)
+        if check.state.context_borrows.len() > 0 {
+            sema_ownership_check_returned_context_borrow_escape(returned, expr_span(value), check.state, check.diagnostics)
         }
     } else {
         sema_stmt_value_return_mismatch(value, return_type, diagnostic_start, check)

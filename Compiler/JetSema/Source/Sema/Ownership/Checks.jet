@@ -453,6 +453,17 @@ sema_ownership_check_context_borrow_escape: fn(lambda: TLambda, span: Span, stat
     sema_ownership_scan_lambda_effect_escape(lambda, span, state.context_borrows, reported, diagnostics)
 }
 
+sema_ownership_check_returned_context_borrow_escape: fn(expr: TExpr, span: Span, state: SemaOwnershipState, diagnostics: ^[Diagnostic]) Never! {
+    if state.context_borrows.len() == 0 -> return
+    if expr.kind == .Lambda(lambda) {
+        sema_ownership_check_context_borrow_escape(lambda, span, state, diagnostics)
+        return
+    }
+    tree_each_expr_child(expr, fn(child_expr: TExpr) {
+        sema_ownership_check_returned_context_borrow_escape(child_expr, span, state, diagnostics)
+    })
+}
+
 sema_ownership_scan_lambda_effect_escape: fn(lambda: TLambda, span: Span, borrows: [SemaOwnershipContextBorrow], reported: ^[String:Bool], diagnostics: ^[Diagnostic]) Never! {
     tree_each_lambda_child(lambda, fn(child_expr: TExpr) {
         sema_ownership_scan_expr_effect_escape(child_expr, span, borrows, reported, diagnostics)
@@ -461,7 +472,7 @@ sema_ownership_scan_lambda_effect_escape: fn(lambda: TLambda, span: Span, borrow
 
 sema_ownership_scan_expr_effect_escape: fn(expr: TExpr, span: Span, borrows: [SemaOwnershipContextBorrow], reported: ^[String:Bool], diagnostics: ^[Diagnostic]) Never! {
     if expr.kind == .HostCall(call) {
-        if call == .EffectCall(_, effect_token, _, _, _, _) {
+        if call == .EffectCall(_, effect_token, _, _, _, _, _) {
             loop borrow in borrows {
                 if borrow.effect_token == effect_token && (borrow.borrowed || borrow.has_write_receiver) {
                     if reported.get(borrow.effect_token) == None {

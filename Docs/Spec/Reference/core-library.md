@@ -422,6 +422,7 @@ The built-module inventory is a source-facing registry, not a missing-domain led
 - `core.encoding.eetf`
 - `core.encoding.hex`
 - `core.encoding.ini`
+- `core.effects` — `#Effect` provider traits, host defaults (`default:`), and pure deterministic test fakes for `Clock`, `FileSystem`, `Random`, `Environment`, `Console`, `Logger`, `Network`, `Database`, and `ProcessRunner`, swappable via `#Context(...)` with static effect discharge (see [`Examples/ErrorsAndEffects/Effects/EffectProviderTraits.jet`](../../../Examples/ErrorsAndEffects/Effects/EffectProviderTraits.jet))
 - `core.encoding.json`
 - `core.encoding.jsonl`
 - `core.encoding.toml`

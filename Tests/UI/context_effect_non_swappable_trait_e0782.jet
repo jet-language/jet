@@ -1,0 +1,17 @@
+// A user `#Effect(swappable: false)` trait cannot be installed in `#Context`; E0782.
+#Effect(swappable: false)
+HardwareLock: trait {
+    acquire: fn(self)
+}
+
+StubLock: struct {
+    impl HardwareLock {
+        acquire: fn(self) {}
+    }
+}
+
+run: fn() {
+    #Context(HardwareLock: StubLock{}) {
+        HardwareLock.acquire()
+    }
+}

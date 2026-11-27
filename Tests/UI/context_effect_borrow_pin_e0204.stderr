@@ -1,0 +1,8 @@
+Error: Jet.UseWhileWriteActive: `bag` can't be changed by `.push()` here — the `#Context(Collector: ^bag)` block is borrowing it
+  --> Tests/UI/context_effect_borrow_pin_e0204.jet:20:13
+    |
+ 20 |         bag.items.push(2)
+    |             ^^^^^
+ Why: The `#Context` block holds a live borrow of `bag` until it ends; changing or moving it inside the block would break the handler
+ Fix: Use `bag` after the `#Context` block ends
+More: jet-lang.dev/e/Jet.UseWhileWriteActive

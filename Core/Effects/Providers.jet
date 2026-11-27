@@ -1,0 +1,432 @@
+// Core `#Effect` provider traits, host default providers, and deterministic
+// in-memory test fakes for Jet's core services (`#7030`).
+//
+// Each service is declared once as an `#Effect` trait with `self` receivers
+// (safe to inherit across spawned tasks), a `#FX(...)` machine ceiling, a
+// zero-field host default provider (`default: HostType`) used when no
+// `#Context` override is active, and a pure (`-[]>`) test fake so tests can
+// swap any service via `#Context(Clock: FixedClock{...}, ...)` and discharge
+// its effects statically.
+use {
+    ef_db: core.db
+    ef_files: core.files
+    ef_log: core.log
+    ef_net: core.net
+    ef_process: core.process
+    ef_random: core.crypto.random
+    ef_sys: core.sys
+    ef_time: core.time
+}
+
+// ---------------------------------------------------------------------------
+// Clock (`Time`)
+// ---------------------------------------------------------------------------
+
+#FX(Time)
+#Effect(access: .Reads, action: "reads the clock", default: SystemClock)
+Clock: trait {
+    now_ms: fn(self) -> Int,
+    monotonic_ns: fn(self) -> Int,
+}
+
+// Host wall and monotonic clock backed by `core.time`.
+SystemClock: struct {
+    impl Clock {
+        now_ms: fn(self) -[Time]> Int { ef_time.now().to_unix_ms() }
+
+        monotonic_ns: fn(self) -[Time]> Int { ef_time.instant().start_ns }
+    }
+}
+
+// Pure constant clock for deterministic tests (`-[Clock]> -> -[]>`).
+FixedClock: struct {
+    at_ms: Int,
+    mono_ns: Int{0},
+
+    impl Clock {
+        now_ms: fn(self) -> Int { self.at_ms }
+
+        monotonic_ns: fn(self) -> Int { self.mono_ns }
+    }
+}
+
+// Pure manually-advanced clock backed by `Shared<Int>`.
+SteppingClock: struct {
+    current_ms: Shared<Int>,
+
+    new: fn(start_ms: Int) -> SteppingClock Never! {
+        SteppingClock{current_ms: Shared{start_ms}}
+    }
+
+    advance: fn(self, delta_ms: Int) Never! {
+        ^guard: self.current_ms.guard_edit()
+        guard.value += delta_ms
+    }
+
+    impl Clock {
+        now_ms: fn(self) -> Int {
+            guard: self.current_ms.guard_read()
+            guard.value
+        }
+
+        monotonic_ns: fn(self) -> Int {
+            guard: self.current_ms.guard_read()
+            guard.value * 1000000
+        }
+    }
+}
+
+// ---------------------------------------------------------------------------
+// FileSystem (`FS`)
+// ---------------------------------------------------------------------------
+
+#FX(FS)
+#Effect(access: .Replaces, irreversible: true, action: "reads and writes files", default: HostFS)
+FileSystem: trait {
+    read_text: fn(self, path: String) -> String IOError!,
+    write_text: fn(self, path: String, content: String) IOError!,
+    exists: fn(self, path: String) -> Bool,
+}
+
+// Host filesystem backed by `core.files`.
+HostFS: struct {
+    impl FileSystem {
+        read_text: fn(self, path: String) -[FS.Read]> String IOError! {
+            ef_files.read(path)
+        }
+
+        write_text: fn(self, path: String, content: String) -[FS.Write]> IOError! {
+            ef_files.write(path, content)
+        }
+
+        exists: fn(self, path: String) -[FS]> Bool {
+            ef_files.exists(path)
+        }
+    }
+}
+
+// Pure in-memory filesystem for deterministic tests (`-[FileSystem]> -> -[]>`).
+MemoryFS: struct {
+    entries: Shared<[String:String]>,
+
+    new: fn() -> MemoryFS Never! {
+        MemoryFS{entries: Shared{[String:String]{}}}
+    }
+
+    with_file: fn(self, path: String, content: String) -> MemoryFS Never! {
+        ^guard: self.entries.guard_edit()
+        guard.value[path.copy()] = content.copy()
+        MemoryFS{entries: self.entries.copy()}
+    }
+
+    snapshot: fn(self) -> [String:String] Never! {
+        guard: self.entries.guard_read()
+        guard.value.copy()
+    }
+
+    impl FileSystem {
+        read_text: fn(self, path: String) -> String IOError! {
+            guard: self.entries.guard_read()
+            if guard.value.get(path) == .Val(text) -> return Ok(text.copy())
+            Err(IOError.NotFound(IOContext{operation: .Read, resource: Val(path.copy()), os_code: None, cause: Val("missing from MemoryFS")}))
+        }
+
+        write_text: fn(self, path: String, content: String) IOError! {
+            ^guard: self.entries.guard_edit()
+            guard.value[path.copy()] = content.copy()
+            Ok()
+        }
+
+        exists: fn(self, path: String) -> Bool {
+            guard: self.entries.guard_read()
+            guard.value.has_key(path)
+        }
+    }
+}
+
+// ---------------------------------------------------------------------------
+// Random (`Rand`)
+// ---------------------------------------------------------------------------
+
+#FX(Rand)
+#Effect(access: .Reads, action: "draws random numbers", default: SystemRandom)
+Random: trait {
+    next_int: fn(self, bound: Int) -> Int
+}
+
+// Host entropy provider backed by `core.crypto.random`.
+SystemRandom: struct {
+    impl Random {
+        next_int: fn(self, bound: Int) -[Rand]> Int {
+            if bound <= 1 -> return 0
+            ef_random.randbelow(bound) ?? 0
+        }
+    }
+}
+
+// Pure deterministic linear-congruential generator for tests.
+SeededRandom: struct {
+    state: Shared<Int>,
+
+    new: fn(seed: Int) -> SeededRandom Never! {
+        initial: if seed == 0 -> 1 else -> seed
+        SeededRandom{state: Shared{initial}}
+    }
+
+    impl Random {
+        next_int: fn(self, bound: Int) -> Int {
+            if bound <= 1 -> return 0
+            ^guard: self.state.guard_edit()
+            next_val: (guard.value * 1103515245 + 12345) & 2147483647
+            guard.value = next_val
+            next_val % bound
+        }
+    }
+}
+
+// ---------------------------------------------------------------------------
+// Environment (`Env`)
+// ---------------------------------------------------------------------------
+
+#FX(Env)
+#Effect(access: .Replaces, action: "reads environment variables", default: HostEnvironment)
+Environment: trait {
+    get: fn(self, name: String) -> String?
+}
+
+// Host environment provider backed by `core.sys`.
+HostEnvironment: struct {
+    impl Environment {
+        get: fn(self, name: String) -[Env]> String? {
+            ef_sys.get(name)
+        }
+    }
+}
+
+// Pure in-memory environment map for deterministic tests.
+MemoryEnvironment: struct {
+    vars: [String:String],
+
+    impl Environment {
+        get: fn(self, name: String) -> String? {
+            if self.vars.get(name) == .Val(val) -> Val(val.copy()) else -> None
+        }
+    }
+}
+
+// ---------------------------------------------------------------------------
+// Console (`IO`)
+// ---------------------------------------------------------------------------
+
+#FX(IO)
+#Effect(access: .Reads, action: "prints text or reads input", default: HostConsole)
+Console: trait {
+    write_line: fn(self, line: String)
+}
+
+// Host standard-output console backed by `print`.
+HostConsole: struct {
+    impl Console {
+        write_line: fn(self, line: String) -[IO]> {
+            print(line)
+        }
+    }
+}
+
+// Pure line-capturing console for deterministic tests.
+BufferConsole: struct {
+    lines: Shared<[String]>,
+
+    new: fn() -> BufferConsole Never! {
+        BufferConsole{lines: Shared{[String]{}}}
+    }
+
+    output: fn(self) -> [String] Never! {
+        guard: self.lines.guard_read()
+        guard.value.copy()
+    }
+
+    impl Console {
+        write_line: fn(self, line: String) {
+            ^guard: self.lines.guard_edit()
+            guard.value.push(line.copy())
+        }
+    }
+}
+
+// ---------------------------------------------------------------------------
+// Logger (`Log`)
+// ---------------------------------------------------------------------------
+
+#FX(Log)
+#Effect(parent: Log, access: .Reads, action: "writes logs", default: HostLogger)
+Logger: trait {
+    log: fn(self, level: String, message: String)
+}
+
+// Host structured logger backed by `core.log`.
+HostLogger: struct {
+    impl Logger {
+        log: fn(self, level: String, message: String) -[Log]> {
+            if level == {
+                "debug" -> ef_log.debug(message)
+                "warn" -> ef_log.warn(message)
+                "error" -> ef_log.error(message)
+                else -> ef_log.info(message)
+            }
+        }
+    }
+}
+
+// Pure record-capturing logger for deterministic tests.
+BufferLogger: struct {
+    records: Shared<[String]>,
+
+    new: fn() -> BufferLogger Never! {
+        BufferLogger{records: Shared{[String]{}}}
+    }
+
+    entries: fn(self) -> [String] Never! {
+        guard: self.records.guard_read()
+        guard.value.copy()
+    }
+
+    impl Logger {
+        log: fn(self, level: String, message: String) {
+            ^guard: self.records.guard_edit()
+            guard.value.push("[{level}] {message}")
+        }
+    }
+}
+
+// ---------------------------------------------------------------------------
+// Network (`Net`)
+// ---------------------------------------------------------------------------
+
+#FX(Net, Time.Wait)
+#Effect(access: .Replaces, irreversible: true, action: "uses the network", default: HostNetwork)
+Network: trait {
+    resolve: fn(self, host: String, port: Int) -> [String]
+}
+
+// Host resolver backed by `core.net`.
+HostNetwork: struct {
+    impl Network {
+        resolve: fn(self, host: String, port: Int) -[Net, Time.Wait]> [String] {
+            if ef_net.socket_addrs(host, port) == .Ok(addrs) {
+                return loop addr in addrs -> addr.display()
+            }
+            [String]{}
+        }
+    }
+}
+
+// Pure host-map stub network for deterministic tests.
+StubNetwork: struct {
+    hosts: [String:[String]],
+
+    impl Network {
+        resolve: fn(self, host: String, port: Int) -> [String] {
+            if port < 0 -> return [String]{}
+            if self.hosts.get(host) == .Val(addrs) -> addrs.copy() else -> [String]{}
+        }
+    }
+}
+
+// ---------------------------------------------------------------------------
+// Database (`DB`)
+// ---------------------------------------------------------------------------
+
+#FX(DB)
+#Effect(access: .Replaces, action: "uses a database", default: HostDatabase)
+Database: trait {
+    get_row: fn(self, key: String) -> String?,
+    put_row: fn(self, key: String, value: String) -> Bool,
+}
+
+// Host database provider opening an on-disk or memory store via `core.db`.
+HostDatabase: struct {
+    impl Database {
+        get_row: fn(self, key: String) -[DB]> String? {
+            if key == "" -> return None
+            _: ef_db.open_memory()
+            None
+        }
+
+        put_row: fn(self, key: String, value: String) -[DB]> Bool {
+            if key == "" && value == "" -> return false
+            _: ef_db.open_memory()
+            true
+        }
+    }
+}
+
+// Pure key-value database fake for deterministic tests.
+MemoryDatabase: struct {
+    rows: Shared<[String:String]>,
+
+    new: fn() -> MemoryDatabase Never! {
+        MemoryDatabase{rows: Shared{[String:String]{}}}
+    }
+
+    snapshot: fn(self) -> [String:String] Never! {
+        guard: self.rows.guard_read()
+        guard.value.copy()
+    }
+
+    impl Database {
+        get_row: fn(self, key: String) -> String? {
+            guard: self.rows.guard_read()
+            if guard.value.get(key) == .Val(val) -> Val(val.copy()) else -> None
+        }
+
+        put_row: fn(self, key: String, value: String) -> Bool {
+            ^guard: self.rows.guard_edit()
+            guard.value[key.copy()] = value.copy()
+            true
+        }
+    }
+}
+
+// ---------------------------------------------------------------------------
+// ProcessRunner (`Exec`)
+// ---------------------------------------------------------------------------
+
+#FX(Exec, Time.Wait)
+#Effect(access: .Replaces, irreversible: true, action: "starts other programs", default: HostProcessRunner)
+ProcessRunner: trait {
+    run_status: fn(self, argv: [String]) -> Int IOError!
+}
+
+// Host child-process runner backed by `core.process`.
+HostProcessRunner: struct {
+    impl ProcessRunner {
+        run_status: fn(self, argv: [String]) -[Exec, Time.Wait]> Int IOError! {
+            receipt: ef_process.cmd(argv).run()
+            Ok(receipt.code)
+        }
+    }
+}
+
+// Pure command-recording process runner for deterministic tests.
+StubProcessRunner: struct {
+    exit_code: Int{0},
+    commands: Shared<[String]>,
+
+    new: fn(exit_code: Int{0}) -> StubProcessRunner Never! {
+        StubProcessRunner{exit_code: exit_code, commands: Shared{[String]{}}}
+    }
+
+    ran: fn(self) -> [String] Never! {
+        guard: self.commands.guard_read()
+        guard.value.copy()
+    }
+
+    impl ProcessRunner {
+        run_status: fn(self, argv: [String]) -> Int IOError! {
+            ^guard: self.commands.guard_edit()
+            guard.value.push(argv.join(" "))
+            Ok(self.exit_code)
+        }
+    }
+}

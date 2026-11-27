@@ -880,8 +880,21 @@ ir_trait_call: fn(m: ^IRModule, p: IRProgram, b: ^IRBuilder, receiver: Int, meth
 // to `jet_rt_native_generator_yield` for Prelude `Emit<T>.emit`, or extracts
 // `(payload_key, receiver_address)` for owned `TraitBox` (tag 0 at +40, box at
 // +48) or borrowed local handler (tag 1 at +40, payload_key at +48, local
-// address at +56) and dispatches to the matching implementation.
-ir_effect_call: fn(m: ^IRModule, p: IRProgram, b: ^IRBuilder, effect_key: String, trait_name: String, method: TMethodRef, type_args: [Type], args: [BodyCallArg], ty: Type, span: Span) -> Int Never! {
+// address at +56) and dispatches to the matching implementation. When no
+// `#Context` handler is installed and the `#Effect` trait names a `default:`
+// provider struct, dispatches to a stack-allocated default instance of that
+// provider.
+ir_effect_default_target: fn(targets: [IRTraitTarget], default_provider: String) -> Int Never! {
+    if default_provider == "" -> return -1
+    short: ir_short_name(default_provider)
+    loop (idx, target) in targets {
+        name: ir_type_name(target.concrete)
+        if name == default_provider || ir_short_name(name) == short -> return idx
+    }
+    -1
+}
+
+ir_effect_call: fn(m: ^IRModule, p: IRProgram, b: ^IRBuilder, effect_key: String, trait_name: String, default_provider: String, method: TMethodRef, type_args: [Type], args: [BodyCallArg], ty: Type, span: Span) -> Int Never! {
     is_prelude_emit: effect_key.starts_with("effect:core.prelude.Emit<") && method.name == "emit" && args.len() == 1
     ^actual_effect_key: effect_key
     ^actual_trait_name: trait_name
@@ -912,21 +925,47 @@ ir_effect_call: fn(m: ^IRModule, p: IRProgram, b: ^IRBuilder, effect_key: String
         ir_effect_missing_unreachable(m, b, actual_trait_name)
         return ir_unreachable_value(m, p, b, ty)
     }
+    default_index: ir_effect_default_target(targets, default_provider)
     pointer_row: ir_pointer_row(m)
     word_row: ir_word_row(m)
     key_word: ir_word_const(m, b, ir_context_key_word(actual_effect_key))
     node: ir_runtime(m, b, "jet_ctx_value_find", [Int]{key_word}, pointer_row)
     zero: ir_word_const(m, b, 0)
     missing: ir_bool_op(m, b, IROp.Eq, node, zero)
-    ir_open_if(b.f, missing, b.line)
-    ir_effect_missing_unreachable(m, b, actual_trait_name)
-    ir_end(b.f, b.line)
-    tag: ir_load_word(m, b, node, 40)
     ^result: -1
     if !ir_unit_type(returned) {
         result_row: ir_value_type(m, p, returned) ?? return ir_type_fail(b, span, returned)
         result = ir_temp(m, b, result_row)
     }
+    outer_before: ir_own_states(b, b.bindings.len())
+    ^outer_states: [[IROwnState]]{}
+    ^outer_leaves: [Bool]{}
+    if default_index >= 0 {
+        default_target: targets[default_index]
+        ir_open_if(b.f, missing, b.line)
+        default_row: ir_value_type(m, p, default_target.concrete) ?? return ir_type_fail(b, span, default_target.concrete)
+        default_self: ir_temp(m, b, default_row)
+        ir_emit(b.f, IROp.StackAddress, default_self, m.types[default_row].size, 8, -1, b.line)
+        default_val: ir_call(m, p, b, default_target.key, default_target.args, default_self, [IRWriteBack]{}, args, span)
+        if ir_failed(b) -> return -1
+        if result >= 0 && default_val >= 0 {
+            result_row: b.f.slot_type[result]
+            adapted: ir_adapt(m, p, b, default_val, result_row, span)
+            if ir_failed(b) -> return -1
+            ir_emit(b.f, IROp.Copy, result, adapted, -1, -1, b.line)
+            b.fresh[default_val] = false
+            b.fresh[adapted] = false
+        }
+        outer_states.push(ir_own_states(b, outer_before.len()))
+        outer_leaves.push(false)
+        ir_else(b.f, b.line)
+        ir_set_own_states(b, outer_before)
+    } else {
+        ir_open_if(b.f, missing, b.line)
+        ir_effect_missing_unreachable(m, b, actual_trait_name)
+        ir_end(b.f, b.line)
+    }
+    tag: ir_load_word(m, b, node, 40)
     before: ir_own_states(b, b.bindings.len())
     ^tests: [Int]{}
     ^arm_states: [[IROwnState]]{}
@@ -954,7 +993,12 @@ ir_effect_call: fn(m: ^IRModule, p: IRProgram, b: ^IRBuilder, effect_key: String
         if targets.len() == 0 {
             ir_effect_missing_unreachable(m, b, actual_trait_name)
             ir_close_arms(m, b, tests, arm_states, arm_leaves, true)
-            return -1
+            if default_index >= 0 {
+                outer_states.push(ir_own_states(b, outer_before.len()))
+                outer_leaves.push(false)
+                ir_close_arms(m, b, [Int]{missing}, outer_states, outer_leaves, false)
+            }
+            return result
         }
     }
     borrowed_cond: ir_bool_op(m, b, IROp.Ne, tag, zero)
@@ -1009,6 +1053,11 @@ ir_effect_call: fn(m: ^IRModule, p: IRProgram, b: ^IRBuilder, effect_key: String
     }
     ir_trait_unreachable(m, b)
     ir_close_arms(m, b, tests, arm_states, arm_leaves, true)
+    if default_index >= 0 {
+        outer_states.push(ir_own_states(b, outer_before.len()))
+        outer_leaves.push(false)
+        ir_close_arms(m, b, [Int]{missing}, outer_states, outer_leaves, false)
+    }
     if result >= 0 {
         b.fresh[result] = ir_has_drop(m, b, result)
         if lent -> b.lent[result] = true

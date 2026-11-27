@@ -2463,7 +2463,7 @@ sema_effect_record_context: fn(interner: Interner, nodes: ^[SemaEffectNode], nod
                     sema_effect_add_context_key(rare.context_keys, TEffectContextKey{key: key.copy(), ty: body_type(interner, tree, default), equatable: equatable})
                 }
             }
-            .Method(_, _, _) | .CellGuardProject(_, _, _, _, _) | .OptionProbe(_, _) | .TupleIndex(_, _) | .SwitchSubjectValue | .YieldSend(_) | .NumericBounds(_, _) | .ComptimeInput(_, _, _) | .MemoStats(_, _) | .DebugTrace(_) | .EffectCall(_, _, _, _, _, _) -> {}
+            .Method(_, _, _) | .CellGuardProject(_, _, _, _, _) | .OptionProbe(_, _) | .TupleIndex(_, _) | .SwitchSubjectValue | .YieldSend(_) | .NumericBounds(_, _) | .ComptimeInput(_, _, _) | .MemoStats(_, _) | .DebugTrace(_) | .EffectCall(_, _, _, _, _, _, _) -> {}
         }
         return
     }
@@ -10098,7 +10098,7 @@ sema_effect_walk_host_call_children: fn(walk: SemaEffectWalk, nodes: ^[SemaEffec
         .ContextGet(_, default, _) -> {
             sema_effect_walk_visit(walk, nodes, facts, module_facts, diagnostics, caller, tree, default)
         }
-        .EffectCall(_, effect_token, _, _, _, args) -> {
+        .EffectCall(_, effect_token, _, _, _, _, args) -> {
             loop argument in args {
                 sema_effect_walk_visit(walk, nodes, facts, module_facts, diagnostics, caller, tree, argument.value)
             }

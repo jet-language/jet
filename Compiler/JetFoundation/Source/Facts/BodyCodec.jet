@@ -4492,14 +4492,15 @@ body_codec_put_bodyhostcall: fn(out: ^BodyCodecOut, value: BodyHostCall) Never! 
             body_codec_put_tag(out, 11)
             body_codec_put_int(out, p0)
         }
-        .EffectCall(p0, p1, p2, p3, p4, p5) -> {
+        .EffectCall(p0, p1, p2, p3, p4, p5, p6) -> {
             body_codec_put_tag(out, 12)
             body_codec_put_string(out, p0)
             body_codec_put_string(out, p1)
             body_codec_put_string(out, p2)
-            body_codec_put_tmethodref(out, p3)
-            body_codec_put_list_type(out, p4)
-            body_codec_put_list_bodycallarg(out, p5)
+            body_codec_put_string(out, p3)
+            body_codec_put_tmethodref(out, p4)
+            body_codec_put_list_type(out, p5)
+            body_codec_put_list_bodycallarg(out, p6)
         }
     }
 }
@@ -4569,10 +4570,11 @@ body_codec_get_bodyhostcall: fn(bytes: [U8], input: ^BodyCodecIn) -> BodyHostCal
             f0: body_codec_get_string(bytes, input)
             f1: body_codec_get_string(bytes, input)
             f2: body_codec_get_string(bytes, input)
-            f3: body_codec_get_tmethodref(bytes, input)
-            f4: body_codec_get_list_type(bytes, input)
-            f5: body_codec_get_list_bodycallarg(bytes, input)
-            BodyHostCall.EffectCall{effect_key: f0, effect_token: f1, trait_name: f2, method: f3, type_args: f4, args: f5}
+            f3: body_codec_get_string(bytes, input)
+            f4: body_codec_get_tmethodref(bytes, input)
+            f5: body_codec_get_list_type(bytes, input)
+            f6: body_codec_get_list_bodycallarg(bytes, input)
+            BodyHostCall.EffectCall{effect_key: f0, effect_token: f1, trait_name: f2, default_provider: f3, method: f4, type_args: f5, args: f6}
         }
         else -> BodyHostCall.SwitchSubjectValue
     }

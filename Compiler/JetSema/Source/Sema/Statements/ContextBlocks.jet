@@ -259,7 +259,7 @@ sema_call_effect_trait_method: fn(receiver: Expr, method: String, method_span: S
         call_type_args = [Type]{elem_ty}
     }
     method_ref: TMethodRef{symbol: trait_method.symbol.id, name: method, mangled: false, trait_owner: Val(resolved.trait_symbol.id), operator_identity: None}
-    call_node: sema_tree_node(result_ty, TExprKind.HostCall{call: THostCall.EffectCall{effect_key: resolved.effect_key, effect_token: resolved.effect_token, trait_name: resolved.trait_name, method: method_ref, type_args: call_type_args, args: checked_args}}, span)
+    call_node: sema_tree_node(result_ty, TExprKind.HostCall{call: THostCall.EffectCall{effect_key: resolved.effect_key, effect_token: resolved.effect_token, trait_name: resolved.trait_name, default_provider: resolved.meta.default_provider, method: method_ref, type_args: call_type_args, args: checked_args}}, span)
     SemaDirectSpecialCheck{handled: true, value: sema_expr_expected_owned(call_node, expected, check.environment.*, check.program.*, check.diagnostics)}
 }
 

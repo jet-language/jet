@@ -141,6 +141,7 @@ SemaEffectTraitMeta: struct {
     deny_only: Bool{false},
     expert: Bool{false},
     action: String{""},
+    default_provider: String{""},
     has_write_receiver: Bool{false},
 }
 
@@ -193,6 +194,9 @@ sema_effect_trait_meta: fn(definition: TraitDef) -> SemaEffectTraitMeta? Never! 
                 }
                 "action" -> {
                     if sema_effect_marker_string_expr(arg_expr) == .Val(text) -> meta.action = text
+                }
+                "default" -> {
+                    if sema_effect_marker_path_expr(arg_expr) == .Val(path) -> meta.default_provider = path.name
                 }
                 "access" -> {
                     ^access_text: ""

@@ -34,6 +34,7 @@ Run a lesson from the repository root, for example `jet run Examples/ErrorsAndEf
 - [EffectHigherOrder](Effects/EffectHigherOrder.jet) — Effects flow through higher-order calls.
 - [EffectLevers](Effects/EffectLevers.jet) — Expert effect levers.
 - [EffectProhibition](Effects/EffectProhibition.jet) — effect prohibition -[!E]>.
+- [EffectProviderTraits](Effects/EffectProviderTraits.jet) — `#Effect` provider traits unite service operations and effect rows, letting `#Context` swap implementations, discharge effects to `-[]>`, or substitute handler effects with LIFO restoration.
 - [EffectRowLayers](Effects/EffectRowLayers.jet) — Every layer that bounds effects, in one program.
 - [Effects](Effects/Effects.jet) — Effect system: every function carries an inferred effect set — the ambient powers its body reaches.
 - [EffectTraitBound](Effects/EffectTraitBound.jet) — A trait method may declare an effect upper bound.

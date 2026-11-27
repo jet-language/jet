@@ -30,6 +30,8 @@ EffectVocabularyRow: struct {
     expert: Bool{false},
     // What this effect does to kept data: Reads, Adds, or Replaces.
     access: EffectAccess{EffectAccess.Reads},
+    // Plain-English action phrase for notices and authority prompts.
+    action: String{""},
 }
 
 effect_access_rank: fn(access: EffectAccess) -> Int Never! {
@@ -70,6 +72,15 @@ effect_vocabulary_access: fn(name: String) -> EffectAccess Never! {
         if row.name == name -> return row.access
     }
     EffectAccess.Reads
+}
+
+// The declared plain-English action phrase of built-in effect `name`
+// (root or leaf), or "" when not declared.
+effect_vocabulary_action: fn(name: String) -> String Never! {
+    loop row in EFFECT_VOCABULARY_ROWS {
+        if row.name == name -> return row.action
+    }
+    ""
 }
 
 // Every declared root and leaf, in source order.
@@ -310,6 +321,8 @@ effect_vocabulary_source_scan: fn(source: String, path: String, machine: [Effect
     ^body: String?{None}
     ^expert_body: String?{None}
     ^access_body: String?{None}
+    ^action_body: String?{None}
+    ^root_action_text: String?{None}
     ^parent: String?{None}
     ^impl_seen: false
     ^in_impl: false
@@ -321,6 +334,8 @@ effect_vocabulary_source_scan: fn(source: String, path: String, machine: [Effect
     expert_head: "expert: fn(self) -> Bool {{ "
     access_head: "access: fn(self) -> EffectAccess {{ "
     access_open: "access: fn(self) -> EffectAccess {{"
+    action_head: "action: fn(self) -> String {{ "
+    root_action_head: "root_action: "
     parent_head: "parent: "
     ^offset: base
     loop index in 0..<lines.len() {
@@ -371,6 +386,8 @@ effect_vocabulary_source_scan: fn(source: String, path: String, machine: [Effect
             body = None
             expert_body = None
             access_body = None
+            action_body = None
+            root_action_text = None
             parent = None
             impl_seen = false
             next
@@ -419,8 +436,18 @@ effect_vocabulary_source_scan: fn(source: String, path: String, machine: [Effect
                 access_body = Val(line.removeprefix(access_head).removesuffix(" }}").trim())
                 next
             }
+            if line.starts_with(action_head) && line.ends_with(" }}") && action_body == None {
+                action_body = Val(line.removeprefix(action_head).removesuffix(" }}").trim())
+                next
+            }
+            if line.starts_with(root_action_head) && root_action_text == None {
+                quoted: line.removeprefix(root_action_head).removesuffix(",").trim()
+                parsed: effect_vocabulary_unquote(quoted) ?? build_time_refused("{place}: `root_action` must be a double-quoted string literal")
+                root_action_text = Val(parsed)
+                next
+            }
             if body != None || !line.starts_with(impl_head) || !line.ends_with(" }}") {
-                build_time_refused("{place}: expected `parent: Root.Case`, `irreversible: fn(self) -> Bool {{ … }}`, `expert: fn(self) -> Bool {{ … }}`, or `access: fn(self) -> EffectAccess {{ … }}` in `impl Effect`")
+                build_time_refused("{place}: expected `parent: Root.Case`, `irreversible: fn(self) -> Bool {{ … }}`, `expert: fn(self) -> Bool {{ … }}`, `access: fn(self) -> EffectAccess {{ … }}`, `action: fn(self) -> String {{ … }}`, or `root_action: \"…\"` in `impl Effect`")
             }
             body = Val(line.removeprefix(impl_head).removesuffix(" }}").trim())
             next
@@ -443,34 +470,38 @@ effect_vocabulary_source_scan: fn(source: String, path: String, machine: [Effect
                 parent_index: effect_vocabulary_row_at(rows, parent_name)
                 if parent_index >= 0 -> parent_access = rows[parent_index].access
             }
-            ^case_facts: [{irreversible: Bool, expert: Bool, access: EffectAccess}]{}
+            ^case_facts: [{irreversible: Bool, expert: Bool, access: EffectAccess, action: String}]{}
             ^any: false
             ^root_access: EffectAccess.Reads
             loop member in cases {
                 irreversible: effect_vocabulary_fact(body, cases, Val(member)) ?? build_time_refused("{place}: `{type_name}`'s `irreversible` body is not `true`, `false`, `self == .Case` or an `||` of those")
                 expert: effect_vocabulary_fact(expert_body, cases, Val(member)) ?? build_time_refused("{place}: `{type_name}`'s `expert` body is not `true`, `false`, `self == .Case` or an `||` of those")
                 access: if access_body == None && parent != None -> parent_access else -> (effect_vocabulary_access_fact(access_body, cases, Val(member)) ?? build_time_refused("{place}: `{type_name}`'s `access` body is not `.Reads`, `.Adds`, `.Replaces`, or an `if self == .Case -> …` chain"))
+                action: effect_vocabulary_action_fact(action_body, cases, Val(member)) ?? build_time_refused("{place}: `{type_name}`'s `action` body is not a string literal or `if self == .Case -> \"…\" else -> \"…\"`")
                 if irreversible -> any = true
                 root_access = effect_access_max(root_access, access)
-                case_facts.push({irreversible: irreversible, expert: expert, access: access})
+                case_facts.push({irreversible: irreversible, expert: expert, access: access, action: action})
             }
             ^root: any
             ^root_expert: false
+            fallback_action: if case_facts.len() > 0 -> case_facts[0].action else -> ""
+            ^root_action: root_action_text ?? fallback_action
             if !family {
                 root = effect_vocabulary_fact(body, cases, None) ?? build_time_refused("{place}: `{type_name}`'s `irreversible` body is not `true` or `false`")
                 root_expert = effect_vocabulary_fact(expert_body, cases, None) ?? build_time_refused("{place}: `{type_name}`'s `expert` body is not `true` or `false`")
                 root_access = effect_vocabulary_access_fact(access_body, cases, None) ?? build_time_refused("{place}: `{type_name}`'s `access` body is not `.Reads`, `.Adds`, or `.Replaces`")
+                root_action = root_action_text ?? (effect_vocabulary_action_fact(action_body, cases, None) ?? build_time_refused("{place}: `{type_name}`'s `action` body is not a string literal"))
             }
             // A family under a parent case names its cases below that case.
             prefix: parent ?? type_name
             if parent == None {
                 decls.push(EffectDecl{name: "{type_name}", name_span: type_span, irreversible: root, span: type_span, access: root_access})
-                rows.push(EffectVocabularyRow{name: type_name.copy(), irreversible: root, kernel: kernel.copy(), expert: root_expert, access: root_access})
+                rows.push(EffectVocabularyRow{name: type_name.copy(), irreversible: root, kernel: kernel.copy(), expert: root_expert, access: root_access, action: root_action})
             }
             loop (at, member) in cases {
                 full: "{prefix}.{member}"
                 decls.push(EffectDecl{name: "{full}", name_span: case_spans[at], irreversible: case_facts[at].irreversible, span: case_spans[at], access: case_facts[at].access})
-                rows.push(EffectVocabularyRow{name: full, irreversible: case_facts[at].irreversible, kernel: kernel.copy(), expert: case_facts[at].expert, access: case_facts[at].access})
+                rows.push(EffectVocabularyRow{name: full, irreversible: case_facts[at].irreversible, kernel: kernel.copy(), expert: case_facts[at].expert, access: case_facts[at].access, action: case_facts[at].action})
             }
             type_name = ""
             kernel = [String]{}
@@ -595,6 +626,47 @@ effect_vocabulary_access_fact: fn(body: String?, cases: [String], member: String
         else_text: foundation_byte_text(after_arrow.bytes(), else_at + 9, after_arrow.bytes().len()).trim()
         then_val: effect_access_parse(then_text) ?? return None
         else_val: effect_access_parse(else_text) ?? return None
+        if matched == .Val(found) -> return Val(found)
+        return Val(if cond -> then_val else -> else_val)
+    }
+}
+
+effect_vocabulary_unquote: fn(text: String) -> String? Never! {
+    cleaned: text.trim()
+    bytes: cleaned.bytes()
+    if bytes.len() < 2 || bytes[0] != (U8{34}) || bytes[bytes.len() - 1] != (U8{34}) -> return None
+    Val(foundation_byte_text(bytes, 1, bytes.len() - 1))
+}
+
+// An `action` body's string value for one case (None for a struct), or None
+// when the body is not a quoted string literal or an `if self == .Case -> "…" else -> "…"`
+// chain. No body defaults to `""`.
+effect_vocabulary_action_fact: fn(body: String?, cases: [String], member: String?) -> String? {
+    written: body ?? return Val("")
+    if effect_vocabulary_unquote(written) == .Val(direct) -> return Val(direct)
+    if member == None || !written.starts_with("if ") -> return None
+    ^rest: written.removeprefix("if ")
+    ^matched: String?{None}
+    loop {
+        arrow: rest.find(" -> ")
+        if arrow < 0 -> return None
+        cond_text: foundation_byte_text(rest.bytes(), 0, arrow).trim()
+        cond: effect_vocabulary_fact(Val(cond_text), cases, member) ?? return None
+        after_arrow: foundation_byte_text(rest.bytes(), arrow + 4, rest.bytes().len()).trim()
+        else_if: after_arrow.find(" else if ")
+        else_at: after_arrow.find(" else -> ")
+        if else_if >= 0 && (else_at < 0 || else_if < else_at) {
+            branch_text: foundation_byte_text(after_arrow.bytes(), 0, else_if).trim()
+            branch: effect_vocabulary_unquote(branch_text) ?? return None
+            if matched == None && cond -> matched = Val(branch)
+            rest = foundation_byte_text(after_arrow.bytes(), else_if + 9, after_arrow.bytes().len()).trim()
+            next
+        }
+        if else_at < 0 -> return None
+        then_text: foundation_byte_text(after_arrow.bytes(), 0, else_at).trim()
+        else_text: foundation_byte_text(after_arrow.bytes(), else_at + 9, after_arrow.bytes().len()).trim()
+        then_val: effect_vocabulary_unquote(then_text) ?? return None
+        else_val: effect_vocabulary_unquote(else_text) ?? return None
         if matched == .Val(found) -> return Val(found)
         return Val(if cond -> then_val else -> else_val)
     }

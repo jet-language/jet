@@ -14,6 +14,8 @@ DB: enum {
 
     impl Effect {
         access: fn(self) -> EffectAccess { if self == .Read -> .Reads else -> .Replaces }
+        action: fn(self) -> String { if self == .Read -> "reads a database" else -> "writes a database" }
+        root_action: "uses a database",
     }
 }
 
@@ -21,6 +23,7 @@ DB: enum {
 Log: struct {
     impl Effect {
         access: fn(self) -> EffectAccess { .Reads }
+        action: fn(self) -> String { "writes logs" }
     }
 }
 
@@ -28,5 +31,6 @@ Log: struct {
 Secret: struct {
     impl Effect {
         access: fn(self) -> EffectAccess { .Reads }
+        action: fn(self) -> String { "reads secrets" }
     }
 }

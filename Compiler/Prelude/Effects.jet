@@ -22,6 +22,7 @@ Net: struct {
     impl Effect {
         irreversible: fn(self) -> Bool { true }
         access: fn(self) -> EffectAccess { .Replaces }
+        action: fn(self) -> String { "uses the network" }
     }
 }
 
@@ -32,12 +33,15 @@ FS: enum {
     impl Effect {
         irreversible: fn(self) -> Bool { self == .Write }
         access: fn(self) -> EffectAccess { if self == .Read -> .Reads else -> .Replaces }
+        action: fn(self) -> String { if self == .Read -> "reads files" else -> "writes files" }
+        root_action: "reads and writes files",
     }
 }
 
 IO: struct {
     impl Effect {
         access: fn(self) -> EffectAccess { .Reads }
+        action: fn(self) -> String { "prints text or reads input" }
     }
 }
 
@@ -46,6 +50,8 @@ Time: enum {
 
     impl Effect {
         access: fn(self) -> EffectAccess { .Reads }
+        action: fn(self) -> String { "waits" }
+        root_action: "reads the clock",
     }
 }
 
@@ -54,12 +60,14 @@ Rand: enum {
 
     impl Effect {
         access: fn(self) -> EffectAccess { .Reads }
+        action: fn(self) -> String { "draws random numbers" }
     }
 }
 
 Env: struct {
     impl Effect {
         access: fn(self) -> EffectAccess { .Replaces }
+        action: fn(self) -> String { "reads environment variables" }
     }
 }
 
@@ -70,12 +78,15 @@ Exec: enum {
     impl Effect {
         irreversible: fn(self) -> Bool { self == .Exit }
         access: fn(self) -> EffectAccess { if self == .Exit -> .Replaces else -> .Reads }
+        action: fn(self) -> String { if self == .Exit -> "ends its own process" else -> "reads its arguments" }
+        root_action: "starts other programs",
     }
 }
 
 GPU: struct {
     impl Effect {
         access: fn(self) -> EffectAccess { .Reads }
+        action: fn(self) -> String { "uses the GPU" }
     }
 }
 
@@ -112,18 +123,21 @@ FFI: enum {
     impl Effect {
         irreversible: fn(self) -> Bool { true }
         access: fn(self) -> EffectAccess { .Replaces }
+        action: fn(self) -> String { "calls foreign code" }
     }
 }
 
 Browser: struct {
     impl Effect {
         access: fn(self) -> EffectAccess { .Replaces }
+        action: fn(self) -> String { "uses browser APIs" }
     }
 }
 
 Panic: struct {
     impl Effect {
         access: fn(self) -> EffectAccess { .Reads }
+        action: fn(self) -> String { "can stop with a panic" }
     }
 }
 
@@ -139,6 +153,7 @@ Mem: enum {
 
     impl Effect {
         access: fn(self) -> EffectAccess { .Reads }
+        action: fn(self) -> String { "allocates memory" }
     }
 }
 
@@ -150,5 +165,6 @@ Mem: enum {
 Unsafe: struct {
     impl Effect {
         access: fn(self) -> EffectAccess { .Reads }
+        action: fn(self) -> String { "reaches `#Unsafe` code" }
     }
 }

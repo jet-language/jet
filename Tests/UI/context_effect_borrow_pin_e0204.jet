@@ -1,0 +1,22 @@
+// Mutating a borrowed `#Context(Effect: ^local)` handler place inside the block fails with E0204.
+#Effect
+Collector: trait {
+    push_val: fn(^self, n: Int)
+}
+
+Bag: struct {
+    items: [Int],
+
+    impl Collector {
+        push_val: fn(^self, n: Int) {
+            self.items.push(n)
+        }
+    }
+}
+
+run: fn() {
+    ^bag: Bag{items: [Int]{}}
+    #Context(Collector: ^bag) {
+        bag.items.push(2)
+    }
+}

@@ -320,6 +320,7 @@ effect_rows: fn(source: String, path: String, machine: [EffectRow]?) -> [EffectR
     ^parent: String?{None}
     ^impl_seen: false
     ^in_impl: false
+    ^access_depth: 0
     ^kernel: [String]{}
     ^listed: false
     loop index in 0..<lines.len() {
@@ -369,6 +370,14 @@ effect_rows: fn(source: String, path: String, machine: [EffectRow]?) -> [EffectR
             next
         }
         if in_impl {
+            if access_depth > 0 {
+                if line == "}}" {
+                    access_depth -= 1
+                } else if line.ends_with("{{") {
+                    access_depth += 1
+                }
+                next
+            }
             if line == "}}" {
                 in_impl = false
                 next
@@ -393,8 +402,15 @@ effect_rows: fn(source: String, path: String, machine: [EffectRow]?) -> [EffectR
                 }
                 next
             }
+            if line == "access: fn(self) -> EffectAccess {{" {
+                access_depth = 1
+                next
+            }
+            if line.starts_with("access: fn(self) -> EffectAccess {{ ") && line.ends_with(" }}") -> next
+            if line.starts_with("action: fn(self) -> String {{ ") && line.ends_with(" }}") -> next
+            if line.starts_with("root_action: \"") -> next
             if body != None || expert_body != None || !line.starts_with("irreversible: fn(self) -> Bool {{ ") || !line.ends_with(" }}") {
-                return Err(rows_fail("{place}: expected `parent: Root.Case`, then one `irreversible: fn(self) -> Bool {{ … }}` line, then one `expert: fn(self) -> Bool {{ … }}` line in `impl Effect`"))
+                return Err(rows_fail("{place}: expected `parent: Root.Case`, `irreversible`, `expert`, `access`, `action`, or `root_action` in `impl Effect`"))
             }
             body = Val(byte_slice(line, "irreversible: fn(self) -> Bool {{ ".len(), line.len() - 2).trim())
             next

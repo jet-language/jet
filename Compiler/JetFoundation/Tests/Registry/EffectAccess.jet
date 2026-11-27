@@ -4,11 +4,13 @@ use jet_foundation.[
     EffectAccess,
     MARKER_REPEATABLE,
     MARKER_SOURCE,
+    authority_effect_action,
     effect_access_max,
     effect_access_name,
     effect_access_parse,
     effect_access_rank,
     effect_vocabulary_access,
+    effect_vocabulary_action,
     registration_marker_rules,
 ]
 
@@ -59,6 +61,46 @@ effect_access_test_is_irreversible: fn(name: String) -> Bool Never! {
     assert_eq(effect_vocabulary_access("Meta.Code"), EffectAccess.Replaces)
     assert_eq(effect_vocabulary_access("Meta.Code.Rewrite"), EffectAccess.Replaces)
     assert_eq(effect_vocabulary_access("Meta"), EffectAccess.Replaces)
+}
+
+#Test("effect_action_vocabulary_drives_authority_effect_action") {
+    assert_eq(effect_vocabulary_action("FS"), "reads and writes files")
+    assert_eq(effect_vocabulary_action("FS.Read"), "reads files")
+    assert_eq(effect_vocabulary_action("FS.Write"), "writes files")
+    assert_eq(effect_vocabulary_action("Time"), "reads the clock")
+    assert_eq(effect_vocabulary_action("Time.Wait"), "waits")
+    assert_eq(effect_vocabulary_action("Exec"), "starts other programs")
+    assert_eq(effect_vocabulary_action("Exec.Exit"), "ends its own process")
+    assert_eq(effect_vocabulary_action("Exec.Args"), "reads its arguments")
+    assert_eq(effect_vocabulary_action("DB"), "uses a database")
+    assert_eq(effect_vocabulary_action("DB.Read"), "reads a database")
+    assert_eq(effect_vocabulary_action("DB.Write"), "writes a database")
+    assert_eq(effect_vocabulary_action("Rand.Draw"), "draws random numbers")
+    assert_eq(effect_vocabulary_action("Mem.Alloc"), "allocates memory")
+    assert_eq(authority_effect_action("FS.Read"), "reads files")
+    assert_eq(authority_effect_action("FS.Write"), "writes files")
+    assert_eq(authority_effect_action("FS"), "reads and writes files")
+    assert_eq(authority_effect_action("Time"), "reads the clock")
+    assert_eq(authority_effect_action("Time.Wait"), "waits")
+    assert_eq(authority_effect_action("Exec"), "starts other programs")
+    assert_eq(authority_effect_action("Exec.Exit"), "ends its own process")
+    assert_eq(authority_effect_action("Exec.Args"), "reads its arguments")
+    assert_eq(authority_effect_action("IO"), "prints text or reads input")
+    assert_eq(authority_effect_action("Net"), "uses the network")
+    assert_eq(authority_effect_action("Env"), "reads environment variables")
+    assert_eq(authority_effect_action("Rand"), "draws random numbers")
+    assert_eq(authority_effect_action("DB"), "uses a database")
+    assert_eq(authority_effect_action("DB.Read"), "reads a database")
+    assert_eq(authority_effect_action("DB.Write"), "writes a database")
+    assert_eq(authority_effect_action("Log"), "writes logs")
+    assert_eq(authority_effect_action("GPU"), "uses the GPU")
+    assert_eq(authority_effect_action("FFI.C"), "calls foreign code")
+    assert_eq(authority_effect_action("Browser"), "uses browser APIs")
+    assert_eq(authority_effect_action("Secret"), "reads secrets")
+    assert_eq(authority_effect_action("Mem"), "allocates memory")
+    assert_eq(authority_effect_action("Panic"), "can stop with a panic")
+    assert_eq(authority_effect_action("Unsafe"), "reaches `#Unsafe` code")
+    assert_eq(authority_effect_action("UnknownThing"), "uses an undeclared authority")
 }
 
 #Test("repeatable_marker_is_registered_on_functions_and_methods") {

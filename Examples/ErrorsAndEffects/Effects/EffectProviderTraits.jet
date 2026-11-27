@@ -1,0 +1,106 @@
+// `#Effect` provider traits unite a service's operations and its effect row in
+// one declaration. `#Context(Effect: handler)` installs any implementation for
+// the lexical block, statically discharges or substitutes the effect, and
+// restores the enclosing handler on exit.
+
+#Effect(access: .Reads, action: "reads the clock")
+Clock: trait {
+    now_ms: fn(self) -> Int
+}
+
+#Effect(access: .Replaces, action: "reads and writes cached entries")
+KeyValue: trait {
+    get: fn(self, key: String) -> String?,
+    put: fn(^self, key: String, value: String),
+}
+
+#Effect(access: .Adds, action: "records audit entries")
+AuditLog: trait {
+    record: fn(^self, entry: String)
+}
+
+FixedClock: struct {
+    at_ms: Int,
+
+    impl Clock {
+        now_ms: fn(self) -> Int { self.at_ms }
+    }
+}
+
+TracingClock: struct {
+    at_ms: Int,
+
+    impl Clock {
+        now_ms: fn(self) -[IO]> Int {
+            print("trace: clock read -> {self.at_ms}")
+            self.at_ms
+        }
+    }
+}
+
+MemoryStore: struct {
+    entries: [String:String],
+
+    impl KeyValue {
+        get: fn(self, key: String) -> String? {
+            if self.entries.get(key) == .Val(value) -> Val(value.copy()) else -> None
+        }
+
+        put: fn(^self, key: String, value: String) {
+            self.entries[key.copy()] = value.copy()
+        }
+    }
+}
+
+AuditBuffer: struct {
+    entries: [String],
+
+    impl AuditLog {
+        record: fn(^self, entry: String) {
+            self.entries.push(entry.copy())
+        }
+    }
+}
+
+// Application logic declares only the `#Effect` traits it uses — zero explicit
+// service parameters threaded through signatures.
+save_session: fn(user: String) -[Clock, KeyValue, AuditLog]> String {
+    ts: Clock.now_ms()
+    token: "{user}@{ts}"
+    KeyValue.put(user, token)
+    AuditLog.record("saved {token}")
+    KeyValue.get(user) ?? "missing"
+}
+
+// Pure test helper (`-[]>`): concrete pure providers discharge Clock, KeyValue,
+// and AuditLog completely.
+run_pure_session: fn() -[]> String {
+    ^store: MemoryStore{entries: [String:String]{}}
+    ^audit: AuditBuffer{entries: [String]{}}
+    ^first: ""
+    ^nested: ""
+    ^restored: ""
+    #Context(Clock: FixedClock{at_ms: 1000}, KeyValue: ^store, AuditLog: ^audit) {
+        first = save_session("ada")
+        #Context(Clock: FixedClock{at_ms: 2500}) {
+            nested = save_session("grace")
+        }
+        restored = "{Clock.now_ms()}"
+    }
+    "{first} | {nested} | restored={restored} | audit={audit.entries.join(", ")}"
+}
+
+// Effect substitution: a handler whose impl uses `-[IO]>` substitutes `Clock`
+// with `-[IO]>` in the enclosing function's row.
+run_traced_clock: fn() -[IO]> Int {
+    ^value: 0
+    #Context(Clock: TracingClock{at_ms: 9001}) {
+        value = Clock.now_ms()
+    }
+    value
+}
+
+run: fn() -[IO]> {
+    print(run_pure_session())
+    print("traced={run_traced_clock()}")
+}

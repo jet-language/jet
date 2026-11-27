@@ -1,0 +1,15 @@
+// Installing a value whose type does not implement the `#Effect` trait in `#Context` emits E0762.
+#Effect
+Clock: trait {
+    now: fn(self) -> Int
+}
+
+NotAClock: struct {
+    value: Int,
+}
+
+run: fn() {
+    #Context(Clock: NotAClock{value: 1}) {
+        _: Clock.now()
+    }
+}

@@ -1,0 +1,41 @@
+// `#Effect(..., default: DefaultProvider)` metadata parsing and `default_provider`
+// extraction in `sema_effect_trait_meta`.
+use {
+    jet_parser.[parse_source]
+    jet_sema.[sema_effect_trait_meta]
+}
+
+#Test("effect marker default argument populates SemaEffectTraitMeta.default_provider") {
+    src: `#Effect(access: .Reads, action: "reads the clock", default: SystemClock)
+Clock: trait {
+    now_ms: fn(self) -> Int
+}
+
+#Effect(swappable: false)
+Pinned: trait {
+    check: fn(self)
+}
+`
+    parsed: parse_source(src.bytes())
+    assert_eq(parsed.diagnostics.len(), 0)
+    ^clock_default: ""
+    ^clock_action: ""
+    ^pinned_swappable: true
+    ^pinned_default: "unset"
+    loop item in parsed.program.items {
+        if item == .Trait(definition) {
+            meta: sema_effect_trait_meta(definition) ?? panic("missing #Effect metadata on {definition.name}")
+            if definition.name == "Clock" {
+                clock_default = meta.default_provider
+                clock_action = meta.action
+            } else if definition.name == "Pinned" {
+                pinned_swappable = meta.swappable
+                pinned_default = meta.default_provider
+            }
+        }
+    }
+    assert_eq(clock_default, "SystemClock")
+    assert_eq(clock_action, "reads the clock")
+    assert(!pinned_swappable)
+    assert_eq(pinned_default, "")
+}

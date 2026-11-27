@@ -1,0 +1,94 @@
+// End-to-end test for `core.effects` provider traits, pure deterministic test
+// fakes (`#Context` discharge to `-[]>`), and ambient `default:` host fallback.
+use core.effects.[
+    BufferConsole,
+    BufferLogger,
+    Clock,
+    Console,
+    Database,
+    Environment,
+    FileSystem,
+    FixedClock,
+    Logger,
+    MemoryDatabase,
+    MemoryEnvironment,
+    MemoryFS,
+    Network,
+    ProcessRunner,
+    Random,
+    SeededRandom,
+    SteppingClock,
+    StubNetwork,
+    StubProcessRunner,
+]
+
+run_service: fn() -[Clock, FileSystem, Random, Environment, Console, Logger, Network, Database, ProcessRunner]> String {
+    now: Clock.now_ms()
+    roll: Random.next_int(100)
+    mode: Environment.get("APP_MODE") ?? "default"
+    _: FileSystem.write_text("/cfg.txt", "{mode}:{now}:{roll}") ?? ()
+    cfg: FileSystem.read_text("/cfg.txt") ?? "err"
+    addrs: Network.resolve("api.local", 443)
+    _: Database.put_row("last", cfg)
+    saved: Database.get_row("last") ?? "none"
+    status: ProcessRunner.run_status([String]{"check", mode}) ?? -1
+    Logger.log("info", "saved {saved}")
+    Console.write_line("ok:{saved}:{addrs.len()}:{status}")
+    saved
+}
+
+pure_immutable_discharge: fn() -[]> String {
+    ^result: ""
+    #Context(
+        Clock: FixedClock{at_ms: 4200},
+        Environment: MemoryEnvironment{vars: [String:String]{"ENV": "pure"}},
+        Network: StubNetwork{hosts: [String:[String]]{"svc.local": [String]{"10.0.0.1:80"}}},
+    ) {
+        ts: Clock.now_ms()
+        env: Environment.get("ENV") ?? "none"
+        addrs: Network.resolve("svc.local", 80)
+        result = "{env}:{ts}:{addrs.len()}"
+    }
+    result
+}
+
+integration_all_providers: fn() -> String {
+    clock: SteppingClock.new(1000)
+    fs: MemoryFS.new()
+    rng: SeededRandom.new(7)
+    env: MemoryEnvironment{vars: [String:String]{"APP_MODE": "test"}}
+    console: BufferConsole.new()
+    logger: BufferLogger.new()
+    net: StubNetwork{hosts: [String:[String]]{"api.local": [String]{"127.0.0.1:443"}}}
+    db: MemoryDatabase.new()
+    proc: StubProcessRunner.new(0)
+    ^saved: ""
+    #Context(
+        Clock: clock,
+        FileSystem: fs,
+        Random: rng,
+        Environment: env,
+        Console: console,
+        Logger: logger,
+        Network: net,
+        Database: db,
+        ProcessRunner: proc,
+    ) {
+        saved = run_service()
+        clock.advance(500)
+        after: Clock.now_ms()
+        Console.write_line("after={after}")
+    }
+    "{saved} | lines={console.output().len()} | logs={logger.entries().len()} | ran={proc.ran().len()}"
+}
+
+// Outside `#Context`, `Clock.now_ms()` dispatches to its `#Effect(default: SystemClock)` provider.
+ambient_clock_positive: fn() -[Clock]> Bool {
+    Clock.now_ms() > 0
+}
+
+run: fn() -[IO, Clock]> {
+    print(pure_immutable_discharge())
+    print(integration_all_providers())
+    print("ambient_ok={ambient_clock_positive()}")
+}

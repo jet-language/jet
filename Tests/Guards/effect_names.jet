@@ -45,6 +45,7 @@ effect_name_declared: fn(text: String, out: ^[String]) {
         if line.starts_with(" ") || !line.ends_with(" {{") -> next
         head: line.removesuffix(" {{")
         if head.ends_with(": struct") -> out.push(head.removesuffix(": struct"))
+        if head.ends_with(": trait") -> out.push(head.removesuffix(": trait"))
         if head.ends_with(": enum") {
             family = head.removesuffix(": enum")
             out.push(head.removesuffix(": enum"))
@@ -339,4 +340,12 @@ effect_list_homes: fn(path: String, out: ^[String]) -[FS.Read]> {
     assert_eq(effect_list_problems(roots, [EffectListRow{root: "FS", covers: "files"}, EffectListRow{root: "Net", covers: "sockets"}]), [String]{"the rows run FS, Net; the sources declare Net, FS"})
     assert_eq(effect_list_problems(roots, [EffectListRow{root: "Net", covers: "sockets"}]), [String]{"`FS` has no row"})
     assert_eq(effect_list_problems(roots, [EffectListRow{root: "Net", covers: "sockets"}, EffectListRow{root: "FS", covers: "files"}]), [String]{})
+}
+
+#Test("authority_effect_action reads from EffectVocabulary with no shadow prose switch") {
+    guards_enter_root()
+    authority: effect_name_files.read("Compiler/JetFoundation/Source/Policy/Authority.jet") ?? panic("read Authority.jet: {err}")
+    assert(authority.contains("effect_vocabulary_action("), "Authority.jet must delegate authority_effect_action to effect_vocabulary_action")
+    assert(!authority.contains("\"reads and writes files\""), "Authority.jet must not duplicate effect action prose from Prelude/Effects.jet")
+    assert(!authority.contains("\"reads the clock\""), "Authority.jet must not duplicate effect action prose from Prelude/Effects.jet")
 }
