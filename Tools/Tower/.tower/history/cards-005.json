@@ -45267,6 +45267,172 @@
       "completedAt": "2026-11-24T12:00:39.541Z",
       "questions": [],
       "retiredAt": "2026-11-27T12:24:52.819Z"
+    },
+    {
+      "id": "c06r6neu",
+      "num": 6853,
+      "title": "Open vocabularies: the compiler reads Core members as trait impls, never by name (D-EXTEND-ARCH1)",
+      "body": "Destination: every compiler list that holds a Core member becomes a Core trait that any package implements with `impl Member.Trait` and trait constants (for example `impl TOML.Format { name: \"TOML\" }`). Core impls are pre-generated (D-OPENTABLE1); package impls are read once per build, only when imported. No compiler file recognizes a Core member by name.\n\nWhy it matters: a third-party database head, file format, unit or protocol must get the same powers as Core's without a compiler release.\n\nDecision: D-EXTEND-ARCH1=A. Design: Docs/research/2026-10-29-extensibility-every-layer.md sections 6.1-6.3 (rules, the per-layer table, the checked-text worked example) and section 8 (the closed-list guard, landed as tests/guards/closed_lists.jet in 912fae1170). Each vocabulary that moves shrinks tests/guards/closed_lists/baseline.tsv.\n\nDone so far: Core's SQL, HTML, Sh, URL, DateTime and Path are CheckedText impls and TypedHeadKind is gone (549b47e704); CheckedText keeps holes as typed values with Hole and build (9afa7da76b, D-TEXTHEAD-HOLES1).\n\nBallot: growing public enums (a marker requiring an `else` arm) are on Main's ballot list (2026-11-15).\n\nSplit from #6202 (the research card).",
+      "kind": "feature",
+      "track": "epoch",
+      "epoch": "G1",
+      "milestoneId": null,
+      "phase": "done",
+      "priority": "P1",
+      "plan": null,
+      "checkSteps": null,
+      "probe": null,
+      "visualMedia": [],
+      "blockedBy": [],
+      "assignee": null,
+      "log": [
+        {
+          "at": "2026-11-24",
+          "by": "Orchestrator",
+          "text": "All criteria met; c4 proved on tip23 (dev 45bbcdbd34): StrFormat gone, golden Packages/FormatSelector 3/3."
+        },
+        {
+          "at": "2026-11-24",
+          "by": "Orchestrator",
+          "text": "Closer ranking (orchestrator, 2026-11-24T10:07Z), smallest remaining work first: 1 #6901 (c10 fix in batch 22; proof only), 2 #5007 (c10/c11 fix in batch 22; proof only), 3 #6853 (c4 in batch 23; c8 needs c8b-fix, ~1h), 4 #4720 (all 5 open criteria have fixes in batch 23; proofs plus fixes), 5 #6727 (c4 per-turn REPL retention, root fix ~2-4h), 6 #6902 (5 open, completion work ~1 day). Closer A G1Facts-2: #6853, #5007, #4720. Closer B G2Editor: #6901, #6727, #6902. Epoch agents on G1: G1Generation-2 (#6851), TypeIDSlice3-3 (#6852)."
+        },
+        {
+          "at": "2026-11-23",
+          "by": "Orchestrator",
+          "text": "Batch 9 landed c9a f4c6a6e347 (jet.runtime.net bindings and exports for the Core-declared network handles); c9b2 follows in batch 10."
+        },
+        {
+          "at": "2026-11-23",
+          "by": "Orchestrator",
+          "text": "Landed on dev 61b25d4de8 (batch 1): growing public enums, compiler half plus UI snapshots, example and site pages. Batch compiler golden/ui/cases vs the dev baseline: 0 new failures."
+        },
+        {
+          "at": "2026-11-23",
+          "by": "Orchestrator",
+          "text": "Unlanded Antigravity work for the growing-enum criterion (D-GROWING-ENUM1), saved 2026-11-23: compiler half $JET_SCRATCH_ROOT/tmp/parked_arch/parked_g1_6853_c7.patch (21 files, 376 added lines; applies cleanly to dev af651a6949, 15% present) and its tests, example and site pages $JET_SCRATCH_ROOT/tmp/parked_arch/6853-c7-open-enum-tests.tar (Tests/UI/open_not_public_enum, OpenEnumExternalNoElse, OpenEnumNestedNoCatchAll, Examples/Modules/Packages/OpenEnum, Docs/Site/Dist/e/E1137). Lands as one submission after a batch-compiler ui/golden/cases run."
+        },
+        {
+          "at": "2026-11-22",
+          "by": "Orchestrator",
+          "text": "Posted full-profile ballot D-GROWING-ENUM1 for c7 (growing public enum marker: A #Open, B #NonExhaustive, C #Growing, D open-by-default/#Closed), validated 0 gaps by Validate.jet and independently reviewed by GoalsOrder against live Markers.jet, Spellings.jet, Coverage.jet, and PublicAPI.jet."
+        },
+        {
+          "at": "2026-11-17",
+          "by": "Main",
+          "text": "c9 parked unlanded by owner priority (#6733/#6734 first): network handle types declared in Core with impl blocks; patch at $JET_SCRATCH_ROOT/lanes/DeclTypes-6-1/c9park/patch (base 6c4b88d8f1, applies), notes in c9park/STATUS. Needs its runtime leaves in a seed before the Core caller (two-cycle split)."
+        },
+        {
+          "at": "2026-11-15",
+          "by": "TowerKeeper-2",
+          "text": "Owner-wait sweep 2026-11-15 (TowerKeeper-2, for Main): c7, body reworded; the owner-only choices are on Main's ballot list (2026-11-15) ($JET_SCRATCH_ROOT/lanes/TowerKeeper-2/ballots-needed.tsv); no question for the owner stays on this card."
+        }
+      ],
+      "criteria": [
+        {
+          "n": 1,
+          "text": "No compiler file recognizes a Core checked-text head by name: the `name == \"SQL\"` tests at Facts/Checked.jet:127 and Sema/Statements.jet:7492 (dev 72a8142651) are gone. Proof: `git grep -n 'name == \"SQL\"' Compiler` prints nothing and `jet test Compiler --profile golden --filter Text/CheckedText` passes.",
+          "status": "met",
+          "metBy": "Main",
+          "verifiedBy": null,
+          "evidence": "dev 1e91c82380: git grep -n 'name == \"SQL\"' acc7351dae -- Compiler prints nothing (rc=1); jet test Compiler --profile golden --filter Text/CheckedText PASS 21/21 on the p254 batch compiler (acc7351dae).",
+          "at": "2026-11-17T08:40:10.247Z"
+        },
+        {
+          "n": 2,
+          "text": "A package head `Cypher{\"... {age} ...\"}` binds `age` as a value like Core's SQL, and its failing check is reported in the package's name at the user's line. Proof: `jet test Compiler --profile golden --filter Packages/CypherHead` passes on o0, o1 and o2, and `jet test Compiler --profile ui --filter package_head_check_fails`.",
+          "status": "met",
+          "metBy": "Main",
+          "verifiedBy": null,
+          "evidence": "dev 2f4a6ea29a: jet test Compiler --profile golden --filter Packages/CypherHead PASS 3/3 (o0, o1, o2) and --profile ui --filter package_head_check_fails PASS on the p254 batch compiler (acc7351dae).",
+          "at": "2026-11-17T08:40:11.743Z"
+        },
+        {
+          "n": 3,
+          "text": "Codec formats are a Core trait: `#Rename`'s format menu (Prelude/Markers.jet `Rename(json, cbor, csv, toml, yaml, xml, args, env, db, layout)`) reads the trait's impls, so a MessagePack package works with `#Rename(msgpack: \"…\")` and the data loaders.",
+          "status": "met",
+          "metBy": "Orchestrator",
+          "verifiedBy": null,
+          "evidence": "On the batch 16 compiler (tree a2a8d238fb; landed on dev ce3b8e7f59): jet test Compiler --profile golden --filter Packages/MsgpackRename -> 3/3 PASS (O0, O1, O2; first line 'x: msgpack key px'); ui serde_rename_unknown_format and serde_rename_not_string PASS. Landed as 835b9120f4.",
+          "at": "2026-11-24T04:18:14.146Z",
+          "proof": {
+            "profile": "golden",
+            "filter": "Packages/MsgpackRename"
+          }
+        },
+        {
+          "n": 4,
+          "text": "String format selectors get their meaning from a trait: StrFormat (AST/Expressions.jet) and its TStrFormat mirror are gone, and a package selector formats a hole with no compiler change. Proof: `git grep -n 'StrFormat' Compiler` prints nothing and `jet test Compiler --profile golden --filter Packages/FormatSelector` passes.",
+          "status": "met",
+          "metBy": "Orchestrator",
+          "verifiedBy": null,
+          "evidence": "`git grep -n StrFormat Compiler` prints nothing at dev 45bbcdbd34; `jet test Compiler --profile golden --filter Packages/FormatSelector` PASS 3/3 (o0, o1, o2) on tip23 (jet build Compiler from dev 45bbcdbd34).",
+          "at": "2026-11-24T12:55:36.205Z"
+        },
+        {
+          "n": 5,
+          "text": "Byte and budget suffixes are Core unit families: one `#UnitFamily` declaration per suffix family replaces the lexer and budget suffix lists, and a package family (for example `hop`) works the same way. Proof: the suffix lists leave Tests/Guards/closed_lists/baseline.tsv and `jet test Compiler --profile golden --filter Units` passes.",
+          "status": "met",
+          "metBy": "Orchestrator",
+          "verifiedBy": null,
+          "evidence": "6e387d3e3b: Core DataSize/Percent #UnitFamily declarations in Prelude/Units.jet, BudgetSpecs & Loader use SEMA_UNITS_CATALOG, closed_lists baseline 951->950, Examples/Types/Units/ByteAndPackageUnits.jet PASS o0/o1/o2",
+          "at": "2026-11-22T03:09:06.169Z"
+        },
+        {
+          "n": 6,
+          "text": "Core protocol traits are declared in the Prelude and the compiler's table is generated from them (OWNED_TRAITS via Tools/Agent/OwnedTraitRows.jet): no compiler file spells a protocol trait name outside the generated table. Proof: `jet test Tests/Guards --filter closed_lists` passes with no protocol-trait name list in its baseline.",
+          "status": "met",
+          "metBy": "Main",
+          "verifiedBy": null,
+          "evidence": "dev acc7351dae: jet test Tests/Guards/closed_lists.jet PASS on the p254 batch compiler with no protocol-trait name list in Tests/Guards/closed_lists/baseline.tsv (kernel rows generated from the Prelude trait declarations).",
+          "at": "2026-11-17T08:40:13.127Z"
+        },
+        {
+          "n": 7,
+          "text": "Growing public enums: adding a member to an enum carrying the growth marker breaks no caller, because a match on it from outside its package needs an `else` arm. The growth marker is on Main's ballot list (2026-11-15).",
+          "status": "met",
+          "metBy": "Orchestrator",
+          "verifiedBy": null,
+          "evidence": "Landed dev 61b25d4de8 (D-GROWING-ENUM1 ratified). On the batch-4 compiler (dev 48ff031e20 + #6793 c2a-j, #6794 B1/E1/S3): golden Examples/Modules/Packages/OpenEnum/run.jet PASS at o0, o1 and o2 (an external match on a growing enum needs an else arm, and adding a member breaks no caller); ui Tests/UI/OpenEnumExternalNoElse and Tests/UI/OpenEnumNestedNoCatchAll PASS (E1137 snapshots).",
+          "at": "2026-11-23T18:57:15.601Z",
+          "proof": {
+            "profile": "ui",
+            "filter": "growing_enum_requires_else"
+          }
+        },
+        {
+          "n": 8,
+          "text": "Library types take on language meaning (what `+` calls, what indexing calls) through declared roles (D-CORE-ROLE1=A, PascalCase markers), never by compiler name lookup. Proof: `jet test Compiler --profile cases --filter core_role_operator_dispatch`. The frozen #4570 holds the original item.",
+          "status": "met",
+          "metBy": "Orchestrator",
+          "verifiedBy": null,
+          "evidence": "tip22 = compiler built from landed dev e271dd7f56 (batch 22): $S test Compiler --compiler=$S --profile cases --filter core_role_operator_dispatch PASS 1/1. Landed in 6853-c8b ecbe64e2d0 + 6853-c8b-fix 3a95fa57f4.",
+          "at": "2026-11-24T11:34:15.374Z"
+        },
+        {
+          "n": 9,
+          "text": "The network handle types (TCPListener, TCPStream, UDPSocket, UnixListener, UnixStream, WsConn, WsMessage) are declared in Core with their methods (impl blocks in Core/Net and Core/Web/Ws), and the compiler's handle-op row table (from #3147 c8) shrinks to the runtime leaves those bodies call. Proof: `jet test Compiler/JetSema/Tests/CompilerOwnedTypeNames.jet` lists none of the seven as compiler-owned.",
+          "status": "met",
+          "metBy": "Orchestrator",
+          "verifiedBy": null,
+          "evidence": "On a compiler built from landed dev 6ab0b5a5c8 (tip20), run in an export of that commit: jet test Compiler/JetSema/Tests/CompilerOwnedTypeNames.jet; 131 passed, 0 failed; all seven types stay unknown. Ws.jet is in Core/Net, not Core/Web",
+          "at": "2026-11-24T08:32:57.493Z"
+        }
+      ],
+      "refs": [],
+      "tags": [
+        "core",
+        "library",
+        "declarative"
+      ],
+      "parentId": null,
+      "needsAcceptance": false,
+      "created": "2026-11-15T02:25:09.261Z",
+      "updated": "2026-11-24T13:01:02.175Z",
+      "updatedBy": "Orchestrator",
+      "criteriaLastN": 9,
+      "completedAt": "2026-11-24T13:01:02.175Z",
+      "questions": [],
+      "retiredAt": "2026-11-27T13:37:25.213Z"
     }
   ]
 }

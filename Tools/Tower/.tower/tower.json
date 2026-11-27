@@ -3,7 +3,7 @@
     "version": 4,
     "project": "Jet",
     "nextNum": 7042,
-    "rev": 114996,
+    "rev": 114998,
     "ui": {
       "toggled": [
         "dec-group:syntax",
@@ -41891,170 +41891,6 @@
       "criteriaLastN": 16
     },
     {
-      "id": "c06r6neu",
-      "num": 6853,
-      "title": "Open vocabularies: the compiler reads Core members as trait impls, never by name (D-EXTEND-ARCH1)",
-      "body": "Destination: every compiler list that holds a Core member becomes a Core trait that any package implements with `impl Member.Trait` and trait constants (for example `impl TOML.Format { name: \"TOML\" }`). Core impls are pre-generated (D-OPENTABLE1); package impls are read once per build, only when imported. No compiler file recognizes a Core member by name.\n\nWhy it matters: a third-party database head, file format, unit or protocol must get the same powers as Core's without a compiler release.\n\nDecision: D-EXTEND-ARCH1=A. Design: Docs/research/2026-10-29-extensibility-every-layer.md sections 6.1-6.3 (rules, the per-layer table, the checked-text worked example) and section 8 (the closed-list guard, landed as tests/guards/closed_lists.jet in 912fae1170). Each vocabulary that moves shrinks tests/guards/closed_lists/baseline.tsv.\n\nDone so far: Core's SQL, HTML, Sh, URL, DateTime and Path are CheckedText impls and TypedHeadKind is gone (549b47e704); CheckedText keeps holes as typed values with Hole and build (9afa7da76b, D-TEXTHEAD-HOLES1).\n\nBallot: growing public enums (a marker requiring an `else` arm) are on Main's ballot list (2026-11-15).\n\nSplit from #6202 (the research card).",
-      "kind": "feature",
-      "track": "epoch",
-      "epoch": "G1",
-      "milestoneId": null,
-      "phase": "done",
-      "priority": "P1",
-      "plan": null,
-      "checkSteps": null,
-      "probe": null,
-      "visualMedia": [],
-      "blockedBy": [],
-      "assignee": null,
-      "log": [
-        {
-          "at": "2026-11-24",
-          "by": "Orchestrator",
-          "text": "All criteria met; c4 proved on tip23 (dev 45bbcdbd34): StrFormat gone, golden Packages/FormatSelector 3/3."
-        },
-        {
-          "at": "2026-11-24",
-          "by": "Orchestrator",
-          "text": "Closer ranking (orchestrator, 2026-11-24T10:07Z), smallest remaining work first: 1 #6901 (c10 fix in batch 22; proof only), 2 #5007 (c10/c11 fix in batch 22; proof only), 3 #6853 (c4 in batch 23; c8 needs c8b-fix, ~1h), 4 #4720 (all 5 open criteria have fixes in batch 23; proofs plus fixes), 5 #6727 (c4 per-turn REPL retention, root fix ~2-4h), 6 #6902 (5 open, completion work ~1 day). Closer A G1Facts-2: #6853, #5007, #4720. Closer B G2Editor: #6901, #6727, #6902. Epoch agents on G1: G1Generation-2 (#6851), TypeIDSlice3-3 (#6852)."
-        },
-        {
-          "at": "2026-11-23",
-          "by": "Orchestrator",
-          "text": "Batch 9 landed c9a f4c6a6e347 (jet.runtime.net bindings and exports for the Core-declared network handles); c9b2 follows in batch 10."
-        },
-        {
-          "at": "2026-11-23",
-          "by": "Orchestrator",
-          "text": "Landed on dev 61b25d4de8 (batch 1): growing public enums, compiler half plus UI snapshots, example and site pages. Batch compiler golden/ui/cases vs the dev baseline: 0 new failures."
-        },
-        {
-          "at": "2026-11-23",
-          "by": "Orchestrator",
-          "text": "Unlanded Antigravity work for the growing-enum criterion (D-GROWING-ENUM1), saved 2026-11-23: compiler half $JET_SCRATCH_ROOT/tmp/parked_arch/parked_g1_6853_c7.patch (21 files, 376 added lines; applies cleanly to dev af651a6949, 15% present) and its tests, example and site pages $JET_SCRATCH_ROOT/tmp/parked_arch/6853-c7-open-enum-tests.tar (Tests/UI/open_not_public_enum, OpenEnumExternalNoElse, OpenEnumNestedNoCatchAll, Examples/Modules/Packages/OpenEnum, Docs/Site/Dist/e/E1137). Lands as one submission after a batch-compiler ui/golden/cases run."
-        },
-        {
-          "at": "2026-11-22",
-          "by": "Orchestrator",
-          "text": "Posted full-profile ballot D-GROWING-ENUM1 for c7 (growing public enum marker: A #Open, B #NonExhaustive, C #Growing, D open-by-default/#Closed), validated 0 gaps by Validate.jet and independently reviewed by GoalsOrder against live Markers.jet, Spellings.jet, Coverage.jet, and PublicAPI.jet."
-        },
-        {
-          "at": "2026-11-17",
-          "by": "Main",
-          "text": "c9 parked unlanded by owner priority (#6733/#6734 first): network handle types declared in Core with impl blocks; patch at $JET_SCRATCH_ROOT/lanes/DeclTypes-6-1/c9park/patch (base 6c4b88d8f1, applies), notes in c9park/STATUS. Needs its runtime leaves in a seed before the Core caller (two-cycle split)."
-        },
-        {
-          "at": "2026-11-15",
-          "by": "TowerKeeper-2",
-          "text": "Owner-wait sweep 2026-11-15 (TowerKeeper-2, for Main): c7, body reworded; the owner-only choices are on Main's ballot list (2026-11-15) ($JET_SCRATCH_ROOT/lanes/TowerKeeper-2/ballots-needed.tsv); no question for the owner stays on this card."
-        }
-      ],
-      "criteria": [
-        {
-          "n": 1,
-          "text": "No compiler file recognizes a Core checked-text head by name: the `name == \"SQL\"` tests at Facts/Checked.jet:127 and Sema/Statements.jet:7492 (dev 72a8142651) are gone. Proof: `git grep -n 'name == \"SQL\"' Compiler` prints nothing and `jet test Compiler --profile golden --filter Text/CheckedText` passes.",
-          "status": "met",
-          "metBy": "Main",
-          "verifiedBy": null,
-          "evidence": "dev 1e91c82380: git grep -n 'name == \"SQL\"' acc7351dae -- Compiler prints nothing (rc=1); jet test Compiler --profile golden --filter Text/CheckedText PASS 21/21 on the p254 batch compiler (acc7351dae).",
-          "at": "2026-11-17T08:40:10.247Z"
-        },
-        {
-          "n": 2,
-          "text": "A package head `Cypher{\"... {age} ...\"}` binds `age` as a value like Core's SQL, and its failing check is reported in the package's name at the user's line. Proof: `jet test Compiler --profile golden --filter Packages/CypherHead` passes on o0, o1 and o2, and `jet test Compiler --profile ui --filter package_head_check_fails`.",
-          "status": "met",
-          "metBy": "Main",
-          "verifiedBy": null,
-          "evidence": "dev 2f4a6ea29a: jet test Compiler --profile golden --filter Packages/CypherHead PASS 3/3 (o0, o1, o2) and --profile ui --filter package_head_check_fails PASS on the p254 batch compiler (acc7351dae).",
-          "at": "2026-11-17T08:40:11.743Z"
-        },
-        {
-          "n": 3,
-          "text": "Codec formats are a Core trait: `#Rename`'s format menu (Prelude/Markers.jet `Rename(json, cbor, csv, toml, yaml, xml, args, env, db, layout)`) reads the trait's impls, so a MessagePack package works with `#Rename(msgpack: \"…\")` and the data loaders.",
-          "status": "met",
-          "metBy": "Orchestrator",
-          "verifiedBy": null,
-          "evidence": "On the batch 16 compiler (tree a2a8d238fb; landed on dev ce3b8e7f59): jet test Compiler --profile golden --filter Packages/MsgpackRename -> 3/3 PASS (O0, O1, O2; first line 'x: msgpack key px'); ui serde_rename_unknown_format and serde_rename_not_string PASS. Landed as 835b9120f4.",
-          "at": "2026-11-24T04:18:14.146Z",
-          "proof": {
-            "profile": "golden",
-            "filter": "Packages/MsgpackRename"
-          }
-        },
-        {
-          "n": 4,
-          "text": "String format selectors get their meaning from a trait: StrFormat (AST/Expressions.jet) and its TStrFormat mirror are gone, and a package selector formats a hole with no compiler change. Proof: `git grep -n 'StrFormat' Compiler` prints nothing and `jet test Compiler --profile golden --filter Packages/FormatSelector` passes.",
-          "status": "met",
-          "metBy": "Orchestrator",
-          "verifiedBy": null,
-          "evidence": "`git grep -n StrFormat Compiler` prints nothing at dev 45bbcdbd34; `jet test Compiler --profile golden --filter Packages/FormatSelector` PASS 3/3 (o0, o1, o2) on tip23 (jet build Compiler from dev 45bbcdbd34).",
-          "at": "2026-11-24T12:55:36.205Z"
-        },
-        {
-          "n": 5,
-          "text": "Byte and budget suffixes are Core unit families: one `#UnitFamily` declaration per suffix family replaces the lexer and budget suffix lists, and a package family (for example `hop`) works the same way. Proof: the suffix lists leave Tests/Guards/closed_lists/baseline.tsv and `jet test Compiler --profile golden --filter Units` passes.",
-          "status": "met",
-          "metBy": "Orchestrator",
-          "verifiedBy": null,
-          "evidence": "6e387d3e3b: Core DataSize/Percent #UnitFamily declarations in Prelude/Units.jet, BudgetSpecs & Loader use SEMA_UNITS_CATALOG, closed_lists baseline 951->950, Examples/Types/Units/ByteAndPackageUnits.jet PASS o0/o1/o2",
-          "at": "2026-11-22T03:09:06.169Z"
-        },
-        {
-          "n": 6,
-          "text": "Core protocol traits are declared in the Prelude and the compiler's table is generated from them (OWNED_TRAITS via Tools/Agent/OwnedTraitRows.jet): no compiler file spells a protocol trait name outside the generated table. Proof: `jet test Tests/Guards --filter closed_lists` passes with no protocol-trait name list in its baseline.",
-          "status": "met",
-          "metBy": "Main",
-          "verifiedBy": null,
-          "evidence": "dev acc7351dae: jet test Tests/Guards/closed_lists.jet PASS on the p254 batch compiler with no protocol-trait name list in Tests/Guards/closed_lists/baseline.tsv (kernel rows generated from the Prelude trait declarations).",
-          "at": "2026-11-17T08:40:13.127Z"
-        },
-        {
-          "n": 7,
-          "text": "Growing public enums: adding a member to an enum carrying the growth marker breaks no caller, because a match on it from outside its package needs an `else` arm. The growth marker is on Main's ballot list (2026-11-15).",
-          "status": "met",
-          "metBy": "Orchestrator",
-          "verifiedBy": null,
-          "evidence": "Landed dev 61b25d4de8 (D-GROWING-ENUM1 ratified). On the batch-4 compiler (dev 48ff031e20 + #6793 c2a-j, #6794 B1/E1/S3): golden Examples/Modules/Packages/OpenEnum/run.jet PASS at o0, o1 and o2 (an external match on a growing enum needs an else arm, and adding a member breaks no caller); ui Tests/UI/OpenEnumExternalNoElse and Tests/UI/OpenEnumNestedNoCatchAll PASS (E1137 snapshots).",
-          "at": "2026-11-23T18:57:15.601Z",
-          "proof": {
-            "profile": "ui",
-            "filter": "growing_enum_requires_else"
-          }
-        },
-        {
-          "n": 8,
-          "text": "Library types take on language meaning (what `+` calls, what indexing calls) through declared roles (D-CORE-ROLE1=A, PascalCase markers), never by compiler name lookup. Proof: `jet test Compiler --profile cases --filter core_role_operator_dispatch`. The frozen #4570 holds the original item.",
-          "status": "met",
-          "metBy": "Orchestrator",
-          "verifiedBy": null,
-          "evidence": "tip22 = compiler built from landed dev e271dd7f56 (batch 22): $S test Compiler --compiler=$S --profile cases --filter core_role_operator_dispatch PASS 1/1. Landed in 6853-c8b ecbe64e2d0 + 6853-c8b-fix 3a95fa57f4.",
-          "at": "2026-11-24T11:34:15.374Z"
-        },
-        {
-          "n": 9,
-          "text": "The network handle types (TCPListener, TCPStream, UDPSocket, UnixListener, UnixStream, WsConn, WsMessage) are declared in Core with their methods (impl blocks in Core/Net and Core/Web/Ws), and the compiler's handle-op row table (from #3147 c8) shrinks to the runtime leaves those bodies call. Proof: `jet test Compiler/JetSema/Tests/CompilerOwnedTypeNames.jet` lists none of the seven as compiler-owned.",
-          "status": "met",
-          "metBy": "Orchestrator",
-          "verifiedBy": null,
-          "evidence": "On a compiler built from landed dev 6ab0b5a5c8 (tip20), run in an export of that commit: jet test Compiler/JetSema/Tests/CompilerOwnedTypeNames.jet; 131 passed, 0 failed; all seven types stay unknown. Ws.jet is in Core/Net, not Core/Web",
-          "at": "2026-11-24T08:32:57.493Z"
-        }
-      ],
-      "refs": [],
-      "tags": [
-        "core",
-        "library",
-        "declarative"
-      ],
-      "parentId": null,
-      "needsAcceptance": false,
-      "created": "2026-11-15T02:25:09.261Z",
-      "updated": "2026-11-24T13:01:02.175Z",
-      "updatedBy": "Orchestrator",
-      "criteriaLastN": 9,
-      "completedAt": "2026-11-24T13:01:02.175Z"
-    },
-    {
       "id": "c0ho9o8j",
       "num": 6856,
       "title": "Build tools and package sources are package providers",
@@ -62277,7 +62113,7 @@
       "track": "epoch",
       "epoch": "G2",
       "milestoneId": null,
-      "phase": "building",
+      "phase": "done",
       "priority": "P2",
       "plan": null,
       "checkSteps": null,
@@ -62286,6 +62122,11 @@
       "blockedBy": [],
       "assignee": null,
       "log": [
+        {
+          "at": "2026-11-27",
+          "by": "Orchestrator",
+          "text": "All 4/4 criteria met and verified on dev 678e978a24d (batch89-s3): c1 design review, c2 jet inspect footprint 2/2 PASS, c3 JetLSP hover/code lens/extract-function 1/1 PASS with 0 errors on refactored doc, c4 BlockFootprint golden 3/3 PASS (o0/o1/o2)."
+        },
         {
           "at": "2026-11-26",
           "by": "Orchestrator",
@@ -62319,11 +62160,11 @@
         {
           "n": 3,
           "text": "The language server shows the same footprint for a selected range (hover or code lens), and an extract-function action turns the selection into a local function whose parameters carry that footprint.",
-          "status": "open",
-          "metBy": null,
+          "status": "met",
+          "metBy": "Orchestrator",
           "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-11-26T16:16:00.008Z"
+          "evidence": "dev 678e978a24d, batch89-s3 (S2==S3 sha256 0c4316f0): restored 7c186ef7d9d module-scope 2-edit _extracted in Compiler/JetLSP/Source/LSP/Footprint.jet + Compiler/JetCLI/Tests/LSPFootprint.jet; jet test Compiler/JetCLI/Tests/LSPFootprint.jet --filter lsp_footprint_ -> 1/1 PASS (hover, code lens, refactor.extract with exact footprint params, and re-opened refactored doc checks with 0 LSP errors).",
+          "at": "2026-11-27T13:37:25.113Z"
         },
         {
           "n": 4,
@@ -62340,8 +62181,9 @@
       "parentId": null,
       "needsAcceptance": false,
       "created": "2026-11-25T17:59:02.257Z",
-      "updated": "2026-11-27T11:52:36.145Z",
-      "updatedBy": "Orchestrator"
+      "updated": "2026-11-27T13:37:27.301Z",
+      "updatedBy": "Orchestrator",
+      "completedAt": "2026-11-27T13:37:27.301Z"
     },
     {
       "id": "c05bs1oq",
@@ -112638,216 +112480,6 @@
       "ratifiedAt": "2026-11-22"
     },
     {
-      "id": "D-GROWING-ENUM1",
-      "cardId": "c06r6neu",
-      "group": "language",
-      "title": "Marker for public enums that may grow across package releases",
-      "situation": "Today every Jet enum is a closed set. Callers must cover every case (`Jet.NonExhaustiveDispatch`), and `Jet.ClosedSetElse` (`E0641`) forbids any `else` arm on a closed set, partial or complete. That makes adding a new case to any public enum a breaking change for downstream packages. This vote chooses the marker that lets a public enum add cases in minor releases by requiring an `else` arm outside its declaring package. We recommend `#Open`.",
-      "gist": "How should a library mark a public enum that may add new cases without breaking callers?",
-      "lesson": "Closed enums catch missing cases when you add a variant inside your own codebase. A growing public enum flips that contract across package boundaries: external matches must include `else -> ...`, while matches inside the declaring package remain exhaustive.",
-      "explainer": "",
-      "story": "Sam ships an HTTP library with a public `StatusClass` enum. In v1.1 he wants to add a new case without breaking every downstream package that matched on it.",
-      "inWild": "// Rust marks public enums with #[non_exhaustive].\n#[non_exhaustive]\npub enum Error { NotFound, Timeout }\n// External match must include a `_ => ...` arm.",
-      "detail": "Provenance: #6853 c7 (G1 open vocabularies). Verified in `Compiler/Prelude/Markers.jet` (`Open`, `Growing`, `NonExhaustive`, and `Closed` are unclaimed) and `Compiler/JetSema/Source/Sema/Coverage.jet:994-1065` (`Jet.NonExhaustiveDispatch`, `Jet.ClosedSetElse`, `E0641`). Inside the declaring package, matches over a marked enum stay exhaustive without `else`. Outside the declaring package, dispatches and nested patterns require a catch-all (`else` or `_`), `E0641` is suppressed, single-arm guards (`if kind == .NotFound`) stay unaffected, and adding a case is a minor API change.",
-      "options": [
-        {
-          "key": "A",
-          "name": "`#Open` marker on public enums",
-          "detail": "Declare `Open` in `Compiler/Prelude/Markers.jet` as a bare PascalCase marker on public (non-`priv`) enums (`#Open Status: enum { ... }`). Using `#Open` on a `struct` or `priv enum` is a compile error. Outside the declaring package, every dispatch or nested pattern over an `#Open` enum must include a catch-all (`else` or `_`), and `Jet.ClosedSetElse` (`E0641`) allows it. Inside the declaring package, matches stay exhaustive, and single-arm `if kind == .NotFound` guards stay unaffected.\n\n`#Open` is one short word that pairs directly with Jet's `closed set` diagnostic wording (`Jet.ClosedSetElse`) and follows Jet's PascalCase marker convention.",
-          "technical": "Add `Open: struct { impl Marker { sites: [.Type] } }` to `Compiler/Prelude/Markers.jet` (restricted in sema to public non-`priv` enums). In `Compiler/JetSema/Source/Sema/Coverage.jet`, treat cross-package dispatches and nested patterns over `#Open` enums as open sets, requiring `else` or `_` and suppressing `E0641`. Preserve closed-set checking inside the declaring package. Record `#Open` in `PublicAPI.jet` (`E1218` publish / `#6860` check): adding cases is minor; adding or removing `#Open`, or removing cases, is major.",
-          "code": "// Library package\n#Open\nErrorKind: enum {\n    NotFound,\n    Timeout,\n}\n\n// Downstream caller package\nlabel: fn(kind: net.ErrorKind) -> String {\n    if kind == {\n        .NotFound -> \"missing\"\n        .Timeout -> \"timed out\"\n        else -> \"other\"\n    }\n}"
-        },
-        {
-          "key": "B",
-          "name": "`#NonExhaustive` marker on public enums",
-          "detail": "Use `#NonExhaustive` instead of `#Open`, mirroring Rust's `#[non_exhaustive]` attribute with the exact same enum-only scope, cross-package catch-all rule, and same-package exhaustiveness.\n\nRust developers recognize the name immediately. However, `NonExhaustive` is a double-negative thirteen-character phrase that breaks from Jet's plain positive bare marker names (`#Scalar`, `#Error`, `#Local`, `#Shared`) and does not mirror `Jet.ClosedSetElse` (`closed set` vs `open`).",
-          "technical": "Identical sema, coverage, `E0641`, and `PublicAPI.jet` rules as A, declaring `NonExhaustive` in `Compiler/Prelude/Markers.jet` with `sites: [.Type]` instead of `Open`.",
-          "code": "// Library package\n#NonExhaustive\nErrorKind: enum {\n    NotFound,\n    Timeout,\n}\n\n// Downstream caller package\nlabel: fn(kind: net.ErrorKind) -> String {\n    if kind == {\n        .NotFound -> \"missing\"\n        .Timeout -> \"timed out\"\n        else -> \"other\"\n    }\n}"
-        },
-        {
-          "key": "C",
-          "name": "`#Growing` marker on public enums",
-          "detail": "Use `#Growing` with the same enum-only scope, cross-package catch-all rule, and same-package exhaustiveness.\n\n`#Growing` describes the author's intent directly (more cases may be added later) and avoids any confusion with file `open` or class inheritance `open` from Kotlin or Swift. Its trade-off is being slightly less paired with `closed set` than `#Open`.",
-          "technical": "Identical sema, coverage, `E0641`, and `PublicAPI.jet` rules as A, declaring `Growing` in `Compiler/Prelude/Markers.jet` with `sites: [.Type]` instead of `Open`.",
-          "code": "// Library package\n#Growing\nErrorKind: enum {\n    NotFound,\n    Timeout,\n}\n\n// Downstream caller package\nlabel: fn(kind: net.ErrorKind) -> String {\n    if kind == {\n        .NotFound -> \"missing\"\n        .Timeout -> \"timed out\"\n        else -> \"other\"\n    }\n}"
-        },
-        {
-          "key": "D",
-          "name": "Open by default across packages, `#Closed` opt-in",
-          "detail": "Flip the default for all public enums across package boundaries (like Swift's library-evolution mode): external matches always require `else` unless the enum carries `#Closed`.\n\nLibrary authors never forget to mark an evolving enum. However, every external match on small fixed enums (`Ordering`, AST kinds) would gain noisy `else` arms unless opted into `#Closed`, migrating existing exhaustive tests.",
-          "technical": "Change `Coverage.jet` so cross-package enum dispatches are open by default unless marked `#Closed` (`sites: [.Type]`) in `Compiler/Prelude/Markers.jet`. Update existing Core and package exhaustive match tests, including `Tests/UI/core_enum_missing_case.jet`.",
-          "code": "// Library package (open by default)\nErrorKind: enum {\n    NotFound,\n    Timeout,\n}\n\n// Downstream caller package (else always required unless #Closed)\nlabel: fn(kind: net.ErrorKind) -> String {\n    if kind == {\n        .NotFound -> \"missing\"\n        .Timeout -> \"timed out\"\n        else -> \"other\"\n    }\n}"
-        }
-      ],
-      "comparisons": [
-        {
-          "lang": "Rust",
-          "note": "`#[non_exhaustive]` requires a wildcard arm in downstream crates while keeping matches exhaustive inside the defining crate; https://doc.rust-lang.org/reference/attributes/type_system.html#the-non_exhaustive-attribute.",
-          "code": "#[non_exhaustive]\npub enum Error { NotFound, Timeout }"
-        },
-        {
-          "lang": "Swift",
-          "note": "Library-evolution mode makes public enums non-frozen by default (`@unknown default`), with `@frozen` opting into closed sets; https://docs.swift.org/swift-book/documentation/the-swift-programming-language/statements/#Switching-Over-Future-Enumeration-Cases.",
-          "code": "@frozen public enum ComparisonResult { case orderedAscending, orderedSame, orderedDescending }"
-        },
-        {
-          "lang": "Kotlin",
-          "note": "`sealed` marks closed hierarchies while ordinary public types remain open for extension; https://kotlinlang.org/docs/sealed-classes.html.",
-          "code": "sealed class Result { data object Ok : Result() }"
-        }
-      ],
-      "rec": "A",
-      "recommendation": {
-        "why": "`#Open` is one plain word that pairs directly with Jet's existing `closed set` error wording while keeping closed enums the safe default.",
-        "gains": [
-          "Pairs directly with `Jet.ClosedSetElse` (`closed set` vs `#Open`).",
-          "Keeps exhaustive checking by default on fixed enums across packages.",
-          "Matches Jet's short positive PascalCase marker style."
-        ],
-        "losses": [
-          {
-            "loss": "Library authors must remember to write `#Open` before v1.0.",
-            "mitigation": "`jet check` API-surface checks (`#6860`) and `jet registry publish` (`E1218`) flag adding a case to a closed enum."
-          }
-        ],
-        "whyNot": [
-          {
-            "key": "B",
-            "reason": "`#NonExhaustive` is long, negative-phrased jargon unlike Jet's other markers."
-          },
-          {
-            "key": "C",
-            "reason": "Clean alternative, but slightly less crisp beside Jet's `closed set` terminology."
-          },
-          {
-            "key": "D",
-            "reason": "Forces noisy `else` arms on every fixed Core and library enum match."
-          }
-        ],
-        "tradeoff": "Opt-in `#Open` preserves exhaustive matching by default while requiring authors to mark evolving enums upfront."
-      },
-      "hybrid": null,
-      "ballotMode": "full",
-      "shortAuthorizedBy": null,
-      "ballotProcessVersion": 5,
-      "reviewPasses": {
-        "adversarial": "Author model family: Gemini. Adversarial model family: Gemini. Fresh agent: GoalsOrder. Verified live Markers.jet (`sites: [.Type]`), Spellings.jet (no `pub`), Coverage.jet (`E0641` partial/complete), and PublicAPI.jet. Fixed all four findings, pinning enum-only scope, SemVer symmetry, nested-pattern catch-alls, and unaffected single-arm guards."
-      },
-      "checkInstructions": null,
-      "surface": {
-        "gist": "How should a library mark a public enum that may add new cases without breaking callers?",
-        "lesson": "Closed enums catch missing cases everywhere. A growing public enum flips that contract across package boundaries: external matches must include `else -> ...`, while matches inside the declaring package stay exhaustive.",
-        "trio": {
-          "current": {
-            "note": "Every enum is a closed set today: missing cases fail `Jet.NonExhaustiveDispatch`, and any `else` arm (partial or complete) fails `Jet.ClosedSetElse` (`E0641`).",
-            "code": "if kind == {\n    .NotFound -> \"missing\"\n    .Timeout -> \"timed out\"\n    else -> \"other\" // E0641 today\n}"
-          },
-          "wild": {
-            "lang": "Rust",
-            "note": "Rust's `#[non_exhaustive]` requires a wildcard arm in external crates while staying exhaustive inside the defining crate. See https://doc.rust-lang.org/reference/attributes/type_system.html#the-non_exhaustive-attribute.",
-            "code": "#[non_exhaustive]\npub enum Error { NotFound, Timeout }"
-          }
-        },
-        "options": [
-          {
-            "key": "A",
-            "name": "`#Open` marker on public enums",
-            "gist": "Mark evolving public enums `#Open`; external matches require `else`, internal stay exhaustive.",
-            "gains": [
-              "Pairs directly with `Jet.ClosedSetElse` (`closed set` vs `#Open`).",
-              "Keeps closed exhaustive matching the default.",
-              "Short positive PascalCase marker."
-            ],
-            "losses": [
-              "Authors must mark evolving enums `#Open` before release."
-            ],
-            "proposed": {
-              "code": "#Open\nErrorKind: enum { NotFound, Timeout }\n// External caller:\nif kind == {\n    .NotFound -> \"missing\"\n    else -> \"other\"\n}"
-            }
-          },
-          {
-            "key": "B",
-            "name": "`#NonExhaustive` marker on public enums",
-            "gist": "Use `#NonExhaustive` with the same cross-package `else` rule as `#Open`.",
-            "gains": [
-              "Familiar name for Rust developers."
-            ],
-            "losses": [
-              "Long negative-phrased spelling unlike Jet's other markers."
-            ],
-            "proposed": {
-              "code": "#NonExhaustive\nErrorKind: enum { NotFound, Timeout }\n// External caller:\nif kind == {\n    .NotFound -> \"missing\"\n    else -> \"other\"\n}"
-            }
-          },
-          {
-            "key": "C",
-            "name": "`#Growing` marker on public enums",
-            "gist": "Use `#Growing` with the same cross-package `else` rule as `#Open`.",
-            "gains": [
-              "States author intent plainly without overloading `open`."
-            ],
-            "losses": [
-              "Does not mirror Jet's `closed set` diagnostic wording."
-            ],
-            "proposed": {
-              "code": "#Growing\nErrorKind: enum { NotFound, Timeout }\n// External caller:\nif kind == {\n    .NotFound -> \"missing\"\n    else -> \"other\"\n}"
-            }
-          },
-          {
-            "key": "D",
-            "name": "Open by default across packages, `#Closed` opt-in",
-            "gist": "Require `else` on all cross-package enum matches unless marked `#Closed`.",
-            "gains": [
-              "Authors never forget to opt into future enum growth."
-            ],
-            "losses": [
-              "Adds noisy `else` arms to fixed Core and library enums."
-            ],
-            "proposed": {
-              "code": "ErrorKind: enum { NotFound, Timeout }\n// External caller always needs else unless #Closed:\nif kind == {\n    .NotFound -> \"missing\"\n    else -> \"other\"\n}"
-            }
-          }
-        ],
-        "recommendation": {
-          "rec": "A",
-          "why": "`#Open` is one plain word that pairs directly with Jet's `closed set` wording while keeping closed enums the default.",
-          "gains": [
-            "Pairs directly with `Jet.ClosedSetElse` (`closed set` vs `#Open`).",
-            "Keeps exhaustive checking by default on fixed enums.",
-            "Matches Jet's short positive PascalCase marker style."
-          ],
-          "losses": [
-            {
-              "loss": "Library authors must mark evolving enums `#Open` upfront.",
-              "mitigation": "API checks (`#6860`) flag adding a case to a closed enum."
-            }
-          ],
-          "whyNot": [
-            {
-              "key": "B",
-              "reason": "Long negative-phrased jargon unlike Jet's other markers."
-            },
-            {
-              "key": "C",
-              "reason": "Clean, but less crisp beside `closed set`."
-            },
-            {
-              "key": "D",
-              "reason": "Forces noisy `else` arms on every fixed enum."
-            }
-          ],
-          "tradeoff": "Opt-in `#Open` keeps exhaustive matching by default while requiring authors to mark evolving enums."
-        }
-      },
-      "draftedBy": "Orchestrator",
-      "reviewedBy": "GoalsOrder",
-      "draft": false,
-      "status": "ratified",
-      "created": "2026-11-22T20:37:15.755Z",
-      "outcome": "A",
-      "ratifiedAt": "2026-11-22"
-    },
-    {
       "id": "D-CORE-CHECK1",
       "cardId": "c0e6znz4",
       "group": "language",
@@ -122529,6 +122161,20 @@
     }
   ],
   "events": [
+    {
+      "at": "2026-11-27T13:37:27.301Z",
+      "by": "Orchestrator",
+      "action": "card.update",
+      "ref": "c0pi4dar",
+      "note": "phase,logEntry"
+    },
+    {
+      "at": "2026-11-27T13:37:25.113Z",
+      "by": "Orchestrator",
+      "action": "card.criteria-meet",
+      "ref": "c0pi4dar",
+      "note": "#3"
+    },
     {
       "at": "2026-11-27T12:33:04.153Z",
       "by": "Orchestrator",
