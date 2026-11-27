@@ -3,7 +3,7 @@
     "version": 4,
     "project": "Jet",
     "nextNum": 7067,
-    "rev": 115209,
+    "rev": 115211,
     "ui": {
       "toggled": [
         "dec-group:syntax",
@@ -59885,7 +59885,7 @@
       "parentId": null,
       "needsAcceptance": false,
       "created": "2026-11-25T17:38:31.481Z",
-      "updated": "2026-11-26T21:26:15.404Z",
+      "updated": "2026-11-27T22:14:10.045Z",
       "updatedBy": "owner",
       "criteriaLastN": 12
     },
@@ -120132,14 +120132,14 @@
       "id": "D-TASKS-SPAWN1",
       "cardId": "c0aq9dry",
       "group": "language",
-      "title": "Structured concurrency with #Tasks block and Prelude spawn library",
+      "title": "Unified #Task marker for structured concurrency",
       "situation": "Today Jet bakes five concurrency forms directly into the parser: `task`, `task.all`, `task.race`, `task.any`, and `task.group`. That creates a separate mini-grammar outside Jet's normal block markers and library functions, and common fan-out loops still need five lines of manual handle lists and join loops. This vote adapts the greenfield proposal's concurrency model to Jet: a `#Tasks` block marker for structured task lifetimes paired with Prelude `spawn` and `tasks` combinators. We recommend Option A: adopt `#Tasks` and Prelude `spawn`/`tasks.map`/`tasks.all` with automated migration, removing five parser special cases while making common fan-out shorter.",
-      "gist": "Should Jet replace the `task` keyword grammar with a `#Tasks` block marker and Prelude `spawn`/`tasks` library?",
+      "gist": "Replace the five task.* parser forms with one parameterized #Task marker. #Task defaults to concurrent .All branches; .Race, .Any, and .Group compose cleanly.",
       "lesson": "Structured concurrency starts parallel tasks inside a scope that automatically waits for every child to finish and cancels siblings if one fails. Replacing five parser-baked `task.*` forms with a `#Tasks` block marker and ordinary Prelude functions makes concurrency follow the exact same rule as `#Context`, `#Transact`, and `#Defer`.",
       "explainer": "",
       "story": "Devon writes a crawler that fetches dozens of pages in parallel and also runs a background server beside a health checker. He wants one-line fan-out over a list of URLs and structured blocks that automatically join and cancel tasks without learning special concurrency syntax.",
       "inWild": "// Kotlin: structured scope function waits for all children automatically\ncoroutineScope {\n    val sizes = urls.map { async { size(it) } }.awaitAll()\n}",
-      "detail": "This ballot adapts greenfield proposal P1's second-tier concurrency row (Docs/Proposals/2026-11-24-greenfield-language.md, Part 2 line 230 and Part 3.13 lines 1998-2032) to Jet, revisiting D-CONC-SPAWN1=D.\n\nWhy the earlier draft fell short. The previous ballot rejected the proposal because it wrapped every spawn in `fn() { ... }` boilerplate and omitted high-level combinators. That made everyday fan-out longer than `task.group`. Adapting the proposal cleanly to Jet removes every one of those downsides.\n\nHow Option A engineers away every downside:\n\n1. Common fan-out becomes shorter, not longer. Today fanning out across a list with `task.group` takes five lines of manual handle lists and join loops. Adding Prelude `tasks.map(urls, size)` shrinks that pattern to one line—zero manual handles, zero lambda boilerplate, and automatic cancellation on failure.\n\n2. Zero lambda noise for bare calls and uniform syntax everywhere else. Zero-argument functions and Jet's bound methods (`Spellings.jet:67`) pass directly to `spawn(server.serve)` with no lambda. Multi-step bodies use Jet's one universal lambda `spawn(fn() { ... })`, while `tasks.all`, `tasks.race`, and `tasks.any` remain single-call Prelude combinators.\n\n3. Five parser special cases drop to zero. Removing `task`, `task.all`, `task.race`, `task.any`, and `task.group` from `Compiler/JetParser/Source/Parser/Statements.jet` and `JET_KEYWORD_LIST` (`PackageFiles.jet:462`) frees `task` as an ordinary identifier. `#Tasks { ... }` joins `#Context`, `#Transact`, `#Defer`, and `#Unsafe` under Jet's single block-marker rule. Libraries can then build peer concurrency scopes with equal power (Philosophy Pillar 5).\n\n4. Safe structured defaults with zero migration burden. Every `spawn` inside `#Tasks { ... }` joins automatically before the block exits, safely borrows parent locals, and cancels siblings on failure. Detached tasks (`spawn(work, detached: true)`) require moved, frozen, or shared captures. One automated `jet migrate` pass rewrites all ~1,650 existing `task` sites cleanly.\n\nResearch evidence. Kotlin `coroutineScope`, Swift `withTaskGroup`, Python Trio nurseries, and Rust `std::thread::scope` all implement structured concurrency as ordinary library scopes. That lets libraries compose timeouts, pools, and tracing scopes without bespoke grammar.",
+      "detail": "Replace all five task.* keyword forms with one #Task marker and free the task identifier. #Task { a: f(), b: g() } defaults to .All with concurrent branches and zero spawn boilerplate.\n\n#Task(.Race) and #Task(.Any) use the same clean branch syntax. #Task(.Group) runs sequential code with inner #Task { ... } spawns and composes with .Race, .Any, limit:, and stack:.\n\nTask.current_group() gives the enclosing group by default. #Task(.Group, as: g) binds an explicit handle for nested groups without colliding with result: #Task { ... }. List fan-out uses xs.par().map(f).",
       "options": [
         {
           "key": "A",
@@ -120301,8 +120301,11 @@
       "draftedBy": "Pip",
       "reviewedBy": "ReviewTierTwo",
       "draft": false,
-      "status": "open",
-      "created": "2026-11-25T22:34:23.999Z"
+      "status": "ratified",
+      "created": "2026-11-25T22:34:23.999Z",
+      "outcome": "A",
+      "comment": "Owner ratified unified #Task marker (.All default concurrent branches, .Race/.Any, .Group composable with .Race/.Any/limit:/stack:/as: + inner #Task { ... } + implicit Task.current_group()), replacing spawn(fn() { ... }) boilerplate and freeing task.",
+      "ratifiedAt": "2026-11-27"
     },
     {
       "id": "D-YIELD-EMIT1",
@@ -123864,6 +123867,20 @@
     }
   ],
   "events": [
+    {
+      "at": "2026-11-27T22:14:10.045Z",
+      "by": "owner",
+      "action": "decision.ratify",
+      "ref": "D-TASKS-SPAWN1",
+      "note": "A"
+    },
+    {
+      "at": "2026-11-27T22:14:08.401Z",
+      "by": "Orchestrator",
+      "action": "decision.update",
+      "ref": "D-TASKS-SPAWN1",
+      "note": ""
+    },
     {
       "at": "2026-11-27T22:09:42.988Z",
       "by": "Orchestrator",
