@@ -1,0 +1,77 @@
+// A namespace import (file or module, aliased or unaliased) needed by a
+// dotted, grouped, forward-alias or nested member import is never reported
+// unused (L0103) and carries no safe removal/rename edit, while a genuinely
+// unused namespace (including a self-prefixed unused module alias) still gets
+// L0103.
+use {
+    jet_foundation.[ImportDecl, ImportKind, ImportedItem, Program, Span]
+    jet_parser.[parse_source]
+    jet_sema.[SemaLivenessVerdict, sema_liveness_unused_imports]
+}
+
+unused_import_owner_span: fn(start: Int, end: Int) -> Span { Span{start: start, end: end} }
+
+unused_import_owner_file: fn(path: String, alias: String, explicit_alias: Bool, start: Int) -> ImportDecl {
+    alias_span: if explicit_alias -> unused_import_owner_span(start, start + alias.len()) else -> unused_import_owner_span(start, start + path.len() + 2)
+    path_span: if explicit_alias -> unused_import_owner_span(start + alias.len() + 2, start + alias.len() + 2 + path.len() + 2) else -> unused_import_owner_span(start, start + path.len() + 2)
+    ImportDecl{kind: ImportKind.File{path: path, span: path_span}, alias: alias, alias_span: alias_span, span: unused_import_owner_span(start, path_span.end), item_spans: [Span]{}, local_spans: [Span]{}, is_pub: false, is_package_pub: false, inline_version: None}
+}
+
+unused_import_owner_module: fn(name: String, alias: String, explicit_alias: Bool, start: Int) -> ImportDecl {
+    alias_span: if explicit_alias -> unused_import_owner_span(start, start + alias.len()) else -> unused_import_owner_span(start + name.len() - alias.len(), start + name.len())
+    path_span: if explicit_alias -> unused_import_owner_span(start + alias.len() + 2, start + alias.len() + 2 + name.len()) else -> unused_import_owner_span(start, start + name.len())
+    ImportDecl{kind: ImportKind.Module{name: name, span: path_span}, alias: alias, alias_span: alias_span, span: unused_import_owner_span(start, path_span.end), item_spans: [Span]{}, local_spans: [Span]{}, is_pub: false, is_package_pub: false, inline_version: None}
+}
+
+unused_import_owner_unqualified: fn(owner: String, original: String, alias: String?, start: Int) -> ImportDecl {
+    owner_span: unused_import_owner_span(start, start + owner.len())
+    item_span: unused_import_owner_span(owner_span.end + 1, owner_span.end + 1 + original.len())
+    local_span: if alias == .Val(local) -> unused_import_owner_span(start, start + local.len()) else -> item_span
+    ImportDecl{kind: ImportKind.Unqualified{module_alias: owner, module_alias_span: owner_span, items: [ImportedItem]{ImportedItem{original: original, alias: alias}}, items_span: item_span, span: unused_import_owner_span(start, item_span.end)}, alias: owner, alias_span: owner_span, span: unused_import_owner_span(start, item_span.end), item_spans: [Span]{item_span}, local_spans: [Span]{local_span}, is_pub: false, is_package_pub: false, inline_version: None}
+}
+
+unused_import_owner_program: fn(imports: [ImportDecl], used: [String]) -> Program {
+    ^program: parse_source("".bytes()).program
+    program.imports = imports
+    program.used_import_names = used
+    program
+}
+
+#Test("file and module namespaces needed by dotted, grouped or forward-alias member imports stay live") {
+    imports: [ImportDecl]{
+        // Aliased file namespace + grouped member import
+        unused_import_owner_file("./math_lib", "f_grouped", true, 10),
+        unused_import_owner_unqualified("f_grouped", "add_one", None, 40),
+        // Aliased file namespace + dotted member import
+        unused_import_owner_file("./math_lib", "f_dotted", true, 70),
+        unused_import_owner_unqualified("f_dotted", "sub_one", None, 100),
+        // Aliased file namespace + forward-alias member import (rewritten to Unqualified by loader)
+        unused_import_owner_file("./math_lib", "f_alias", true, 130),
+        unused_import_owner_unqualified("f_alias", "mul_two", Val("twice"), 160),
+        // Unaliased file namespace + forward-alias member import (no safe deletion edit!)
+        unused_import_owner_file("./math_lib", "math_lib", false, 190),
+        unused_import_owner_unqualified("math_lib", "mul_two", Val("twice_unaliased"), 220),
+        // File namespace needed by a nested dotted prefix (`pkg.sub.[helper]`)
+        unused_import_owner_file("./pkg", "pkg", true, 260),
+        unused_import_owner_unqualified("pkg.sub", "helper", None, 290),
+        // Aliased file namespace + unrewritten Module forward-alias row
+        unused_import_owner_file("./extra", "extra", true, 320),
+        unused_import_owner_module("extra.item", "extra_item", true, 350),
+        // Module namespace + forward-alias member import
+        unused_import_owner_module("core.math", "m_alias", true, 390),
+        unused_import_owner_unqualified("m_alias", "abs", Val("magnitude"), 420),
+        // Genuinely unused file namespace, unaliased file namespace, and self-prefixed module alias
+        unused_import_owner_file("./unused_a", "unused_file", true, 460),
+        unused_import_owner_file("./unused_b", "unused_b", false, 500),
+        unused_import_owner_module("self_mod.sub", "self_mod", true, 540),
+    }
+    used: [String]{"add_one", "sub_one", "twice", "twice_unaliased", "helper", "extra_item", "magnitude"}
+    program: unused_import_owner_program(imports, used)
+    ^verdicts: [SemaLivenessVerdict]{}
+    sema_liveness_unused_imports(program, [String]{}, "fixture.jet", verdicts)
+    names: loop verdict in verdicts -> verdict.fact.subject
+    assert_eq(names.join(","), "unused_file,unused_b,self_mod")
+    loop verdict in verdicts {
+        assert_eq(verdict.code, "L0103")
+    }
+}

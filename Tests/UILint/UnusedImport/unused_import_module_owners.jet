@@ -1,0 +1,19 @@
+// Module namespaces needed by grouped, dotted, and forward-alias member
+// imports stay live; only a genuinely unused module namespace emits L0103.
+use {
+    m_grouped: core.math
+    m_grouped.[abs]
+    m_dotted: core.math
+    m_dotted.sqrt
+    m_alias: core.math
+    scale: m_alias.exp
+    core.http.client
+    fetch: client.get
+    unused_mod: core.files
+}
+
+run: fn() {
+    _: abs(-1)
+    _: sqrt(4.0) + scale(1.0)
+    _: fetch
+}

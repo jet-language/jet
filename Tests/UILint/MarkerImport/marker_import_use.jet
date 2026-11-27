@@ -1,0 +1,17 @@
+// Marker applications count as uses of their declaring imports (single and
+// bracketed), while a genuinely unused import still emits L0103.
+use {
+    marks: "./marks"
+    audit_marks: "./marks"
+    unused_mod: "./unused_mod"
+}
+
+#Marks.Audited(note: "single")
+greet: fn() -> Int { 42 }
+
+#[Inline, AuditMarks.Audited(note: "list")]
+double: fn(x: Int) -> Int { x * 2 }
+
+run: fn() {
+    _: greet() + double(2)
+}

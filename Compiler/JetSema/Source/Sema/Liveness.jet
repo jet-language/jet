@@ -113,20 +113,29 @@ sema_liveness_located: fn(diagnostic: ^^Diagnostic?, segments: [SemaSourceSegmen
     Val(sema_diagnostic_with_source_location(found, segments))
 }
 
-// Whether a member import (`transform: functions.apply`) names `alias` as
-// its owner. It reaches the owner through the module import that binds that
-// name, so that module import is used.
-sema_liveness_member_owner: fn(program: Program, alias: String) -> Bool Never! {
-    loop declaration in program.imports {
-        if declaration.kind == .Unqualified(module_alias, _, _, _, _) && module_alias == alias {
-            return true
+// Whether another member or sub-module import (`transform: functions.apply`,
+// `functions.apply`, `functions.[apply]`) names `alias` as its owner. It
+// reaches the owner through the file or module import that binds that name,
+// so that import is used.
+sema_liveness_member_owner: fn(program: Program, alias: String, skip_index: Int) -> Bool Never! {
+    prefix: "{alias}."
+    loop (index, declaration) in program.imports {
+        if index == skip_index -> next
+        if declaration.kind == {
+            .Unqualified(module_alias, _, _, _, _) -> {
+                if module_alias == alias || module_alias.starts_with(prefix) -> return true
+            }
+            .Module(name, _) -> {
+                if name.starts_with(prefix) -> return true
+            }
+            .File(_, _) -> {}
         }
     }
     false
 }
 
 sema_liveness_unused_imports: fn(program: Program, foreign_aliases: [String], source: String, verdicts: ^[SemaLivenessVerdict]) {
-    loop declaration in program.imports {
+    loop (declaration_index, declaration) in program.imports {
         if declaration.is_pub || declaration.is_package_pub -> next
         if declaration.kind == {
             .File(path, path_span) -> {
@@ -136,7 +145,9 @@ sema_liveness_unused_imports: fn(program: Program, foreign_aliases: [String], so
                 explicit_alias: declaration.alias_span.end <= path_span.start
                 span: if explicit_alias -> declaration.alias_span else -> declaration.span
                 edit: if explicit_alias -> TextEdit{span: span, new_text: "_{declaration.alias}"} else -> TextEdit{span: span, new_text: ""}
-                sema_liveness_note_import(program, foreign_aliases, declaration.alias, source, span, Val(edit), verdicts)
+                if !sema_liveness_member_owner(program, declaration.alias, declaration_index) {
+                    sema_liveness_note_import(program, foreign_aliases, declaration.alias, source, span, Val(edit), verdicts)
+                }
             }
             .Module(_, path_span) -> {
                 // `use files: core.files` renames the alias, written before
@@ -144,7 +155,7 @@ sema_liveness_unused_imports: fn(program: Program, foreign_aliases: [String], so
                 explicit_alias: declaration.alias_span.end <= path_span.start
                 span: if explicit_alias -> declaration.alias_span else -> Span{start: path_span.end - declaration.alias.len(), end: path_span.end}
                 edit: if explicit_alias -> TextEdit{span: span, new_text: "_{declaration.alias}"} else -> TextEdit{span: declaration.span, new_text: ""}
-                if !sema_liveness_member_owner(program, declaration.alias) {
+                if !sema_liveness_member_owner(program, declaration.alias, declaration_index) {
                     sema_liveness_note_import(program, foreign_aliases, declaration.alias, source, span, Val(edit), verdicts)
                 }
             }

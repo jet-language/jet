@@ -1,0 +1,21 @@
+// Namespaces needed by dotted, grouped, or forward-alias member imports
+// (both aliased and unaliased file imports, and module imports) stay live;
+// only a genuinely unused namespace emits L0103.
+use {
+    m_grouped: "./math_lib"
+    m_grouped.[add_one]
+    m_dotted: "./math_lib"
+    m_dotted.sub_one
+    m_alias: "./math_lib"
+    twice: m_alias.mul_two
+    "./math_lib"
+    twice_unaliased: math_lib.mul_two
+    m_core: core.math
+    magnitude: m_core.abs
+    unused_ns: "./unused_lib"
+}
+
+run: fn() {
+    total: add_one(1) + sub_one(2) + twice(3) + twice_unaliased(4) + magnitude(-5)
+    print("{total}")
+}
