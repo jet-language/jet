@@ -91,10 +91,10 @@ priv derive_split_seed: fn(parent_seed: U64, keys: [Int | String]) -> U64 Never!
 // exact native stream: a modulo-only draw would bias the result and consume
 // a different number of words for large bounds.
 seeded_bounded: fn(state: ^U64, bound: U64) -> U64 Never! {
-    if bound == (U64{0}) -> return seeded_next(state)
+    if bound == (U64{0}) -> return seeded_next(^state)
     threshold: wrapping(U64{0} - bound) %% bound
     loop {
-        product: Int{seeded_next(state)} * Int{bound}
+        product: Int{seeded_next(^state)} * Int{bound}
         low: U64{product & 18446744073709551615}
         if low >= threshold -> return U64{product >> 64}
     }
@@ -106,13 +106,13 @@ priv __seeded_int: fn(state: ^U64, low: Int, high: Int) -> Int? Never! {
     if high < low -> return None
     if high == low -> return Val(low)
     width: U64{(high - low + 1) & 18446744073709551615}
-    offset: Int{seeded_bounded(state, width)}
+    offset: Int{seeded_bounded(^state, width)}
     ^value: (low + offset) & 18446744073709551615
     if value > C_MASK63 -> value -= 18446744073709551616
     Val(value)
 }
 
-seeded_unit: fn(state: ^U64) -> Float Never! { Float{seeded_next(state) >> 11} / C_BASE53_FLOAT }
+seeded_unit: fn(state: ^U64) -> Float Never! { Float{seeded_next(^state) >> 11} / C_BASE53_FLOAT }
 
 /// Deterministic caller-owned capability. Drawing edits this owner's `state`;
 /// keyed `split(keys...)` derives child streams purely from `root_seed` and
@@ -126,17 +126,17 @@ RNG: struct {
         lower: Int{I64{low}}
         upper: Int{I64{high}}
         if upper < lower -> core.math.__numeric_stop("RNG.int requires low <= high")
-        __seeded_int(self.state, lower, upper) ?? core.math.__numeric_stop("RNG.int requires low <= high")
+        __seeded_int(^self.state, lower, upper) ?? core.math.__numeric_stop("RNG.int requires low <= high")
     }
 
-    float: fn(^self) -> Float Never! { seeded_unit(self.state) }
+    float: fn(^self) -> Float Never! { seeded_unit(^self.state) }
 
     float_range: fn(^self, low: Float, high: Float) -> Float Never! {
         if !(high > low) -> return low
         low + (high - low) * self.float()
     }
 
-    bool: fn(^self) -> Bool Never! { (seeded_next(self.state) & U64{1}) == U64{1} }
+    bool: fn(^self) -> Bool Never! { (seeded_next(^self.state) & U64{1}) == U64{1} }
 
     // Public bool(p)'s existing arity-1 row targets this reserved
     // method; the zero-argument coin draw uses bool(), not a default p=0.5.
@@ -164,7 +164,7 @@ RNG: struct {
     bytes: fn(^self, count: Int) -> [U8] Never! {
         length: Int{I64{count}}
         ^out: [U8]{}
-        loop _ in 0..<length -> out.push(U8{seeded_next(self.state) & U64{255}})
+        loop _ in 0..<length -> out.push(U8{seeded_next(^self.state) & U64{255}})
         out
     }
 

@@ -106,15 +106,23 @@ Swept using the live modified `JetSema` across all 6 repo areas:
 | `Tests/Guards/` | Full Guards package | 0 | 0 | Clean |
 | `Tools/Agent/` | 54 standalone tools | 0 | 0 | Clean |
 | `Examples/` | 217 files (`Basics`, `Concurrency`, `Collections`, `Crypto`, `Math`, `Memory`) | 0 | 0 | Clean |
-| **Total** | **>500,000 LOC** | **38** | **21** | **~0.007% hit rate; 0 false positives on non-swapped calls; every hit is a genuine literal reversal clarified by explicit labels** |
+| **Total** | **>500,000 LOC** | **38** | **21** | **100% false-positive rate (38/38 hits were intentional, correct reversals clarified by explicit labels; 0 bugs found; ~0.007% hit rate per LOC)** |
+
+## 4b. Prior art and owner ruling
+
+- **Clang-Tidy `bugprone-swapped-arguments`** (LLVM): warns when call-site argument names/expressions are strongly similar to swapped parameter names of compatible types — uses heuristic string similarity and fires as an opt-in lint rather than a language rule.
+- **Clang-Tidy `bugprone-easily-swappable-parameters`** (LLVM): flags declarations with adjacent same-typed parameters (like Jet's rejected draft that penalized `pow(x, 2)` and `atan2(y, x)`).
+- **Swift argument labels** (SE-0046 / Swift Language Guide): makes labels mandatory by default unless `_` opts out; prevents transposition globally at the cost of verbosity on every call.
+- **Kotlin / Python named arguments**: opt-in labels with no language-level crossed-name check; relies on IDE hints or linters.
+- **Jet's choice (owner-ratified 2026-11-26):** Require directed permutation cycles of length >= 2 across eligible same-typed parameters (`E0773`, `Jet.CrossedArgumentNames`). The naive one-way rule produced ~205 false positives on idiomatic calls (`set_header(client, "User-Agent", name)`, `sign_extend(bits, 64)`); the owner explicitly ratified narrowing `#7020` to swap/rotation cycles and aligning `Diagnostics.jet` + `Docs/Spec/Reference/syntax-surface.jet` to match.
 
 ## 5. Cutover checklist
 
-1. **Diagnostics registry:** Register `E0773` (`Jet.CrossedArgumentNames`) in `Compiler/Prelude/Diagnostics.jet`, regenerate `Compiler/JetFoundation/Source/Registry/DiagnosticRows.jet` and `Docs/Site/Dist/e/Jet.CrossedArgumentNames/index.html` via `Tools/Agent/DiagnosticRows.jet --write`, and update `Tests/diagnostics_census.tsv` via `Tools/Agent/DiagnosticCensus.jet --write`.
+1. **Diagnostics registry:** Register `E0773` (`Jet.CrossedArgumentNames`) in `Compiler/Prelude/Diagnostics.jet` with text matching the ratified swap-cycle rule, regenerate `Compiler/JetFoundation/Source/Registry/DiagnosticRows.jet` and `Docs/Site/Dist/e/Jet.CrossedArgumentNames/index.html` via `Tools/Agent/DiagnosticRows.jet --write`, and update `Tests/diagnostics_census.tsv` via `Tools/Agent/DiagnosticCensus.jet --write`.
 2. **Sema check:** Implement `sema_call_check_crossed_arguments` in `Compiler/JetSema/Source/Sema/Calls/Checking.jet` with zero `.copy()` additions and zero text-keyed lookups.
-3. **Repo sweep fixes (atomic with cutover for bootstrap safety):** Label all 38 intentional reversal sites across the 21 files listed in Section 4 so Stage 1 -> Stage 2 self-hosting and `jet check Core` pass with 0 `E0773` hits.
+3. **Full-repo sweep fixes (atomic with cutover):** Sweep `Core/`, `Compiler/`, `Jetpack/`, `Tests/` (including `Tests/Run/`, `Tests/UI/`, `Tests/Conformance/`, `Tests/Cases/`), `Tools/` (including `Tools/Agent/`, `Tools/AgentEval/`, `Tools/Gauntlet/`, `Tools/Perf/`), and `Examples/`, labeling every intentional reversal site so `jet check` passes with 0 `E0773` hits.
 4. **Tests, example, and spec:**
    - Unit tests in `Compiler/JetSema/Tests/CrossedArgumentFixtures.jet`
    - UI snapshot pair `Tests/UI/crossed_argument_names.jet` and `Tests/UI/crossed_argument_names.stderr`
    - Golden example `Examples/Basics/CrossedArgumentNames.jet` and `.out` (verified at O0, O1, O2)
-   - Spec update in `Docs/Spec/spec.md` (call-binding section alongside `E0772`). No new syntax, so no parser, formatter, or editor grammar changes are needed.
+   - Spec & reference updates in `Docs/Spec/spec.md` and `Docs/Spec/Reference/syntax-surface.jet`. No new syntax, so no parser, formatter, or editor grammar changes are needed.

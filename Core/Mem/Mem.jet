@@ -134,7 +134,7 @@ fill: fn<T>(to: *T, value: T, count: Int) Never! { core.mem.fill<T>(to, value, c
 // nothing.
 #[Builtin.Role(.InlineListAppend), Unsafe("`from` names `count` live, aligned `T`s, and a T that owns a resource has one owner after the append")]
 list_append: fn<T>(values: ^[T], from: *T, count: Int) -> Bool Never! {
-    core.mem.list_append<T>(values, from, count)
+    core.mem.list_append<T>(^values, from, count)
 }
 
 // The `count` Ts at `to` become `values[start..<start + count]`, as one move
@@ -198,7 +198,7 @@ priv __view_from_raw: fn<T, O>(owner: O, pointer: *T, count: Int) -> View<T> Nev
 // once and not read again soon. The writes are ordered before the next
 // call and the function's return.
 #Builtin.Role(.InlineStreamStore) stream_store: fn<T>(dst: ^T, value: T) Never! {
-    core.mem.stream_store<T>(dst, value)
+    core.mem.stream_store<T>(^dst, value)
 }
 
 // The raw List layout operations Core's encoding and crypto storage measure
@@ -219,7 +219,7 @@ priv __view_from_raw: fn<T, O>(owner: O, pointer: *T, count: Int) -> View<T> Nev
 }
 
 #Builtin.Role(.InlineListReserveExact) priv __list_reserve_exact: fn<T>(values: ^[T], additional: Int) -> Bool Never! {
-    __list_reserve_exact<T>(values, additional)
+    __list_reserve_exact<T>(^values, additional)
 }
 
 // `p.offset(n)` and `p.byte_offset(n)` on a raw pointer `*T`: the pointer

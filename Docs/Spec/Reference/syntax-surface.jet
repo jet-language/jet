@@ -89,7 +89,9 @@ largest: fn<T: Comparable>(xs: [T]) -> T {
 }
 
 // Argument labels bind by name and may skip defaults; `/` and `*` mark the
-// positional-only and label-only zones (S61, D-APILABEL1=A).
+// positional-only and label-only zones. Two or more unlabeled positional
+// arguments whose names permute across same-typed parameters are refused with
+// E0773 (`Jet.CrossedArgumentNames`) unless labeled explicitly.
 schedule: fn(task: String, delay: Int{0}, urgent: Bool{false}) -> Bool { urgent }
 call_with_labels: fn() {
     schedule("backup", delay: 30, urgent: true)   // labels are checked docs
