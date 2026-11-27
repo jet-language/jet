@@ -1337,6 +1337,21 @@ through any function it calls (E0938), so changing a global never makes cached
 results stale. Under `jet test`, every `#Memo` cache clears between tests so
 hits, misses, and entries do not leak across tests.
 
+`#EveryField(of: T)` on a function or method is a repeatable compile-time check
+marker that refuses the declaration when its body never directly reads one or
+more stored fields of struct `T` (E0972). Computed fields (`name: T -> expr`)
+are not stored fields and are not required. Direct owner-matched reads count,
+including field accesses (`x.f`), optional field accesses (`x?.f`), compound
+assignments (`x.f += v`), non-wildcard struct destructuring (`T{f}` /
+`T{f: local}`), and struct patterns; plain writes (`x.f = v`), `..` rest
+patterns, `f: _` discards, method calls on `x`, and passing `x` whole to
+another function (including `print(x)` and `x.copy()`) do not count. `of:`
+resolves through type aliases and supports generic struct heads (`Box`) or
+instantiations (`Box<Int>`, matching concrete type arguments). Naming a
+non-struct type, a struct with private stored fields inaccessible in the
+function's module, or repeating the same struct on one function is E0974. See
+[`EveryField.jet`](../../Examples/Types/EveryField.jet).
+
 A value tag is a field-less struct whose `impl Marker` block names
 `sites: [.TypeUse]`; it declares an erased dataflow fact and its policy. Its
 denials are its own `#FX(!…)` row, which is required, names at least one

@@ -1,0 +1,14 @@
+// `#EveryField(of: Account)` fails closed (E0974) when `Account` has private
+// stored fields invisible to the function's module.
+use bank.[Account, open]
+
+bank: module
+
+#EveryField(of: Account)
+inspect_account: fn(account: Account) -> Int {
+    account.id
+}
+
+run: fn() {
+    print(inspect_account(open(7)))
+}

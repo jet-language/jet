@@ -1,0 +1,32 @@
+// Owner-typed matching: reading fields with the same names on an unrelated
+// struct (`Other`) or on a different generic instantiation (`Box<String>`)
+// never satisfies `#EveryField(of: Order)` or `#EveryField(of: Box<Int>)`.
+Order: struct {
+    id: Int,
+    total: Int,
+}
+
+Other: struct {
+    id: Int,
+    total: Int,
+}
+
+Box: struct<T> {
+    value: T,
+}
+
+#EveryField(of: Order)
+wrong_struct: fn(order: Order, other: Other) -> Int {
+    Other{id, total}: other
+    id + total + order.id
+}
+
+#EveryField(of: Box<Int>)
+wrong_generic_arg: fn(_a: Box<Int>, b: Box<String>) -> String {
+    b.value
+}
+
+run: fn() {
+    print(wrong_struct(Order{id: 1, total: 2}, Other{id: 3, total: 4}))
+    print(wrong_generic_arg(Box<Int>{value: 1}, Box<String>{value: "ok"}))
+}

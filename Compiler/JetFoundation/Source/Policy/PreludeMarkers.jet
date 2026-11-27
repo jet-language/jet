@@ -119,6 +119,17 @@ Post: struct {
     }
 }
 
+// `#EveryField(of: T)` on a function or method refuses a body that never
+// reads one of `T`'s stored fields.
+EveryField: struct {
+    of: Type,
+
+    impl Marker {
+        sites: [.Function, .Method],
+        repeatable: true,
+    }
+}
+
 // Each call of a `#Recorded` function or method is listed in its caller's
 // FunctionInfo as the CompilerCall a `check` rule hears (`recorded`), and
 // in `returns` too when a return path of the caller returns its value.

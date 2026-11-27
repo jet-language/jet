@@ -15,6 +15,7 @@ use jet_foundation.[
     MARKER_ALLOW,
     MARKER_DEADLINE,
     MARKER_DEV_PANEL,
+    MARKER_EVERY_FIELD,
     MARKER_KERNEL,
     MARKER_MAX_DEPTH,
     MARKER_MEMO,
@@ -459,7 +460,9 @@ sema_function_header_supported: fn(function: Func, context: ^SemaCheckContext) -
         // block FunctionCheck.jet wraps it in (deadline_guards). An
         // `#On(stage, Marker)` tool-stage hook is an ordinary Jet body that a
         // tool calls while compiling; MarkerRules checks its signature.
-        if sema_function_header_marker_projected(marker.name) || (marker.name == MARKER_REACTIVE && function.is_reactive) || (marker.name == MARKER_KERNEL && function.kernel != None) || marker.name == MARKER_MEMO || marker.name == MARKER_REPEATABLE || marker.name == MARKER_ALLOW || marker.name == MARKER_DEV_PANEL || marker.name == MARKER_STATE || marker.name == MARKER_DEADLINE || marker.name == MARKER_ON || (marker.name == MARKER_TARGET && function.web_marker != None) || (sema_marker_is_wasm_export(marker) && function.web_marker != None) || sema_marker_is_guest_export(marker) {
+        // `#EveryField(of: T)` is checked by EveryField.jet after body checking
+        // (E0972/E0974) and adds nothing to runtime lowering.
+        if sema_function_header_marker_projected(marker.name) || (marker.name == MARKER_REACTIVE && function.is_reactive) || (marker.name == MARKER_KERNEL && function.kernel != None) || marker.name == MARKER_MEMO || marker.name == MARKER_EVERY_FIELD || marker.name == MARKER_REPEATABLE || marker.name == MARKER_ALLOW || marker.name == MARKER_DEV_PANEL || marker.name == MARKER_STATE || marker.name == MARKER_DEADLINE || marker.name == MARKER_ON || (marker.name == MARKER_TARGET && function.web_marker != None) || (sema_marker_is_wasm_export(marker) && function.web_marker != None) || sema_marker_is_guest_export(marker) {
             next
         }
         // A user-declared marker is metadata its declaration describes; it

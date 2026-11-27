@@ -1,0 +1,14 @@
+// Repeating `#EveryField` for the same struct on one function is E0974.
+Order: struct {
+    id: Int,
+}
+
+#EveryField(of: Order)
+#EveryField(of: Order)
+read_id: fn(order: Order) -> Int {
+    order.id
+}
+
+run: fn() {
+    print(read_id(Order{id: 42}))
+}

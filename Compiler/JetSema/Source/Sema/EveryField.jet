@@ -1,0 +1,446 @@
+// `#EveryField(of: T)` check marker: refuses a function or method whose body
+// never directly reads one or more stored fields of struct `T` (E0972), and
+// fails closed when `of:` does not name a visible struct or repeats the same
+// struct on one function (E0974).
+use jet_foundation.[
+    BodyIfCond,
+    BodyPatternShape,
+    BodyTree,
+    Diagnostic,
+    Expr,
+    FnBody,
+    Func,
+    Interner,
+    InternerDelta,
+    Marker,
+    MarkerHook,
+    Span,
+    SymbolID,
+    TFieldRef,
+    TGenericParam,
+    Type,
+    checked_expr_type_id,
+    delta_type_syntax,
+    diagnostic_with_label,
+    type_name,
+    type_syntax,
+]
+
+SemaEveryFieldTarget: struct {
+    symbol_id: SymbolID,
+    type_name: String,
+    display_name: String,
+    type_args: [Type]?,
+    stored_fields: [String],
+    marker_span: Span,
+}
+
+// Check every `#EveryField(of: T)` marker attached to `func` against its
+// checked `flat` body. Skips zero-marker functions immediately.
+sema_every_field_check_function: fn(func: Func, flat: FnBody, environment: SemaScopeEnvironment, program: SemaProgramTables, generic_params: [TGenericParam], type_delta: [InternerDelta], diagnostics: ^[Diagnostic]) {
+    ^markers: [Marker]{}
+    loop marker in func.markers {
+        if !marker.negated && sema_marker_is_hook(marker, MarkerHook.EveryField) {
+            markers.push(marker.copy())
+        }
+    }
+    if markers.len() == 0 -> return
+
+    ^targets: [SemaEveryFieldTarget]{}
+    loop marker in markers {
+        target: sema_every_field_resolve_target(marker, environment, program, generic_params, diagnostics) ?? next
+        if sema_every_field_target_duplicate(targets, target) {
+            diagnostics.push(sema_error("E0974", marker.span, "duplicate `#EveryField` marker for `{target.display_name}`", "each struct needs at most one `#EveryField` marker on a function", "remove the duplicate `#EveryField` marker"))
+            next
+        }
+        targets.push(target)
+    }
+    if targets.len() == 0 -> return
+
+    tree: flat.tree
+    // Plain assignment targets (`x.f = v`) are pure writes, never reads;
+    // compound assignments (`x.f += v`) have `op != None` and read first.
+    ^written: [Int:Bool]{}
+    loop statement in tree.stmts {
+        if statement == .Assign(place, op, _, _, _) && op == None && place == .Expr(target_id) {
+            written[target_id] = true
+        }
+    }
+
+    loop target in targets {
+        read: sema_every_field_collect_reads(tree, written, target, environment, program, generic_params, type_delta)
+        ^missed: [String]{}
+        loop field_name in target.stored_fields {
+            if read.get(field_name) == None -> missed.push(field_name.copy())
+        }
+        if missed.len() > 0 {
+            listed: (loop name in missed -> "`{name}`").join(", ")
+            noun: if missed.len() == 1 -> "field" else -> "fields"
+            what: "function `{func.name}` never reads stored {noun} {listed} of `{target.display_name}`"
+            why: "`#EveryField(of: {target.display_name})` requires the body to directly read every stored field of `{target.display_name}` — plain writes, `..` rest patterns, `_` discards, and passing the whole value to another function do not count"
+            fix: "read {listed} on `{target.display_name}` in `{func.name}`, or remove `#EveryField(of: {target.display_name})`"
+            diagnostics.push(diagnostic_with_label(sema_error("E0972", func.name_span, what, why, fix), target.marker_span, "required by this `#EveryField` marker"))
+        }
+    }
+}
+
+sema_every_field_expr_to_type: fn(expr: Expr) -> Type? Never! {
+    if expr == {
+        .Paren(inner, _, _) -> sema_every_field_expr_to_type(inner)
+        .TypeValue(ty, _, _) -> Val(ty.copy())
+        .Ident(name, _, _) -> Val(Type.Named{name: name.copy()})
+        .Field(_, _, _, _) -> {
+            path: sema_marker_rules_argument_path(expr) ?? return None
+            Val(Type.Named{name: path})
+        }
+        .Str(_, _, _) | .StrMatchLit(_, _, _) | .BinMatchLit(_, _, _) | .Int(_, _, _, _, _) | .Float(_, _, _, _, _) | .Bool(_, _, _) | .Unit(_, _) | .Char(_, _, _) | .ListLit(_, _, _) | .MemberSpread(_, _, _, _) | .Spread(_, _, _) | .MapLit(_, _, _) | .Index(_, _, _, _, _) | .Slice(_, _, _, _, _, _) | .Range(_, _, _, _, _) | .Call(_, _) | .Unary(_, _, _, _) | .Binary(_, _, _, _, _) | .CompareChain(_, _, _, _, _) | .UnitLit(_, _, _, _, _, _, _) | .Deref(_, _, _) | .RawOf(_, _, _) | .Copy(_, _, _) | .Place(_, _, _, _) | .OptField(_, _, _, _, _, _) | .MethodCall(_, _, _, _, _, _, _) | .OptMethodCall(_, _, _, _, _, _, _) | .StructLit(_, _, _, _, _, _, _, _) | .TypedLit(_, _, _, _) | .EnumLit(_, _, _, _, _, _, _) | .Tainted(_, _, _, _) | .Present(_, _, _) | .Absent(_, _) | .Todo(_, _, _) | .NoElse(_, _) | .PatternTest(_, _, _, _) | .Ok(_, _, _) | .Err(_, _, _) | .Try(_, _, _, _, _) | .OrFallback(_, _, _, _, _) | .If(_, _, _, _, _, _, _) | .TupleLit(_, _, _, _) | .Lambda(_, _) | .CallValue(_, _, _, _) | .PtrFromAddr(_, _, _, _, _, _) | .ComptimeName(_, _, _, _) | .Pipe(_, _, _, _) -> None
+    }
+}
+
+sema_every_field_unwrap_tag: fn(ty: Type) -> Type Never! {
+    if ty == .Tagged(_, inner) -> return sema_every_field_unwrap_tag(inner)
+    ty.copy()
+}
+
+sema_every_field_resolve_target: fn(marker: Marker, environment: SemaScopeEnvironment, program: SemaProgramTables, generic_params: [TGenericParam], diagnostics: ^[Diagnostic]) -> SemaEveryFieldTarget? {
+    if marker.args.len() != 1 -> return None
+    arg_expr: sema_marker_rules_marker_expression(marker, 0) ?? return None
+    written: sema_every_field_expr_to_type(arg_expr) ?? {
+        diagnostics.push(sema_error("E0974", marker.span, "`#EveryField(of: ...)` requires a struct type", "`#EveryField` checks every stored field of one struct type", "pass a struct type name, such as `#EveryField(of: Order)`"))
+        return None
+    }
+    resolved: sema_every_field_unwrap_tag(sema_function_resolve_declared(environment, program, written, environment.module_identity, generic_params))
+    graph: program.registration_graph
+    row_ref: sema_type_resolve_nominal_row(graph, resolved, environment.module_identity) ?? {
+        shown: type_name(resolved)
+        diagnostics.push(sema_error("E0974", marker.span, "`#EveryField(of: {shown})` requires a struct type", "`{shown}` is not a struct type, so it has no stored struct fields to check", "name a struct type in `#EveryField(of: ...)`"))
+        return None
+    }
+    nominal: graph.modules[row_ref.module_index].nominals[row_ref.row]
+    if nominal.kind != SemaRegistrationNominalKind.Struct {
+        shown: nominal.symbol.name
+        diagnostics.push(sema_error("E0974", marker.span, "`#EveryField(of: {shown})` requires a struct type", "`{shown}` is not a struct — `#EveryField` only checks stored fields of a struct", "use a struct type with `#EveryField(of: ...)`, or exhaustive `if == {{ … }}` matching for enums"))
+        return None
+    }
+    ^type_args: [Type]?{None}
+    if resolved == .Apply(_, args) {
+        resolved_args: loop arg in args -> sema_every_field_unwrap_tag(sema_function_resolve_declared(environment, program, arg, environment.module_identity, generic_params))
+        type_args = Val(resolved_args)
+    }
+    display_name: if type_args == .Val(args) -> {
+        shown_args: (loop arg in args -> type_name(arg)).join(", ")
+        "{nominal.symbol.name}<{shown_args}>"
+    } else -> nominal.symbol.name.copy()
+    // Check stored-field visibility fail-closed: a caller that cannot see a
+    // private stored field cannot exhaustively cover the struct.
+    ^inline_module: Span?{None}
+    if nominal.source == .SourceAST(item) {
+        if item == .Struct(declared) -> inline_module = declared.inline_module
+    }
+    ^stored_fields: [String]{}
+    ^inaccessible: [String]{}
+    loop field in nominal.fields {
+        if field.computed -> next
+        if !sema_expression_field_visible(field.symbol.visibility == 2, field.symbol.visibility == 1, nominal.symbol.module_identity, inline_module, marker.span, false, environment, program) {
+            inaccessible.push(field.symbol.name.copy())
+            next
+        }
+        stored_fields.push(field.symbol.name.copy())
+    }
+    if inaccessible.len() > 0 {
+        listed: (loop name in inaccessible -> "`{name}`").join(", ")
+        noun: if inaccessible.len() == 1 -> "field" else -> "fields"
+        verb: if inaccessible.len() == 1 -> "is" else -> "are"
+        diagnostics.push(sema_error("E0974", marker.span, "`#EveryField(of: {display_name})` cannot check inaccessible private {noun} {listed}", "stored {noun} {listed} on `{display_name}` {verb} not visible in this module, so this function cannot read every stored field of `{display_name}`", "move this `#EveryField` function into `{nominal.symbol.name}`'s module, or make {listed} visible"))
+        return None
+    }
+    Val(SemaEveryFieldTarget{
+        symbol_id: nominal.symbol.id,
+        type_name: nominal.symbol.name.copy(),
+        display_name: display_name,
+        type_args: type_args,
+        stored_fields: stored_fields,
+        marker_span: marker.span,
+    })
+}
+
+sema_every_field_target_duplicate: fn(targets: [SemaEveryFieldTarget], candidate: SemaEveryFieldTarget) -> Bool Never! {
+    loop existing in targets {
+        if existing.symbol_id != candidate.symbol_id -> next
+        if existing.type_args == None || candidate.type_args == None -> return true
+        if existing.type_args == candidate.type_args -> return true
+    }
+    false
+}
+
+sema_every_field_node_type: fn(interner: Interner, type_delta: [InternerDelta], tree: BodyTree, id: Int) -> Type? Never! {
+    tid: checked_expr_type_id(tree.expr_types, id) ?? return None
+    Val(if type_delta.len() > 0 -> delta_type_syntax(interner, type_delta[0], tid) else -> type_syntax(interner, tid))
+}
+
+sema_every_field_type_matches: fn(ty: Type, target: SemaEveryFieldTarget, environment: SemaScopeEnvironment, program: SemaProgramTables, generic_params: [TGenericParam]) -> Bool Never! {
+    resolved: sema_every_field_unwrap_tag(sema_function_resolve_declared(environment, program, ty, environment.module_identity, generic_params))
+    graph: program.registration_graph
+    row_ref: sema_type_resolve_nominal_row(graph, resolved, environment.module_identity) ?? return false
+    nominal: graph.modules[row_ref.module_index].nominals[row_ref.row]
+    if nominal.symbol.id != target.symbol_id -> return false
+    if target.type_args == .Val(expected_args) {
+        if resolved == .Apply(_, actual_args) {
+            if actual_args.len() != expected_args.len() -> return false
+            loop index in 0..<expected_args.len() {
+                actual: sema_every_field_unwrap_tag(sema_function_resolve_declared(environment, program, actual_args[index], environment.module_identity, generic_params))
+                if actual != expected_args[index] -> return false
+            }
+            return true
+        }
+        return false
+    }
+    true
+}
+
+sema_every_field_struct_field_type: fn(struct_ty: Type, field_name: String, environment: SemaScopeEnvironment, program: SemaProgramTables, generic_params: [TGenericParam]) -> Type? Never! {
+    resolved: sema_every_field_unwrap_tag(sema_function_resolve_declared(environment, program, struct_ty, environment.module_identity, generic_params))
+    graph: program.registration_graph
+    row_ref: sema_type_resolve_nominal_row(graph, resolved, environment.module_identity) ?? return None
+    nominal: graph.modules[row_ref.module_index].nominals[row_ref.row]
+    if nominal.kind != SemaRegistrationNominalKind.Struct -> return None
+    generic_names: loop parameter in nominal.generic_params -> parameter.name
+    actual_args: if resolved == .Apply(_, args) -> args else -> [Type]{}
+    loop field in nominal.fields {
+        if field.symbol.name == field_name {
+            resolved_field: sema_type_resolve_member_type(graph, nominal, field.ty)
+            if generic_names.len() > 0 && actual_args.len() == generic_names.len() {
+                return Val(sema_inference_substitute_type(resolved_field, generic_names, actual_args))
+            }
+            return Val(resolved_field)
+        }
+    }
+    None
+}
+
+sema_every_field_variant_payload_types: fn(enum_ty: Type, variant_name: String, environment: SemaScopeEnvironment, program: SemaProgramTables, generic_params: [TGenericParam]) -> [Type] Never! {
+    resolved: sema_every_field_unwrap_tag(sema_function_resolve_declared(environment, program, enum_ty, environment.module_identity, generic_params))
+    graph: program.registration_graph
+    row_ref: sema_type_resolve_nominal_row(graph, resolved, environment.module_identity) ?? return [Type]{}
+    nominal: graph.modules[row_ref.module_index].nominals[row_ref.row]
+    if nominal.kind != SemaRegistrationNominalKind.Enum -> return [Type]{}
+    generic_names: loop parameter in nominal.generic_params -> parameter.name
+    actual_args: if resolved == .Apply(_, args) -> args else -> [Type]{}
+    ^out: [Type]{}
+    loop variant in nominal.variants {
+        if variant.symbol.name != variant_name -> next
+        if variant.payload == {
+            .Unit -> {}
+            .Single(ty, _) -> {
+                resolved_ty: sema_type_resolve_member_type(graph, nominal, ty)
+                out.push(if generic_names.len() > 0 && actual_args.len() == generic_names.len() -> sema_inference_substitute_type(resolved_ty, generic_names, actual_args) else -> resolved_ty)
+            }
+            .Named(fields) -> {
+                loop field in fields {
+                    resolved_ty: sema_type_resolve_member_type(graph, nominal, field.ty)
+                    out.push(if generic_names.len() > 0 && actual_args.len() == generic_names.len() -> sema_inference_substitute_type(resolved_ty, generic_names, actual_args) else -> resolved_ty)
+                }
+            }
+        }
+        break
+    }
+    out
+}
+
+sema_every_field_option_inner: fn(subject_ty: Type?) -> Type? Never! {
+    st: subject_ty ?? return None
+    unwrapped: sema_every_field_unwrap_tag(st)
+    if unwrapped == .Option(value_ty) -> return Val(value_ty)
+    None
+}
+
+sema_every_field_result_part: fn(subject_ty: Type?, is_ok: Bool) -> Type? Never! {
+    st: subject_ty ?? return None
+    unwrapped: sema_every_field_unwrap_tag(st)
+    if unwrapped == .Result(ok_ty, err_ty) -> return Val(if is_ok -> ok_ty else -> err_ty)
+    None
+}
+
+sema_every_field_list_elem: fn(subject_ty: Type?) -> Type? Never! {
+    st: subject_ty ?? return None
+    unwrapped: sema_every_field_unwrap_tag(st)
+    if unwrapped == {
+        .List(inner) | .FixedList(inner, _) -> Val(inner)
+        .Int | .Float | .Bool | .String | .Char | .Map(_, _, _) | .Shared(_) | .Option(_) | .Result(_, _) | .Fn(_, _, _, _, _, _) | .Named(_) | .Apply(_, _) | .TraitObject(_) | .Tuple(_) | .IntN(_, _) | .InlineRange(_, _, _) | .Float32 | .Tagged(_, _) | .Union(_) | .Case(_, _) | .Quantity(_, _) | .Measure(_) -> None
+    }
+}
+
+sema_every_field_map_value: fn(subject_ty: Type?) -> Type? Never! {
+    st: subject_ty ?? return None
+    unwrapped: sema_every_field_unwrap_tag(st)
+    if unwrapped == .Map(_, _, value_ty) -> return Val(value_ty)
+    None
+}
+
+sema_every_field_pattern: fn(shape: BodyPatternShape, subject_ty: Type?, target: SemaEveryFieldTarget, read: ^[String:Bool], environment: SemaScopeEnvironment, program: SemaProgramTables, generic_params: [TGenericParam]) Never! {
+    if shape == {
+        .Struct(fields, _) -> {
+            matched: if subject_ty == .Val(st) -> sema_every_field_type_matches(st, target, environment, program, generic_params) else -> false
+            loop field in fields {
+                if field == {
+                    .Bind(field_name, local, _) -> {
+                        if matched && local != "_" -> read[field_name] = true
+                    }
+                    .Value(field_name, _, _) -> {
+                        if matched -> read[field_name] = true
+                    }
+                    .Nested(field_name, nested, _) -> {
+                        if matched -> read[field_name] = true
+                        nested_ty: if subject_ty == .Val(st) -> sema_every_field_struct_field_type(st, field_name, environment, program, generic_params) else -> None
+                        sema_every_field_pattern(nested.shape, nested_ty, target, read, environment, program, generic_params)
+                    }
+                }
+            }
+        }
+        .Or(alternatives, _) -> {
+            loop alternative in alternatives {
+                sema_every_field_pattern(alternative, subject_ty, target, read, environment, program, generic_params)
+            }
+        }
+        .Present(_, _, inner, _) -> {
+            if inner == .Val(nested) {
+                sema_every_field_pattern(nested.shape, sema_every_field_option_inner(subject_ty), target, read, environment, program, generic_params)
+            }
+        }
+        .Ok(_, _, inner, _) -> {
+            if inner == .Val(nested) {
+                sema_every_field_pattern(nested.shape, sema_every_field_result_part(subject_ty, true), target, read, environment, program, generic_params)
+            }
+        }
+        .Err(_, _, inner, _) -> {
+            if inner == .Val(nested) {
+                sema_every_field_pattern(nested.shape, sema_every_field_result_part(subject_ty, false), target, read, environment, program, generic_params)
+            }
+        }
+        .List(items, _, _) -> {
+            elem_ty: sema_every_field_list_elem(subject_ty)
+            loop item in items {
+                if item == .Nested(nested) {
+                    sema_every_field_pattern(nested.shape, elem_ty, target, read, environment, program, generic_params)
+                }
+            }
+        }
+        .Map(entries, _, _) -> {
+            val_ty: sema_every_field_map_value(subject_ty)
+            loop entry in entries {
+                if entry.slot == .Nested(nested) {
+                    sema_every_field_pattern(nested.shape, val_ty, target, read, environment, program, generic_params)
+                }
+            }
+        }
+        .Variant(variant_name, bindings, _, _) -> {
+            payload_tys: if subject_ty == .Val(st) -> sema_every_field_variant_payload_types(st, variant_name, environment, program, generic_params) else -> [Type]{}
+            loop (index, binding) in bindings {
+                if binding == .Nested(nested) {
+                    slot_ty: if index < payload_tys.len() -> Val(payload_tys[index]) else -> None
+                    sema_every_field_pattern(nested.shape, slot_ty, target, read, environment, program, generic_params)
+                }
+            }
+        }
+        .Absent(_) | .Range(_, _, _) | .Text(_, _) | .Binary(_, _) -> {}
+    }
+}
+
+sema_every_field_if_cond: fn(condition: BodyIfCond, tree: BodyTree, target: SemaEveryFieldTarget, read: ^[String:Bool], environment: SemaScopeEnvironment, program: SemaProgramTables, generic_params: [TGenericParam], type_delta: [InternerDelta]) Never! {
+    if condition == {
+        .Plain(_) -> {}
+        .And(left, right) -> {
+            sema_every_field_if_cond(left, tree, target, read, environment, program, generic_params, type_delta)
+            sema_every_field_if_cond(right, tree, target, read, environment, program, generic_params, type_delta)
+        }
+        .IfLet(pattern, subj) -> {
+            subj_ty: sema_every_field_node_type(program.registration_graph.interner, type_delta, tree, subj)
+            sema_every_field_pattern(pattern.shape, subj_ty, target, read, environment, program, generic_params)
+        }
+    }
+}
+
+sema_every_field_note_guard_path: fn(path: [TFieldRef], target: SemaEveryFieldTarget, read: ^[String:Bool]) Never! {
+    loop field in path {
+        if field.owner == Val(target.symbol_id) {
+            read[field.name] = true
+        }
+    }
+}
+
+sema_every_field_field_node_matches: fn(receiver: Int, field: TFieldRef, tree: BodyTree, target: SemaEveryFieldTarget, environment: SemaScopeEnvironment, program: SemaProgramTables, generic_params: [TGenericParam], type_delta: [InternerDelta]) -> Bool Never! {
+    if target.type_args != None {
+        recv_ty: sema_every_field_node_type(program.registration_graph.interner, type_delta, tree, receiver) ?? return false
+        return sema_every_field_type_matches(recv_ty, target, environment, program, generic_params)
+    }
+    if field.owner == Val(target.symbol_id) -> return true
+    if field.owner == None {
+        recv_ty: sema_every_field_node_type(program.registration_graph.interner, type_delta, tree, receiver) ?? return false
+        return sema_every_field_type_matches(recv_ty, target, environment, program, generic_params)
+    }
+    false
+}
+
+sema_every_field_collect_reads: fn(tree: BodyTree, written: [Int:Bool], target: SemaEveryFieldTarget, environment: SemaScopeEnvironment, program: SemaProgramTables, generic_params: [TGenericParam], type_delta: [InternerDelta]) -> [String:Bool] Never! {
+    ^read: [String:Bool]{}
+    interner: program.registration_graph.interner
+    loop statement in tree.stmts {
+        if statement == .StructDestructure(temp, _, _, binds, _) {
+            if sema_every_field_type_matches(temp.ty, target, environment, program, generic_params) {
+                loop bind in binds {
+                    if bind.local.name != "_" -> read[bind.field] = true
+                }
+            }
+        }
+        if statement == .RefutableBind(pattern, init, _, _) {
+            init_ty: sema_every_field_node_type(interner, type_delta, tree, init)
+            sema_every_field_pattern(pattern.shape, init_ty, target, read, environment, program, generic_params)
+        }
+        if statement == .If(condition, _, _, _, _) {
+            sema_every_field_if_cond(condition, tree, target, read, environment, program, generic_params, type_delta)
+        }
+        if statement == .Match(subject, arms, _, _) {
+            subj_ty: sema_every_field_node_type(interner, type_delta, tree, subject)
+            loop arm in arms {
+                sema_every_field_pattern(arm.pattern.shape, subj_ty, target, read, environment, program, generic_params)
+            }
+        }
+        if statement == .EnumMatch(scrutinee, arms, _, _, _) {
+            subj_ty: sema_every_field_node_type(interner, type_delta, tree, scrutinee)
+            loop arm in arms {
+                sema_every_field_pattern(arm.pattern.shape, subj_ty, target, read, environment, program, generic_params)
+            }
+        }
+    }
+    loop node in tree.nodes {
+        kind: node.kind
+        if kind == .Field(receiver, field) && written.get(node.id) == None {
+            if sema_every_field_field_node_matches(receiver, field, tree, target, environment, program, generic_params, type_delta) {
+                read[field.name] = true
+            }
+        }
+        if kind == .OptField(base, member, _) {
+            if sema_every_field_node_type(interner, type_delta, tree, base) == .Val(base_ty) {
+                unwrapped: sema_every_field_unwrap_tag(base_ty)
+                if unwrapped == .Option(inner) && sema_every_field_type_matches(inner, target, environment, program, generic_params) {
+                    read[member] = true
+                }
+            }
+        }
+        if kind == .PatternMatches(subject, pattern) {
+            subj_ty: sema_every_field_node_type(interner, type_delta, tree, subject)
+            sema_every_field_pattern(pattern.shape, subj_ty, target, read, environment, program, generic_params)
+        }
+        if kind == .IfExpr(condition, _, _, _, _) {
+            sema_every_field_if_cond(condition, tree, target, read, environment, program, generic_params, type_delta)
+        }
+        if kind == .SharedGuardMap(_, path, _) {
+            sema_every_field_note_guard_path(path, target, read)
+        }
+        if kind == .SharedGuardSplit(_, first, second, _) {
+            sema_every_field_note_guard_path(first, target, read)
+            sema_every_field_note_guard_path(second, target, read)
+        }
+    }
+    read
+}

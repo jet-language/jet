@@ -1,0 +1,79 @@
+// `#EveryField(of: T)` guards hand-written save, compare, copy, and migrate
+// code so adding a stored field to `T` cannot silently skip it.
+Order: struct {
+    id: Int,
+    cents: Int,
+    note: String,
+    // Computed fields are derived projections, not stored fields.
+    summary: String -> "#{self.id} ({self.cents}c)",
+
+    #EveryField(of: Order)
+    serialize: fn(self) -> String {
+        "order:{self.id}:{self.cents}:{self.note}"
+    }
+}
+
+Customer: struct {
+    code: String,
+    vip: Bool,
+}
+
+Box: struct<T> {
+    value: T,
+}
+
+OrderAlias: Order
+
+#EveryField(of: Order)
+same_order: fn(left: Order, right: Order) -> Bool {
+    if left.id != right.id -> return false
+    if left.cents != right.cents -> return false
+    left.note == right.note
+}
+
+#EveryField(of: Order)
+apply_bonus: fn(order: ^Order, bonus: Int) -> String {
+    order.cents += bonus
+    "id={order.id} cents={order.cents} note={order.note}"
+}
+
+#EveryField(of: OrderAlias)
+clone_order: fn(order: Order) -> Order {
+    Order{id, cents, note, ..}: order
+    Order{id: id, cents: cents, note: note}
+}
+
+#EveryField(of: Order)
+#EveryField(of: Customer)
+render_receipt: fn(order: Order, customer: Customer) -> String {
+    tier: if customer.vip -> "vip" else -> "std"
+    "{customer.code}[{tier}] -> {order.id}/{order.cents}/{order.note}"
+}
+
+#EveryField(of: Order)
+describe_optional: fn(maybe: Order?) -> String {
+    id: maybe?.id ?? 0
+    cents: maybe?.cents ?? 0
+    note: maybe?.note ?? "none"
+    "opt:{id}:{cents}:{note}"
+}
+
+#EveryField(of: Box<T>)
+copy_box: fn<T>(box: Box<T>) -> Box<T> {
+    Box<T>{value: box.value}
+}
+
+run: fn() {
+    ^order: Order{id: 101, cents: 2500, note: "express"}
+    customer: Customer{code: "C-7", vip: true}
+    copied: clone_order(order)
+    print(order.serialize())
+    print(order.summary)
+    print("same={same_order(order, copied)}")
+    print(apply_bonus(order, 500))
+    print(render_receipt(order, customer))
+    print(describe_optional(Val(copied)))
+    print(describe_optional(None))
+    boxed: copy_box<Int>(Box<Int>{value: 42})
+    print("box={boxed.value}")
+}

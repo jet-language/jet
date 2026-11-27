@@ -1,0 +1,18 @@
+// `#EveryField(of: ...)` requires a struct type: enums and primitives are E0974.
+Status: enum {
+    Open,
+    Closed,
+}
+
+#EveryField(of: Status)
+check_enum: fn(s: Status) -> Bool {
+    s == .Open
+}
+
+#EveryField(of: Int)
+check_prim: fn(x: Int) -> Int { x }
+
+run: fn() {
+    print(check_enum(.Open))
+    print(check_prim(1))
+}

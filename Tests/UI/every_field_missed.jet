@@ -1,0 +1,34 @@
+// `#EveryField(of: Order)` refuses a function that skips stored fields, even
+// when it writes them (`o.cents = 0`), passes `o` whole (`print(o)`,
+// `helper(o)`, `o.copy()`), calls a method on `o`, or uses `..` / `_`.
+Order: struct {
+    id: Int,
+    cents: Int,
+    note: String,
+    tag: String,
+
+    summary: fn(self) -> String { "{self.id}:{self.note}" }
+}
+
+helper: fn(o: Order) {
+    _: o.cents
+}
+
+#EveryField(of: Order)
+save_incomplete: fn(o: ^Order) -> String {
+    Order{id, ..}: o
+    o.cents = 0
+    print(o)
+    helper(o)
+    _: o.copy()
+    _: o.summary()
+    if o == Order{tag: _, ..} {
+        print("matched")
+    }
+    "{id}"
+}
+
+run: fn() {
+    ^o: Order{id: 1, cents: 50, note: "hi", tag: "v1"}
+    print(save_incomplete(o))
+}

@@ -655,6 +655,9 @@ sema_marker_rules_names_item: fn(argument: Expr, source_type: String) -> Bool {
     if source_type == "Effect" && sema_marker_rules_scoped_effect_path(argument) != None {
         return true
     }
+    if source_type == "Type" && argument == .TypeValue(_, _, _) {
+        return true
+    }
     argument == .Ident(_, _, _) || argument == .Field(_, _, _, _) || argument == .EnumLit(_, _, _, _, _, _, _)
 }
 

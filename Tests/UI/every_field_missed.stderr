@@ -1,0 +1,12 @@
+Error: Jet.EveryFieldMissed: Function `save_incomplete` never reads stored fields `cents`, `note`, `tag` of `Order`
+  --> Tests/UI/every_field_missed.jet:18:1
+    |
+ 18 | save_incomplete: fn(o: ^Order) -> String {
+    | ^^^^^^^^^^^^^^^
+  --> Tests/UI/every_field_missed.jet:17:1
+    |
+ 17 | #EveryField(of: Order)
+    | ^^^^^^^^^^^^^^^^^^^^^^ required by this `#EveryField` marker
+ Why: `#EveryField(of: Order)` requires the body to directly read every stored field of `Order` — plain writes, `..` rest patterns, `_` discards, and passing the whole value to another function do not count
+ Fix: Read `cents`, `note`, `tag` on `Order` in `save_incomplete`, or remove `#EveryField(of: Order)`
+More: jet-lang.dev/e/Jet.EveryFieldMissed

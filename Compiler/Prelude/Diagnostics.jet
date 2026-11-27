@@ -15491,6 +15491,25 @@ NestedDiscoveredImports: struct {
     }
 }
 
+EveryFieldMissed: struct {
+    impl Diagnostic {
+        code: "E0972",
+        safety_class: .Opinion,
+        safety_reason: "Skipping a stored field still runs safely, and `#EveryField` refuses it so adding a field never silently misses hand-written code.",
+        meaning: "A `#EveryField(of: T)` function never reads one or more stored fields of `T`",
+        detail: true,
+        no_fix: .Behavior,
+
+        what: fn(self) -> String { "Function marked `#EveryField` never reads one or more stored fields" }
+
+        why: fn(self) -> String {
+            "`#EveryField(of: T)` requires the function body to directly read every stored field of `T` so adding a new field cannot silently skip hand-written save, compare, copy, or migration code"
+        }
+
+        fix: fn(self) -> String { "Read each missed stored field in the function body, or remove `#EveryField`." }
+    }
+}
+
 UnknownPlatform: struct {
     impl Diagnostic {
         code: "E0973",
@@ -15511,6 +15530,26 @@ UnknownPlatform: struct {
         }
 
         fix: fn(self) -> String { "Write `target: linux.x64` or `target: linux.arm64`." }
+    }
+}
+
+EveryFieldTargetInvalid: struct {
+    impl Diagnostic {
+        code: "E0974",
+        safety_class: .Soundness,
+        safety_reason: "Without a visible struct schema, `#EveryField` cannot verify every stored field is read.",
+        expert_path: "none: `#EveryField` targets one visible struct type per marker",
+        meaning: "`#EveryField(of: T)` names a non-struct type, a struct with inaccessible private fields, or repeats the same struct",
+        detail: true,
+        no_fix: .Behavior,
+
+        what: fn(self) -> String { "`#EveryField(of: T)` target is not a checkable struct" }
+
+        why: fn(self) -> String {
+            "`#EveryField(of: T)` checks every stored field of a single struct visible to the function — non-struct types have no struct fields, inaccessible private fields cannot be verified, and duplicate markers for the same struct conflict"
+        }
+
+        fix: fn(self) -> String { "Name a struct type whose stored fields are all visible in this module, once per `#EveryField` marker." }
     }
 }
 

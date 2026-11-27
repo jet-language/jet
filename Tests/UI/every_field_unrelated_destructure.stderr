@@ -1,0 +1,25 @@
+Error: Jet.EveryFieldMissed: Function `wrong_struct` never reads stored field `total` of `Order`
+  --> Tests/UI/every_field_unrelated_destructure.jet:19:1
+    |
+ 19 | wrong_struct: fn(order: Order, other: Other) -> Int {
+    | ^^^^^^^^^^^^
+  --> Tests/UI/every_field_unrelated_destructure.jet:18:1
+    |
+ 18 | #EveryField(of: Order)
+    | ^^^^^^^^^^^^^^^^^^^^^^ required by this `#EveryField` marker
+ Why: `#EveryField(of: Order)` requires the body to directly read every stored field of `Order` — plain writes, `..` rest patterns, `_` discards, and passing the whole value to another function do not count
+ Fix: Read `total` on `Order` in `wrong_struct`, or remove `#EveryField(of: Order)`
+More: jet-lang.dev/e/Jet.EveryFieldMissed
+
+Error: Jet.EveryFieldMissed: Function `wrong_generic_arg` never reads stored field `value` of `Box<Int>`
+  --> Tests/UI/every_field_unrelated_destructure.jet:25:1
+    |
+ 25 | wrong_generic_arg: fn(_a: Box<Int>, b: Box<String>) -> String {
+    | ^^^^^^^^^^^^^^^^^
+  --> Tests/UI/every_field_unrelated_destructure.jet:24:1
+    |
+ 24 | #EveryField(of: Box<Int>)
+    | ^^^^^^^^^^^^^^^^^^^^^^^^^ required by this `#EveryField` marker
+ Why: `#EveryField(of: Box<Int>)` requires the body to directly read every stored field of `Box<Int>` — plain writes, `..` rest patterns, `_` discards, and passing the whole value to another function do not count
+ Fix: Read `value` on `Box<Int>` in `wrong_generic_arg`, or remove `#EveryField(of: Box<Int>)`
+More: jet-lang.dev/e/Jet.EveryFieldMissed
