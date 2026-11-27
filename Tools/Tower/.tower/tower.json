@@ -2,8 +2,8 @@
   "meta": {
     "version": 4,
     "project": "Jet",
-    "nextNum": 7053,
-    "rev": 115105,
+    "nextNum": 7054,
+    "rev": 115109,
     "ui": {
       "toggled": [
         "dec-group:syntax",
@@ -63890,6 +63890,62 @@
       "updated": "2026-11-27T18:21:46.986Z",
       "updatedBy": "Orchestrator",
       "criteriaLastN": 3
+    },
+    {
+      "id": "c0i65t1o",
+      "num": 7053,
+      "title": "Authoring friction P0: D27 Part A (structural Copy for small plain-data structs) & D29 (zero-refcount Shared<T> borrow in scoped tasks — adversarial audit first)",
+      "body": "Owner-approved D27 Part A and D29 (conditional on adversarial safety audit) from Docs/Research/jet-authoring-friction-2026-11-27.md: (1) D27 Part A: infer Copy structurally for small plain all-scalar structs (e.g. <= 24/32 bytes, all fields Copy, zero heap pointers, no #Close/#MoveOnly), deleting the manual Copy.jet allowlist while keeping all heap types (String, [T], Map) and large structs strictly move-only. (2) D29 Option 3 (adversarial audit FIRST before any build commits): borrow Shared<T> directly with zero atomic refcount overhead inside scoped concurrency (task.group, task.all, task.race, task.any) and handle escaping/detached tasks cleanly via owned handle refcount bump, eliminating h1/h2 shadow variables.",
+      "kind": "task",
+      "track": "epoch",
+      "epoch": "G1",
+      "milestoneId": null,
+      "phase": "ready",
+      "priority": "P0",
+      "plan": null,
+      "checkSteps": null,
+      "probe": null,
+      "visualMedia": [],
+      "blockedBy": [],
+      "assignee": null,
+      "log": [],
+      "criteria": [
+        {
+          "n": 1,
+          "text": "D27 Part A: Infer Copy structurally for small plain all-scalar structs (<= 24/32B, all fields Copy, zero heap pointers, no #Close/#MoveOnly) and delete the manual Copy.jet allowlist; large structs and all heap/handle types remain strictly move-only (verified O0/O1/O2 + UI tests)",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-11-27T18:29:43.680Z"
+        },
+        {
+          "n": 2,
+          "text": "D29 Adversarial Audit (GATE BEFORE BUILD): land Docs/Audits/2026-11-27-shared-scoped-borrow-review.md attacking opener drop/move/reassign of ^hits during task.group, escaping into detached tasks/closures/returns, panic/cancel unwind, lock-order tracking, and ABI/codegen; confirm soundness before any build commits",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-11-27T18:29:44.481Z"
+        },
+        {
+          "n": 3,
+          "text": "D29 Implementation: zero-refcount Shared<T> borrow across task.group / task.all / task.race / task.any (eliminating h1/h2 shadow bindings) with compile-time refusal of unsafe move/reassign during active group and safe handle clone for detached/escaping captures (O0/O1/O2 + UI snapshots + benchmark proof)",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-11-27T18:29:45.313Z"
+        }
+      ],
+      "refs": [],
+      "tags": [],
+      "parentId": null,
+      "needsAcceptance": false,
+      "created": "2026-11-27T18:29:42.883Z",
+      "updated": "2026-11-27T18:29:45.313Z",
+      "updatedBy": "Orchestrator",
+      "criteriaLastN": 3
     }
   ],
   "decisions": [
@@ -122959,6 +123015,34 @@
     }
   ],
   "events": [
+    {
+      "at": "2026-11-27T18:29:45.313Z",
+      "by": "Orchestrator",
+      "action": "card.criteria-add",
+      "ref": "c0i65t1o",
+      "note": "#3 D29 Implementation: zero-refcount Shared<T> borrow across ta"
+    },
+    {
+      "at": "2026-11-27T18:29:44.481Z",
+      "by": "Orchestrator",
+      "action": "card.criteria-add",
+      "ref": "c0i65t1o",
+      "note": "#2 D29 Adversarial Audit (GATE BEFORE BUILD): land Docs/Audits/"
+    },
+    {
+      "at": "2026-11-27T18:29:43.680Z",
+      "by": "Orchestrator",
+      "action": "card.criteria-add",
+      "ref": "c0i65t1o",
+      "note": "#1 D27 Part A: Infer Copy structurally for small plain all-scal"
+    },
+    {
+      "at": "2026-11-27T18:29:42.883Z",
+      "by": "Orchestrator",
+      "action": "card.add",
+      "ref": "c0i65t1o",
+      "note": "Authoring friction P0: D27 Part A (structural Copy for small plain-data structs) & D29 (zero-refcount Shared<T> borrow in scoped tasks — adversarial audit first)"
+    },
     {
       "at": "2026-11-27T18:21:46.986Z",
       "by": "Orchestrator",
