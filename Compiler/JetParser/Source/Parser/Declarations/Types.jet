@@ -48,7 +48,11 @@ use {
 }
 
 parser_distinct_ahead: fn(state: ^JetParserState) -> Bool Never! {
-    parser_current_kind(state) == TOKEN_IDENT && parser_kind_at(state, 1) == TOKEN_COLON && parser_kind_at(state, 2) == TOKEN_IDENT && parser_value_at(state, 2) == "distinct"
+    if parser_current_kind(state) != TOKEN_IDENT || parser_kind_at(state, 1) != TOKEN_COLON || parser_kind_at(state, 2) != TOKEN_IDENT {
+        return false
+    }
+    word: parser_value_at(state, 2)
+    word == "distinct" || (word == "Distinct" && parser_kind_at(state, 3) == TOKEN_LT)
 }
 
 // Owner ruling (#6176): `Name: …` at file or module scope is classified by
@@ -56,10 +60,10 @@ parser_distinct_ahead: fn(state: ^JetParserState) -> Bool Never! {
 // side that reads only as a type (`[T]`, `*T`, `A | B`, `Box<T>`, `T?`) are
 // transparent type aliases. A bare path (`Other`, `random.RNG`, `other.MAX`)
 // parses as a constant binding and sema reclassifies it as an alias when the
-// path names a type (sema_alias_classify). `Name: distinct Base` is a
-// nominal type. There is no `alias` keyword. A `:` inside `<…>` is a bound.
-// A `state { … }` right-hand side takes the alias path so the alias reports
-// the ineligible state section (E0158).
+// path names a type (sema_alias_classify). `Name: distinct Base` and
+// `Name: Distinct<Base>` are nominal types. There is no `alias` keyword. A `:`
+// inside `<…>` is a bound. A `state { … }` right-hand side takes the alias path
+// so the alias reports the ineligible state section (E0158).
 parser_type_alias_ahead_at: fn(state: ^JetParserState, offset: Int) -> Bool {
     if parser_kind_at(state, offset) != TOKEN_IDENT -> return false
     ^after: offset + 1
@@ -81,8 +85,11 @@ parser_type_alias_ahead_at: fn(state: ^JetParserState, offset: Int) -> Bool {
     }
     if parser_kind_at(state, after) != TOKEN_COLON -> return false
     first: after + 1
-    if parser_kind_at(state, first) == TOKEN_IDENT && parser_value_at(state, first) == "distinct" {
-        return false
+    if parser_kind_at(state, first) == TOKEN_IDENT {
+        word: parser_value_at(state, first)
+        if word == "distinct" || (word == "Distinct" && parser_kind_at(state, first + 1) == TOKEN_LT) {
+            return false
+        }
     }
     if generic -> return true
     if parser_kind_at(state, first) == TOKEN_IDENT && parser_value_at(state, first) == "state" && parser_kind_at(state, first + 1) == TOKEN_LBRACE {
@@ -188,9 +195,12 @@ parser_parse_distinct: fn(state: ^JetParserState, modifiers: ParsedItemModifiers
     name: parser_expect_name(state, "as the distinct type name")
     parser_expect(state, TOKEN_COLON, "`:` after a distinct type name")
     keyword: parser_expect_name(state, "after `:` in a distinct declaration")
-    if parser_value(state, keyword) != "distinct" {
-        parser_add_error(state, keyword.span, "expected `distinct` in a distinct type declaration", "nominal declarations use `Name: distinct Base`", "write `Name: distinct Int`")
+    keyword_text: parser_value(state, keyword)
+    is_wrapper: keyword_text == "Distinct" && parser_current_kind(state) == TOKEN_LT
+    if !is_wrapper && keyword_text != "distinct" {
+        parser_add_error(state, keyword.span, "expected `Distinct<Base>` or `distinct` in a distinct type declaration", "nominal declarations use `Name: Distinct<Base>` or `Name: distinct Base`", "write `Name: Distinct<Int>`")
     }
+    if is_wrapper -> parser_bump(state)
     parsed: parser_parse_type(state, 0)
     // The type grammar owns the `Int(lo..hi)` spelling of every type
     // position; a named distinct keeps that interval in its declaration, so
@@ -204,7 +214,7 @@ parser_parse_distinct: fn(state: ^JetParserState, modifiers: ParsedItemModifiers
         }
         .Int | .Float | .Bool | .String | .Char | .List(_) | .Map(_, _, _) | .Shared(_) | .Option(_) | .Result(_, _) | .Fn(_, _, _, _, _, _) | .Named(_) | .Apply(_, _) | .TraitObject(_) | .Tuple(_) | .FixedList(_, _) | .IntN(_, _) | .Float32 | .Tagged(_, _) | .Union(_) | .Case(_, _) | .Quantity(_, _) | .Measure(_) -> parsed
     }
-    if range_value == None && parser_current_kind(state) == TOKEN_LPAREN {
+    if !is_wrapper && range_value == None && parser_current_kind(state) == TOKEN_LPAREN {
         open: parser_bump(state)
         lower: parser_distinct_range_bound(state, "as the range's lower bound")
         parser_expect(state, TOKEN_DOT_DOT, "between distinct range bounds")
@@ -215,11 +225,20 @@ parser_parse_distinct: fn(state: ^JetParserState, modifiers: ParsedItemModifiers
         }
         range_value = Val(IntegerRange{lo: lower.value, hi: upper.value, span: parser_cover(open.span, close.span)})
     }
+    ^wrapper_close: Span?{None}
+    if is_wrapper {
+        if parser_type_close_here(state) {
+            wrapper_close = Val(parser_take_type_close(state))
+        } else {
+            wrapper_close = Val(parser_expect(state, TOKEN_GT, "`>` after `Distinct<...>` base type").span)
+        }
+    }
     // The declaration ends at its last significant token; the statement
     // terminator is consumed but never widens the span.
-    end: if range_value == {
-        .Val(value) -> value.span
-        .None -> base.span
+    end: if {
+        wrapper_close == .Val(close_span) -> close_span
+        range_value == .Val(value) -> value.span
+        else -> base.span
     }
     parser_expect(state, TOKEN_SEMI, "after a distinct type declaration")
     markers: modifiers.markers

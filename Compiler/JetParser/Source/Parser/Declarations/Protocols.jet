@@ -1,11 +1,18 @@
 use {
     jet_foundation.[
+        CodeModule,
+        EnumLitArg,
+        Expr,
         Item,
+        MARKER_PROTOCOL,
+        Marker,
         ProtocolDecl,
         ProtocolDirection,
         ProtocolMessage,
         Span,
+        Type,
         TypedNamedField,
+        expr_span,
     ]
     jet_lexer.[
         TOKEN_COLON,
@@ -97,4 +104,81 @@ parser_protocol_message: fn(state: ^JetParserState) -> ProtocolMessage {
 
 parser_protocol_error: fn(state: ^JetParserState, span: Span, what: String, why: String, fix: String) {
     parser_add_error_code(state, "E0154", span, what, why, fix)
+}
+
+parser_protocol_step_from_expr: fn(state: ^JetParserState, expr: Expr) -> ProtocolMessage? {
+    span: expr_span(expr)
+    if expr == .EnumLit(type_name, variant, _, args, leading_dot, _, _) {
+        if !leading_dot || type_name != "" {
+            parser_protocol_error(state, span, "expected `.Client(Message)` or `.Server(Message)` in `#Protocol`", "each step names the sending endpoint and its message type", "write `.Client(Hello)` or `.Server(Ack)`")
+            return None
+        }
+        direction: if variant == {
+            "Client" -> ProtocolDirection.ClientToServer
+            "Server" -> ProtocolDirection.ServerToClient
+            else -> {
+                parser_protocol_error(state, span, "protocol steps start with `.Client(...)` or `.Server(...)`, found `.{variant}`", "the endpoint variant determines the message direction", "write `.Client(Hello)` or `.Server(Ack)`")
+                return None
+            }
+        }
+        if args.len() != 1 {
+            parser_protocol_error(state, span, "`.{variant}(...)` expects one message type, got {args.len()}", "each protocol step carries one message type or unit message name", "write `.{variant}(MessageType)`")
+            return None
+        }
+        payload_expr: if args[0] == {
+            .Positional(value) -> value
+            .Named(_, value) -> value
+        }
+        if payload_expr == {
+            .Ident(msg_name, msg_span, _) -> {
+                fields: [TypedNamedField]{TypedNamedField{name: "payload", ty: Type.Named{name: msg_name}}}
+                return Val(ProtocolMessage{direction: direction, name: msg_name, name_span: msg_span, fields: fields, span: span})
+            }
+            .EnumLit(inner_type, msg_name, msg_span, inner_args, inner_dot, inner_span, _) -> {
+                if inner_dot && inner_type == "" && inner_args.len() == 0 {
+                    return Val(ProtocolMessage{direction: direction, name: msg_name, name_span: msg_span ?? inner_span, fields: [TypedNamedField]{}, span: span})
+                }
+            }
+            .Str(_, _, _) | .StrMatchLit(_, _, _) | .BinMatchLit(_, _, _) | .Int(_, _, _, _, _) | .Float(_, _, _, _, _) | .Bool(_, _, _) | .Unit(_, _) | .Char(_, _, _) | .ListLit(_, _, _) | .MemberSpread(_, _, _, _) | .Spread(_, _, _) | .MapLit(_, _, _) | .Index(_, _, _, _, _) | .Slice(_, _, _, _, _, _) | .Range(_, _, _, _, _) | .Call(_, _) | .Unary(_, _, _, _) | .Binary(_, _, _, _, _) | .CompareChain(_, _, _, _, _) | .UnitLit(_, _, _, _, _, _, _) | .Deref(_, _, _) | .RawOf(_, _, _) | .Copy(_, _, _) | .Place(_, _, _, _) | .Field(_, _, _, _) | .OptField(_, _, _, _, _, _) | .MethodCall(_, _, _, _, _, _, _) | .OptMethodCall(_, _, _, _, _, _, _) | .StructLit(_, _, _, _, _, _, _, _) | .TypedLit(_, _, _, _) | .Tainted(_, _, _, _) | .Present(_, _, _) | .Absent(_, _) | .Todo(_, _, _) | .NoElse(_, _) | .PatternTest(_, _, _, _) | .Ok(_, _, _) | .Err(_, _, _) | .Try(_, _, _, _, _) | .OrFallback(_, _, _, _, _) | .If(_, _, _, _, _, _, _) | .TupleLit(_, _, _, _) | .Lambda(_, _) | .CallValue(_, _, _, _) | .PtrFromAddr(_, _, _, _, _, _) | .ComptimeName(_, _, _, _) | .Paren(_, _, _) | .Pipe(_, _, _, _) | .TypeValue(_, _, _) -> {}
+        }
+        parser_protocol_error(state, expr_span(payload_expr), "expected a message type name inside `.{variant}(...)`", "each step names a message struct (or `.Tag` for an empty message)", "write `.{variant}(Hello)`")
+        return None
+    }
+    parser_protocol_error(state, span, "expected `.Client(Message)` or `.Server(Message)` in `#Protocol`", "each step names the sending endpoint and its message type", "write `.Client(Hello)` or `.Server(Ack)`")
+    None
+}
+
+// Lowers `#Protocol([.Client(Hello), .Server(Ack), …]) Name: module {}` into
+// the exact `Item.ProtocolDecl` expanded by `sema_protocols_expand`.
+parser_protocol_from_module: fn(state: ^JetParserState, module_item: CodeModule) -> Item? {
+    ^found: Marker?{None}
+    loop marker in module_item.markers {
+        if marker.name != MARKER_PROTOCOL -> next
+        if found != None {
+            parser_protocol_error(state, marker.span, "`#Protocol` is already applied to `{module_item.name}`", "a protocol module carries one ordered step list", "combine the steps into one `#Protocol([...])` marker")
+            next
+        }
+        found = Val(marker)
+    }
+    marker: found ?? return None
+    if module_item.body == .Val(items) && items.len() > 0 {
+        parser_protocol_error(state, module_item.name_span, "`#Protocol` attaches to an empty host module `{module_item.name}: module {{}}`", "the compiler generates `{module_item.name}.Client` and `{module_item.name}.Server` from the `#Protocol` step list", "declare message structs beside the protocol and keep `{module_item.name}: module {{}}` empty")
+    }
+    values: parser_bind_marker_arguments(state, marker, [String]{"steps"}, 1) ?? {
+        return Val(Item.ProtocolDecl{value: ProtocolDecl{is_pub: module_item.is_pub, is_package_pub: module_item.is_package_pub, name: module_item.name, name_span: module_item.name_span, messages: [ProtocolMessage]{}, span: parser_cover(marker.span, module_item.span)}})
+    }
+    steps_expr: values[0] ?? {
+        return Val(Item.ProtocolDecl{value: ProtocolDecl{is_pub: module_item.is_pub, is_package_pub: module_item.is_package_pub, name: module_item.name, name_span: module_item.name_span, messages: [ProtocolMessage]{}, span: parser_cover(marker.span, module_item.span)}})
+    }
+    ^messages: [ProtocolMessage]{}
+    if steps_expr == .ListLit(elements, _, _) {
+        loop element in elements {
+            if parser_protocol_step_from_expr(state, element) == .Val(step) {
+                messages.push(step)
+            }
+        }
+    } else {
+        parser_protocol_error(state, expr_span(steps_expr), "`#Protocol` expects a list of steps", "write `[.Client(Hello), .Server(Ack), ...]` to declare the ordered exchange", "write `#Protocol([.Client(Hello), .Server(Ack)])`")
+    }
+    Val(Item.ProtocolDecl{value: ProtocolDecl{is_pub: module_item.is_pub, is_package_pub: module_item.is_package_pub, name: module_item.name, name_span: module_item.name_span, messages: messages, span: parser_cover(marker.span, module_item.span)}})
 }

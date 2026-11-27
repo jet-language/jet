@@ -31,6 +31,7 @@ use jet_foundation.[
     ItemTemplateLoop,
     MARKER_INLINE,
     MARKER_META,
+    MARKER_STATES,
     MARKER_STATIC,
     Marker,
     MarkerCallArg,
@@ -839,6 +840,10 @@ jfmt_fmt_fact_decl: fn(f: ^JetFmt, declaration: FactDecl) {
 }
 
 jfmt_fmt_protocol_decl: fn(f: ^JetFmt, protocol: ProtocolDecl) {
+    if protocol.span.start < f.src_bytes.len() && f.src_bytes[protocol.span.start] == 35 {
+        jfmt_write_verbatim(f, protocol.span.start, protocol.span.end, false)
+        return
+    }
     jfmt_write(f, "protocol ")
     jfmt_write(f, protocol.name)
     jfmt_write(f, " {{")
@@ -1412,6 +1417,10 @@ jfmt_fmt_trait: fn(f: ^JetFmt, t: TraitDef) {
 }
 
 jfmt_fmt_extern_rust: fn(f: ^JetFmt, block: ExternRustBlock) {
+    if block.span.start < f.src_bytes.len() && f.src_bytes[block.span.start] == 35 {
+        jfmt_write_verbatim(f, block.span.start, block.span.end, false)
+        return
+    }
     jfmt_write(f, "extern")
     jfmt_write(f, " ")
     jfmt_write(f, "rust")
@@ -1550,9 +1559,17 @@ jfmt_fmt_distinct: fn(f: ^JetFmt, d: DistinctDef) {
     jfmt_fmt_type_markers(f, d.type_markers, true)
     jfmt_fmt_written_privacy(f, d.is_pub, d.name_span.start)
     jfmt_write(f, d.name)
-    jfmt_write(f, ": distinct ")
-    jfmt_fmt_type_at(f, d.base, Val(d.base_span))
-    if d.range == .Val(range) -> jfmt_write(f, "({range.lo}..{range.hi})")
+    is_wrapper: jfmt_src_text(f, d.name_span.end, d.base_span.start).contains("Distinct<")
+    if is_wrapper {
+        jfmt_write(f, ": Distinct<")
+        jfmt_fmt_type_at(f, d.base, Val(d.base_span))
+        if d.range == .Val(range) -> jfmt_write(f, "({range.lo}..{range.hi})")
+        jfmt_write(f, ">")
+    } else {
+        jfmt_write(f, ": distinct ")
+        jfmt_fmt_type_at(f, d.base, Val(d.base_span))
+        if d.range == .Val(range) -> jfmt_write(f, "({range.lo}..{range.hi})")
+    }
 }
 
 jfmt_fmt_type_alias: fn(f: ^JetFmt, a: TypeAliasDef) {
@@ -2585,7 +2602,7 @@ jfmt_fmt_struct: fn(f: ^JetFmt, s: StructDef) {
     type_source: jfmt_source_list_span_after(f, s.name_span.end, JFMT_DELIM_ANGLE)
     jfmt_fmt_type_params(f, s.type_params, type_source)
     ^members: [JetFmtMember]{}
-    if s.state == .Val(state) {
+    if s.state == .Val(state) && !jfmt_has_states_marker(s.type_markers) {
         members.push(JetFmtMember{kind: JFMT_MEMBER_STATE, index: 0, start: state.span.start})
     }
     loop index in 0..<s.fields.len() {
@@ -2686,12 +2703,13 @@ jfmt_fmt_enum: fn(f: ^JetFmt, e: EnumDef) {
     loop marker in e.type_markers {
         if marker.inside -> inside_marker = true
     }
-    if e.variants.len() == 0 && e.groups.len() == 0 && e.trait_impls.len() == 0 && e.methods.len() == 0 && e.effect_impl == None && e.state == None && !inside_marker {
+    has_written_state: e.state != None && !jfmt_has_states_marker(e.type_markers)
+    if e.variants.len() == 0 && e.groups.len() == 0 && e.trait_impls.len() == 0 && e.methods.len() == 0 && e.effect_impl == None && !has_written_state && !inside_marker {
         jfmt_fmt_empty_type_body(f, e.name_span.end, e.span.end)
         return
     }
     derives_decode: jfmt_has_name(e.derives, "Decode")
-    cases_only: !inside_marker && e.trait_impls.len() == 0 && e.methods.len() == 0 && e.effect_impl == None && e.state == None
+    cases_only: !inside_marker && e.trait_impls.len() == 0 && e.methods.len() == 0 && e.effect_impl == None && !has_written_state
     if cases_only && jfmt_source_body_is_one_line(f, e.name_span.end) {
         jfmt_write(f, " {{ ")
         jfmt_fmt_enum_entries(f, e, "", derives_decode, true)
@@ -2751,7 +2769,7 @@ jfmt_fmt_enum: fn(f: ^JetFmt, e: EnumDef) {
     if e.effect_impl == .Val(declared) {
         members.push(JetFmtMember{kind: JFMT_MEMBER_EFFECT_IMPL, index: 0, start: declared.span.start})
     }
-    if e.state == .Val(state) {
+    if e.state == .Val(state) && !jfmt_has_states_marker(e.type_markers) {
         members.push(JetFmtMember{kind: JFMT_MEMBER_STATE, index: 0, start: state.span.start})
     }
     loop index in 0..<e.type_markers.len() {
@@ -2763,6 +2781,13 @@ jfmt_fmt_enum: fn(f: ^JetFmt, e: EnumDef) {
     jfmt_fmt_type_body_members(f, jfmt_sort_members(members), body, derives_decode, e.variants.len() > 0)
     f.indent -= 1
     jfmt_end_block(f)
+}
+
+jfmt_has_states_marker: fn(markers: [Marker]) -> Bool Never! {
+    loop marker in markers {
+        if marker.name == MARKER_STATES -> return true
+    }
+    false
 }
 
 jfmt_fmt_variant: fn(f: ^JetFmt, v: Variant, derives_decode: Bool) {

@@ -844,6 +844,48 @@ StepLimit: struct {
     }
 }
 
+// `#Defer { … }` runs a cleanup block when its enclosing block exits in reverse
+// registration order. A single-statement `#Defer { close(resource) }` satisfies
+// the resource's close duty identically to `defer close(resource)`.
+Defer: struct {
+    impl Marker {
+        sites: [.Block],
+    }
+}
+
+// `#States({ Draft: [.Confirmed, .Canceled], … }, groups: { Open: [.Draft, .Confirmed] })`
+// declares a struct or enum's typestate graph and optional named state groups.
+States: struct {
+    transitions: Value,
+    groups: Value{none},
+
+    impl Marker {
+        sites: [.Type],
+    }
+}
+
+// `#Protocol([.Client(Hello), .Server(Ack), …])` on a module declares an
+// ordered message exchange and generates `#SingleUse` `.Client` and `.Server`
+// handles whose typestate transitions follow the step list.
+Protocol: struct {
+    steps: Value,
+
+    impl Marker {
+        sites: [.Module],
+    }
+}
+
+// `#Foreign(.Rust, "crate@ver")` declares a foreign library binding module or
+// block, lowering identically to `extern <lang> "…" { … }`.
+Foreign: struct {
+    language: Ident,
+    library: String,
+
+    impl Marker {
+        sites: [.Module],
+    }
+}
+
 // The built-in value tags. `Input` is untrusted input, so it protects the
 // integrity of what it may flow into; `Secret` keeps its value out of timing.
 #FX(!DB, !Exec, !Net)

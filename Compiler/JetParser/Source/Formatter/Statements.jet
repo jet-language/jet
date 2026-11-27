@@ -920,9 +920,15 @@ jfmt_fmt_stmt: fn(f: ^JetFmt, stmt: Stmt) {
         }
     }
     if stmt == {
-        .DeferClose(close, _) -> {
-            jfmt_write(f, "defer ")
-            jfmt_fmt_expr(f, close, JFMT_PREC_OR_FALLBACK)
+        .DeferClose(close, span) -> {
+            if jfmt_defer_is_marker(f, span) {
+                jfmt_write(f, "#Defer {{ ")
+                jfmt_fmt_expr(f, close, JFMT_PREC_OR_FALLBACK)
+                jfmt_write(f, " }}")
+            } else {
+                jfmt_write(f, "defer ")
+                jfmt_fmt_expr(f, close, JFMT_PREC_OR_FALLBACK)
+            }
         }
         .Expr(e) -> {
             unsafe_assert: if e == {
@@ -1087,8 +1093,13 @@ jfmt_fmt_stmt: fn(f: ^JetFmt, stmt: Stmt) {
         // `#Shield { … }` round-trips verbatim.
         .Shield(body, span) -> { jfmt_fmt_block_body(f, body, span.end) }
         // `defer statement` stays one line; a braced or longer body keeps its braces.
+        // `#Defer { … }` round-trips verbatim.
         .Defer(body, span) -> {
             if {
+                jfmt_defer_is_marker(f, span) -> {
+                    jfmt_write(f, "#Defer {{")
+                    jfmt_fmt_block_body(f, body, span.end)
+                }
                 body.len() == 1 && !jfmt_defer_braced(f, span) -> {
                     jfmt_write(f, "defer ")
                     jfmt_fmt_stmt(f, body[0])
@@ -1241,6 +1252,11 @@ jfmt_fmt_stmt: fn(f: ^JetFmt, stmt: Stmt) {
             jfmt_end_block(f)
         }
     }
+}
+
+// Whether the deferred statement at `span` was written as `#Defer { … }`.
+jfmt_defer_is_marker: fn(f: JetFmt, span: Span) -> Bool Never! {
+    span.start < f.src_bytes.len() && f.src_bytes[span.start] == 35
 }
 
 // Whether the source `defer` at `span` opens a braced block.

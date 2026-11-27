@@ -221,6 +221,10 @@ parser_parse_item_or_import: fn(state: ^JetParserState) -> ParsedItemOrImport {
         value: parser_parse_c_module(state)
         return ParsedItemOrImport{item: Val(value), handled: true}
     }
+    if parser_foreign_marker_ahead_at(state, 0) {
+        value: parser_parse_foreign_marker(state)
+        return ParsedItemOrImport{item: Val(value), handled: true}
+    }
     modifiers: parser_parse_item_modifiers(state, true)
     if {
         parser_module_ahead(state) -> {
@@ -2286,6 +2290,7 @@ parser_parse_struct: fn(state: ^JetParserState, modifiers: ParsedItemModifiers) 
     close: parser_expect(state, TOKEN_RBRACE, "`}}` after struct fields")
     value.span = parser_cover(modifiers.start_span, close.span)
     markers: parser_merge_inbody_markers(state, modifiers.markers, inside, modifiers.start_span.start, close.span.start, "struct `{value.name}`")
+    parser_apply_states_marker(state, value.name, value.name_span, value.state, markers)
     value.cap = parser_type_fx_cap(state, markers, value.name, "type")
     parser_apply_struct_markers(state, value, markers, modifiers.grouped_markers)
     parser_finish_marker_struct(state, value)
@@ -2371,6 +2376,7 @@ parser_parse_enum: fn(state: ^JetParserState, modifiers: ParsedItemModifiers) ->
     // the package auto-derive default and SingleUse/MustUse, applied once the
     // body (and every marker line in it) is read.
     markers: parser_merge_inbody_markers(state, modifiers.markers, inside, modifiers.start_span.start, close.span.start, "enum `{value.name}`")
+    parser_apply_states_marker(state, value.name, value.name_span, value.state, markers)
     value.cap = parser_type_fx_cap(state, markers, value.name, "type")
     ^_: parser_layout_marker_fact(state, markers, modifiers.grouped_markers, true)
     parser_apply_enum_type_markers(state, value, markers)

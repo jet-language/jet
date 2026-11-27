@@ -1565,6 +1565,9 @@ priv sema_unknown_type_suggestion: fn(name: String, declared: [String]) -> Strin
 }
 
 sema_unknown_type_name: fn(name: String, span: Span, declared: [String], name_span: Span?) -> Diagnostic {
+    if name == "Distinct" {
+        return sema_error("E0119", span, "`Distinct<T>` declares a named nominal type and cannot be written anonymously here", "each `Name: Distinct<Base>` declaration mints one fresh nominal type; an inline `Distinct<T>` has no shared type name", "declare `Name: Distinct<Base>` at module scope and reference `Name` here")
+    }
     if name == "Text" {
         return sema_error("E0119", span, "there's no type called `Text`", "Jet's text type is `String`", "write `String` instead of `Text`")
     }
@@ -1615,6 +1618,10 @@ sema_failure_declared_type_names: fn(environment: SemaScopeEnvironment, program:
 // then the type arguments it cannot take. A word-cased acronym head
 // (`Id<Node>`) gets the one E0358 instead.
 sema_unknown_generic_type_name: fn(name: String, span: Span, diagnostics: ^[Diagnostic]) {
+    if name == "Distinct" {
+        diagnostics.push(sema_error("E0119", span, "`Distinct<T>` declares a named nominal type and cannot be written anonymously here", "each `Name: Distinct<Base>` declaration mints one fresh nominal type; an inline `Distinct<T>` has no shared type name", "declare `Name: Distinct<Base>` at module scope and reference `Name` here"))
+        return
+    }
     if sema_casing_acronym_diagnostic(name, span) == .Val(acronym) {
         diagnostics.push(acronym)
         return

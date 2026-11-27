@@ -2,11 +2,16 @@
 // These identifier-led forms are selected by the declaration dispatcher.
 use {
     jet_foundation.[
+        Expr,
+        ExprField,
+        MARKER_STATES,
+        Marker,
         NamedSpan,
         Span,
         StateArrow,
         StateDecl,
         StateGroup,
+        expr_span,
     ]
     jet_lexer.[
         TOKEN_COLON,
@@ -115,4 +120,100 @@ parser_state_dotted_name: fn(state: ^JetParserState, context: String) -> NamedSp
         end = part.span
     }
     NamedSpan{name: name, span: parser_cover(first.span, end)}
+}
+
+parser_states_record_fields: fn(expr: Expr) -> [ExprField]? Never! {
+    if expr == {
+        .StructLit(type_name, _, _, _, fields, inferred, _, _) -> if inferred && type_name == "" -> Val(fields) else -> None
+        .TypedLit(head, body, _, _) -> if head == None && body == .Empty -> Val([ExprField]{}) else -> None
+        .Str(_, _, _) | .StrMatchLit(_, _, _) | .BinMatchLit(_, _, _) | .Int(_, _, _, _, _) | .Float(_, _, _, _, _) | .Bool(_, _, _) | .Unit(_, _) | .Char(_, _, _) | .ListLit(_, _, _) | .MemberSpread(_, _, _, _) | .Spread(_, _, _) | .MapLit(_, _, _) | .Index(_, _, _, _, _) | .Slice(_, _, _, _, _, _) | .Range(_, _, _, _, _) | .Ident(_, _, _) | .Call(_, _) | .Unary(_, _, _, _) | .Binary(_, _, _, _, _) | .CompareChain(_, _, _, _, _) | .UnitLit(_, _, _, _, _, _, _) | .Deref(_, _, _) | .RawOf(_, _, _) | .Copy(_, _, _) | .Place(_, _, _, _) | .Field(_, _, _, _) | .OptField(_, _, _, _, _, _) | .MethodCall(_, _, _, _, _, _, _) | .OptMethodCall(_, _, _, _, _, _, _) | .EnumLit(_, _, _, _, _, _, _) | .Tainted(_, _, _, _) | .Present(_, _, _) | .Absent(_, _) | .Todo(_, _, _) | .NoElse(_, _) | .PatternTest(_, _, _, _) | .Ok(_, _, _) | .Err(_, _, _) | .Try(_, _, _, _, _) | .OrFallback(_, _, _, _, _) | .If(_, _, _, _, _, _, _) | .TupleLit(_, _, _, _) | .Lambda(_, _) | .CallValue(_, _, _, _) | .PtrFromAddr(_, _, _, _, _, _) | .ComptimeName(_, _, _, _) | .Paren(_, _, _) | .Pipe(_, _, _, _) | .TypeValue(_, _, _) -> None
+    }
+}
+
+parser_states_member_name: fn(expr: Expr) -> NamedSpan? Never! {
+    if expr == {
+        .EnumLit(type_name, variant, variant_span, args, leading_dot, span, _) -> {
+            if leading_dot && type_name == "" && args.len() == 0 {
+                return Val(NamedSpan{name: variant, span: variant_span ?? span})
+            }
+            None
+        }
+        .Ident(name, span, _) -> Val(NamedSpan{name: name, span: span})
+        .Str(_, _, _) | .StrMatchLit(_, _, _) | .BinMatchLit(_, _, _) | .Int(_, _, _, _, _) | .Float(_, _, _, _, _) | .Bool(_, _, _) | .Unit(_, _) | .Char(_, _, _) | .ListLit(_, _, _) | .MemberSpread(_, _, _, _) | .Spread(_, _, _) | .MapLit(_, _, _) | .Index(_, _, _, _, _) | .Slice(_, _, _, _, _, _) | .Range(_, _, _, _, _) | .Call(_, _) | .Unary(_, _, _, _) | .Binary(_, _, _, _, _) | .CompareChain(_, _, _, _, _) | .UnitLit(_, _, _, _, _, _, _) | .Deref(_, _, _) | .RawOf(_, _, _) | .Copy(_, _, _) | .Place(_, _, _, _) | .Field(_, _, _, _) | .OptField(_, _, _, _, _, _) | .MethodCall(_, _, _, _, _, _, _) | .OptMethodCall(_, _, _, _, _, _, _) | .StructLit(_, _, _, _, _, _, _, _) | .TypedLit(_, _, _, _) | .Tainted(_, _, _, _) | .Present(_, _, _) | .Absent(_, _) | .Todo(_, _, _) | .NoElse(_, _) | .PatternTest(_, _, _, _) | .Ok(_, _, _) | .Err(_, _, _) | .Try(_, _, _, _, _) | .OrFallback(_, _, _, _, _) | .If(_, _, _, _, _, _, _) | .TupleLit(_, _, _, _) | .Lambda(_, _) | .CallValue(_, _, _, _) | .PtrFromAddr(_, _, _, _, _, _) | .ComptimeName(_, _, _, _) | .Paren(_, _, _) | .Pipe(_, _, _, _) | .TypeValue(_, _, _) -> None
+    }
+}
+
+parser_states_has_name: fn(states: [NamedSpan], name: String) -> Bool Never! {
+    loop entry in states {
+        if entry.name == name -> return true
+    }
+    false
+}
+
+parser_states_list_members: fn(state: ^JetParserState, expr: Expr, context: String) -> [NamedSpan] {
+    ^members: [NamedSpan]{}
+    if expr == .ListLit(elements, _, _) {
+        loop element in elements {
+            if parser_states_member_name(element) == .Val(named) {
+                members.push(named)
+            } else {
+                parser_add_error(state, expr_span(element), "expected a state name such as `.Confirmed` {context}", "each entry in a `#States` list names a state of this type", "write `.StateName` inside the list")
+            }
+        }
+        return members
+    }
+    parser_add_error(state, expr_span(expr), "expected a list of state names {context}", "`#States` maps each state or group to a `[.State, ...]` list", "write `[.Target]` or `[]`")
+    members
+}
+
+// Lowers `#States({ Draft: [.Confirmed, .Canceled], … }, groups: { Open: [.Draft, .Confirmed] })`
+// on a struct or enum into the exact `StateDecl` produced by `state { … }`,
+// auto-including target-only states so terminal states do not need empty rows.
+parser_apply_states_marker: fn(state: ^JetParserState, type_name: String, type_name_span: Span, existing: ^StateDecl?, markers: [Marker]) {
+    loop marker in markers {
+        if marker.name != MARKER_STATES -> next
+        values: parser_bind_marker_arguments(state, marker, [String]{"transitions", "groups"}, 1) ?? next
+        transitions_expr: values[0] ?? next
+        fields: parser_states_record_fields(transitions_expr) ?? {
+            parser_add_error(state, expr_span(transitions_expr), "`#States` expects a record of state transitions", "write `{{ State: [.Next, ...], ... }}` to declare a type's states and legal moves", "write `#States({{ Draft: [.Confirmed], Confirmed: [] }})`")
+            next
+        }
+        ^states: [NamedSpan]{}
+        ^arrows: [StateArrow]{}
+        ^groups: [StateGroup]{}
+        loop field in fields {
+            targets: parser_states_list_members(state, field.value, "in `#States` transitions")
+            arrows.push(StateArrow{from: NamedSpan{name: field.name, span: field.name_span}, to: targets, span: parser_cover(field.name_span, expr_span(field.value))})
+            states.push(NamedSpan{name: field.name, span: field.name_span})
+        }
+        // Auto-include target-only states so terminal states (`Shipped`, `Canceled`)
+        // participate in typestate checking even when written only as targets.
+        ^extra_targets: [NamedSpan]{}
+        loop arrow in arrows {
+            loop target in arrow.to {
+                if !parser_states_has_name(states, target.name) && !parser_states_has_name(extra_targets, target.name) {
+                    extra_targets.push(NamedSpan{name: target.name, span: target.span})
+                }
+            }
+        }
+        loop target in extra_targets {
+            arrows.push(StateArrow{from: NamedSpan{name: target.name, span: target.span}, to: [NamedSpan]{}, span: target.span})
+            states.push(target)
+        }
+        if values[1] == .Val(groups_expr) {
+            group_fields: parser_states_record_fields(groups_expr) ?? {
+                parser_add_error(state, expr_span(groups_expr), "`#States(..., groups: ...)` expects a record of state groups", "each group maps a group name to the list of states it includes", "write `groups: {{ Open: [.Draft, .Confirmed] }}`")
+                [ExprField]{}
+            }
+            loop gfield in group_fields {
+                members: parser_states_list_members(state, gfield.value, "in `#States` group `{gfield.name}`")
+                groups.push(StateGroup{name: NamedSpan{name: gfield.name, span: gfield.name_span}, members: members, span: parser_cover(gfield.name_span, expr_span(gfield.value))})
+            }
+        }
+        section: StateDecl{is_pub: false, is_package_pub: false, type_name: type_name, type_name_span: type_name_span, states: states, arrows: arrows, groups: groups, span: marker.span}
+        if existing == {
+            .None -> { existing = Val(section) }
+            .Val(_) -> parser_report_repeated_state_section(state, section, type_name)
+        }
+    }
 }

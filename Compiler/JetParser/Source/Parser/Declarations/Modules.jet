@@ -129,6 +129,9 @@ parser_parse_module: fn(state: ^JetParserState, modifiers: ParsedItemModifiers) 
         parser_module_is_dashed(name_head.name) || parser_module_config_body_ahead(state) -> parser_parse_module_decl_after_name(state, modifiers, start.span, name_head)
         else -> {
             module_item: parser_parse_code_module_after_name(state, modifiers, start.span, name_head)
+            if parser_protocol_from_module(state, module_item) == .Val(protocol_item) {
+                return protocol_item
+            }
             parser_module_apply_cap(state, module_item)
         }
     }

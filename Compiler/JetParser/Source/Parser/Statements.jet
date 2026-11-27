@@ -2553,6 +2553,9 @@ parser_parse_marked_statement: fn(state: ^JetParserState) -> Stmt {
         }
         "Reactive" -> Stmt.Reactive{body: body.statements, span: span}
         "Shield" -> Stmt.Shield{body: body.statements, span: span}
+        "Defer" -> {
+            if body.statements.len() == 1 && body.statements[0] == .Expr(expression) && parser_defer_close_call(expression) -> Stmt.DeferClose{close: expression, span: span} else -> Stmt.Defer{body: body.statements, span: span}
+        }
         "Off" | "On" -> Stmt.Switched{marker: marker, body: body.statements, span: span}
         "FX" -> parser_authority_scope_stmt(state, marker, args, body.statements, span) ?? Stmt.Expr{expr: Expr.Unit{span: hash.span, id: parser_node_id(state)}}
         "Policy" -> parser_policy_block_stmt(state, marker, body.statements, span) ?? Stmt.Expr{expr: Expr.Unit{span: hash.span, id: parser_node_id(state)}}

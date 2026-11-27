@@ -638,6 +638,7 @@ parser_colon_declarations_local: fn(tokens: ^[Token], tables: TokenTables) -> Pa
     generate_id: parser_colon_find_name(tables, "generate")
     code_id: parser_colon_find_name(tables, "code")
     run_id: parser_colon_find_name(tables, "#run")
+    foreign_id: parser_colon_find_name(tables, "Foreign")
     has_marker_words: marker_id >= 0 || derive_id >= 0 || expand_id >= 0
     ^saved: [ParserColonSaved]{}
     saved.try_reserve(16) ?? ()
@@ -719,6 +720,13 @@ parser_colon_declarations_local: fn(tokens: ^[Token], tables: TokenTables) -> Pa
                 }
             }
             head_kind = if head < count -> tokens[head].kind else -> -1
+            if head_kind == TOKEN_LBRACE && foreign_id >= 0 && (frame == PARSER_COLON_FRAME_MODULE || frame == PARSER_COLON_FRAME_CONTAINER) {
+                hash_at: parser_colon_code_at(tokens, index)
+                name_at: parser_colon_code_at(tokens, hash_at + 1)
+                if hash_at < head && name_at < head && tokens[hash_at].kind == TOKEN_HASH && tokens[name_at].kind == TOKEN_IDENT && name_index(tokens[name_at].decoded) == foreign_id {
+                    head_kind = TOKEN_KW_EXTERN
+                }
+            }
             if parser_colon_head_keyword(head_kind) {
                 declared: parser_colon_declared_name(tokens, head)
                 if declared >= 0 {

@@ -4,6 +4,7 @@
 use jet_lexer.[
     TOKEN_COLON,
     TOKEN_DOT,
+    TOKEN_EOF,
     TOKEN_HASH,
     TOKEN_IDENT,
     TOKEN_KW_EXTERN,
@@ -12,6 +13,7 @@ use jet_lexer.[
     TOKEN_LPAREN,
     TOKEN_LT,
     TOKEN_MINUS,
+    TOKEN_RPAREN,
     TOKEN_SEMI,
 ]
 
@@ -22,6 +24,28 @@ parser_c_module_ahead_at: fn(state: ^JetParserState, offset: Int) -> Bool Never!
     marker: parser_lookahead(state, offset + 1)
     word: parser_value(state, marker)
     (word == "Import" || word == "Bindgen") && parser_kind_at(state, offset + 2) == TOKEN_KW_MODULE
+}
+
+// `#Foreign(.Rust, "crate@ver") { … }` or `#Foreign(.Rust, "crate@ver") Name: module { … }`.
+parser_foreign_marker_ahead_at: fn(state: ^JetParserState, offset: Int) -> Bool Never! {
+    if parser_kind_at(state, offset) != TOKEN_HASH || parser_kind_at(state, offset + 1) != TOKEN_IDENT {
+        return false
+    }
+    if parser_value_at(state, offset + 1) != "Foreign" || parser_kind_at(state, offset + 2) != TOKEN_LPAREN {
+        return false
+    }
+    ^at: offset + 3
+    ^depth: 1
+    loop depth > 0 {
+        kind: parser_kind_at(state, at)
+        if kind == TOKEN_LPAREN -> depth += 1
+        if kind == TOKEN_RPAREN -> depth -= 1
+        if kind == TOKEN_EOF -> return false
+        at += 1
+    }
+    loop parser_kind_at(state, at) == TOKEN_SEMI -> at += 1
+    after: parser_kind_at(state, at)
+    after == TOKEN_LBRACE || after == TOKEN_KW_MODULE
 }
 
 parser_item_declaration_ahead_at: fn(state: ^JetParserState, offset: Int) -> Bool Never! {
@@ -40,6 +64,7 @@ parser_item_declaration_ahead_at: fn(state: ^JetParserState, offset: Int) -> Boo
             if parser_kind_at(state, offset + 1) != TOKEN_IDENT -> return false
             marker_name: parser_value_at(state, offset + 1)
             if parser_c_module_ahead_at(state, offset) -> return true
+            if parser_foreign_marker_ahead_at(state, offset) -> return true
             // `#Test.X` is a qualified marker (parser_test_ahead), not a test.
             if marker_name == {
                 "UnitFamily" -> parser_kind_at(state, offset + 2) == TOKEN_LPAREN
@@ -49,8 +74,11 @@ parser_item_declaration_ahead_at: fn(state: ^JetParserState, offset: Int) -> Boo
         }
         TOKEN_IDENT -> {
             name: parser_value_at(state, offset)
-            if parser_kind_at(state, offset + 1) == TOKEN_COLON && parser_kind_at(state, offset + 2) == TOKEN_IDENT && parser_value_at(state, offset + 2) == "distinct" {
-                return true
+            if parser_kind_at(state, offset + 1) == TOKEN_COLON && parser_kind_at(state, offset + 2) == TOKEN_IDENT {
+                rhs: parser_value_at(state, offset + 2)
+                if rhs == "distinct" || (rhs == "Distinct" && parser_kind_at(state, offset + 3) == TOKEN_LT) {
+                    return true
+                }
             }
             if name == {
                 "state" -> parser_kind_at(state, offset + 1) == TOKEN_IDENT || parser_kind_at(state, offset + 1) == TOKEN_LBRACE

@@ -1,0 +1,179 @@
+// Clause-sublanguage markers and wrappers: `#Defer`, `x.freeze()`,
+// `Name: Distinct<Base>`, `#States({…}, groups: {…})`, and `#Protocol([…])`.
+package: {
+    name: "clause_sublanguage_markers"
+    authority: { allow: [IO, Time.Wait] }
+}
+
+// 1. `Name: Distinct<Base>` nominal wrappers, bundle derives, and range bounds.
+AccountID: Distinct<Int>
+
+#Numeric
+Meters: Distinct<Float>
+
+Percent: Distinct<Int(0..100)>
+
+describe_account: fn(id: AccountID) -> String { "acct:{id.raw()}" }
+
+// 2. `#States({…}, groups: {…})` above a struct (auto-including terminal states),
+//    in-body `#States: ({…})`, and on an enum.
+#States(
+    {
+        Draft: [.Confirmed, .Canceled],
+        Confirmed: [.Shipped, .Canceled],
+    },
+    groups: {
+        Open: [.Draft, .Confirmed],
+    },
+)
+Order: struct {
+    id: Int,
+
+    start: fn(id: Int) -> Order.Draft { Order{id: id} }
+
+    confirm: fn(self: ^^Order.Draft) -> Order.Confirmed { self }
+
+    ship: fn(self: ^^Order.Confirmed) -> Order.Shipped { self }
+
+    cancel: fn(self: ^^Order.Open) -> Order.Canceled { self }
+}
+
+remind_open: fn(order: Order.Open) -> String { "open:{order.id}" }
+
+receipt_shipped: fn(order: Order.Shipped) -> String { "shipped:{order.id}" }
+
+Lamp: struct {
+    #States: ({Off: [.On], On: [.Off]})
+    watts: Int,
+
+    make: fn(watts: Int) -> Lamp.Off { Lamp{watts: watts} }
+
+    turn_on: fn(self: ^^Lamp.Off) -> Lamp.On { self }
+}
+
+#States(
+    {
+        Shut: [.Open, .Locked],
+        Open: [.Shut],
+        Locked: [.Shut],
+    },
+)
+Door: enum {
+    Shut,
+    Open,
+    Locked(code: Int),
+
+    open: fn(self: Door.Shut) -> Door.Open { .Open }
+
+    lock: fn(self: Door.Shut, code: Int) -> Door.Locked { .Locked(code: code) }
+
+    unlock: fn(self: Door.Locked, key: Int) -> Door.Shut {
+        if self == {
+            .Locked(_) -> .Shut
+            .Shut | .Open -> .Shut
+        }
+    }
+
+    label: fn(self) -> String {
+        if self == {
+            .Shut -> "shut"
+            .Open -> "open"
+            .Locked(_) -> "locked"
+        }
+    }
+}
+
+// 3. `#Protocol([.Client(Msg), .Server(Msg), …])` on an empty host module.
+Hello: struct {
+    version: Int,
+}
+
+Ack: struct {
+    session: Int,
+}
+
+Charge: struct {
+    cents: Int,
+}
+
+Receipt: struct {
+    id: Int,
+}
+
+#Protocol([
+    .Client(Hello),
+    .Server(Ack),
+    .Client(Charge),
+    .Server(Receipt),
+])
+Payment: module {}
+
+drive_payment: fn(h: ^^Payment.Client) {
+    h1: h.Hello(Hello{version: 1}) ?? panic("hello failed")
+    h2: h1.recv_Ack() ?? panic("ack failed")
+    h3: h2.Charge(Charge{cents: 500}) ?? panic("charge failed")
+    h3.recv_Receipt()
+}
+
+// 4. `#Defer { }` LIFO blocks and unified `#Defer { close(resource) }` duty.
+#SingleUse GuardHandle: struct {
+    tag: String,
+
+    impl Close {
+        close: fn(^^self) { print("close:{self.tag}") }
+    }
+}
+
+run_defer_demo: fn(early: Bool) -> Int {
+    handle: GuardHandle{tag: "db"}
+    #Defer { close(handle) }
+    #Defer { print("defer:first") }
+    #Defer { print("defer:second") }
+    if early -> return 10
+    20
+}
+
+// 5. `x.freeze()` method snapshot and chained idempotency across tasks.
+Snapshot: struct {
+    value: Int,
+}
+
+run: fn() {
+    // Distinct<Base>
+    aid: AccountID.from_int(42)
+    print(describe_account(aid))
+    dist: Meters.from_float(3.0) + Meters.from_float(1.5)
+    print("meters:{dist.raw()}")
+    pct: Percent.from_int(75)
+    print("pct:{pct.raw()}")
+
+    // #States (struct above-decl, struct in-body, enum)
+    order: Order.start(7)
+    print(remind_open(order))
+    shipped: order.confirm().ship()
+    print(receipt_shipped(shipped))
+    lamp: Lamp.make(60).turn_on()
+    print("lamp:{lamp.watts}")
+    door: Door.Shut.lock(9).unlock(9)
+    print("door:{door.label()}")
+
+    // #Protocol
+    client: Payment.Client.client()
+    drive_payment(client)
+    print("protocol:ok")
+
+    // #Defer
+    res: run_defer_demo(true)
+    print("defer_ret:{res}")
+
+    // x.freeze()
+    ^src: Snapshot{value: 41}
+    frozen: src.freeze()
+    twice: src.freeze().freeze()
+    src.value = 99
+    task.group frozen_reads {
+        t1: task { frozen.value }
+        t2: task { twice.value }
+        print("frozen:{t1.join() ?? -1},{t2.join() ?? -1},{src.value}")
+    }
+}
