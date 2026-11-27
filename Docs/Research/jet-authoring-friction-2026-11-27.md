@@ -9,6 +9,7 @@
 > - **#7044 [P0]:** `C23` (`Neg` operator trait), `D26` (`_: expr` read discard), `H44` (`#Layout(c)` typed struct pointers in `#Unsafe`)
 > - **#7045 [P0]:** `B10` Part 1 (Option 1A: bare `Float` default, exact contextual `Decimal`/`Float`, `Type{value}` scalars, `#UnitFamily(Time)` `hour`/`day` replacing `h`/`d`, delete magic `f` suffix)
 > - **#7046 [P0]:** `B10` Part 2 (Unified unquoted `Type{...}` / `Type{{{...}}}` `DSL` trait: type-owned `parse`, hole spans, LSP Semantic Tokens `highlight`, `jet fmt`, cutover of `SQL`/`HTML`/`Sh`/`Regex`/`Path`/`URL`/`DateTime`/`Grammar`/`Complex`/`Quaternion` + FFI foundation, delete magic `i`/`j`/`k` suffixes)
+> - **#7047 [P0]:** Option 1 (`!` / `!(context)` / `!!` exclusively for Fallible `T E!`, reserving `?` / `?.` / `??` strictly for Optional `T?`, superseding `#7034`'s `?` failure-mark spelling)
 >
 > **Remaining in this TODO list for owner discussion & decision:** **37 items** (`A2–A8`, `B9`, `B11`, `B13`, `B16–B17`, `C18–C19`, `C22`, `C24–C25`, `D27–D30`, `E31`, `E33`, `E51–E53`, `F34`, `F36`, `F38`, `G39–G40`, `G42–G43`, `H45`, `I46–I47`, `J48–J50`). Item numbers are kept stable as items are removed.
 
@@ -244,12 +245,12 @@ Legend:
 #### E33 / E52 (Go-4). Nested `Result` ergonomics (`(T E!) TaskFailure!`) — `ACCIDENTAL FRICTION`
 - **What happens:** `Task<Int DomainError!>.join()` returns `(Int DomainError!) TaskFailure!`, which is awkward to bind or unwrap without passing the handle to a helper function.
 - **Proposed fixes / ideas:**
-  - Ensure `h.join()?` cleanly unwraps the outer `TaskFailure!` into `T E!`, make nested `.Ok(.Ok(v))` / `.Ok(.Err(e))` / `.Err(tf)` matching smooth without helper wrappers, and support `Task<T E!>` uniformly across `task.all` / `task.race` / `task.any`.
+  - Ensure `h.join()!` cleanly unwraps the outer `TaskFailure!` into `T E!`, make nested `.Ok(.Ok(v))` / `.Ok(.Err(e))` / `.Err(tf)` matching smooth without helper wrappers, and support `Task<T E!>` uniformly across `task.all` / `task.race` / `task.any`.
 
-#### E53 (Go-5). Rock-solid `??` block/error binding everywhere (`val: f() ?? { log(err); return fallback }`) — `ACCIDENTAL FRICTION`
-- **What happens:** Replacing Go's 3-line `if err != nil { log(err); return fallback }` relies on `val: f() ?? { log(err); return fallback }` working cleanly in *every* expression position (including inside `task { ... }`, lambdas, and multi-statement blocks) with `err` bound cleanly on the failure branch.
+#### E53 (Go-5). Rock-solid `!!` block/error binding everywhere (`val: f() !! { log(err); return fallback }`) — `ACCIDENTAL FRICTION`
+- **What happens:** Replacing Go's 3-line `if err != nil { log(err); return fallback }` relies on `val: f() !! { log(err); return fallback }` working cleanly in *every* expression position (including inside `task { ... }`, lambdas, and multi-statement blocks) with `err` bound cleanly on the failure branch.
 - **Proposed fixes / ideas:**
-  - Audit and ensure `?? { ... }` with implicit `err` binding works uniformly across `fn`, lambdas, `task { ... }`, and `if`/loop arms, with zero surprising `Unit`/type-mismatch rejections.
+  - Audit and ensure `!! { ... }` with implicit `err` binding works uniformly across `fn`, lambdas, `task { ... }`, and `if`/loop arms, with zero surprising `Unit`/type-mismatch rejections (can roll directly into `#7047` if approved).
 
 ---
 
@@ -377,21 +378,6 @@ Legend:
 ---
 
 ## 4. Reference: Jet Error Handling vs. Go Error Handling
-
-### Why Go's error handling is widely praised — and why programmers still complain about it
-
-People praise Go's error handling for **4 great semantic ideas**:
-1. **Errors are ordinary values, not invisible exceptions:** You can pass, wrap, inspect, log, and test them like any other data.
-2. **Every failure exit is visible right in the code:** Reading a Go function top-to-bottom shows every early return — critical when auditing locks, files, or partial state mutations.
-3. **Adding context as errors bubble up is natural:** `fmt.Errorf("load config %s: %w", path, err)`.
-4. **Zero hidden runtime unwind machinery:** Predictable performance and simple control flow.
-
-Yet Go's *syntax* and *type system* carry **5 real flaws**:
-1. **Relentless boilerplate:** Every fallible call takes 3 lines (`v, err := f(); if err != nil { return zero, err }`), burying the happy path.
-2. **Untyped `error` interface loses exhaustiveness:** A signature `(*Config, error)` doesn't say *which* errors can happen; callers silently miss new error cases.
-3. **Zero-value hazard:** `(T, error)` is a pair, not a sum type — forgetting to check `err` lets you read an uninitialized zero value / `nil` pointer.
-4. **Easy to silently drop an error:** Calling `file.Close()` or `os.Remove(p)` without checking `err` compiles cleanly.
-5. **No built-in audience separation:** Internal debug details get concatenated into `err.Error()` and leak into user-facing UI/HTTP responses.
 
 ### Side-by-Side: Go vs. Jet
 
