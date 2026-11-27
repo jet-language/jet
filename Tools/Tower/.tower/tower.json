@@ -2,8 +2,8 @@
   "meta": {
     "version": 4,
     "project": "Jet",
-    "nextNum": 7060,
-    "rev": 115142,
+    "nextNum": 7061,
+    "rev": 115149,
     "ui": {
       "toggled": [
         "dec-group:syntax",
@@ -20023,6 +20023,11 @@
       "assignee": null,
       "log": [
         {
+          "at": "2026-11-27",
+          "by": "Orchestrator",
+          "text": "Cross-note with #6759: 30M LOC/s stays the stretch target (1-10M LOC/s acceptable real-world floor). Ensure per-phase budgets include Core binary signature table loading + lazy body reachability so small cold compiles skip unused Core parsing and comptime.bodies."
+        },
+        {
           "at": "2026-11-23",
           "by": "Orchestrator",
           "text": "Owner direction 2026-11-23: G7's compile-speed target for the architectural pillars is about 400K lines/s; c3 (30M end metric), c8 (fused per-function pipeline) and c9 (compiler compiled well) moved to G8 card #6996. After the pillars land, work moves to G1-G6 (all unfrozen work), owner target Friday 2026-11-27 06:00."
@@ -20946,7 +20951,7 @@
       "parentId": null,
       "needsAcceptance": false,
       "created": "2026-10-23T14:31:32.550Z",
-      "updated": "2026-11-25T23:43:01.164Z",
+      "updated": "2026-11-27T20:04:50.087Z",
       "updatedBy": "Orchestrator",
       "criteriaLastN": 43
     },
@@ -35440,6 +35445,11 @@
       "assignee": null,
       "log": [
         {
+          "at": "2026-11-27",
+          "by": "Orchestrator",
+          "text": "Architectural gap noted (owner-requested): even after arenas (#6793) and parallelism (#6794), cold single-file scripts must never re-parse/re-check unused Core source or evaluate unused Core comptime.bodies. Ship a pre-encoded, mmap-able flat binary signature table for Core as part of the compiler artifact (zero user build cache, honoring #6966) plus lazy reachable body lowering so cold single-file check/test drops from 1-4s to tens of milliseconds."
+        },
+        {
           "at": "2026-11-16",
           "by": "Main",
           "text": "A/B p201 → p202 (abspans, RunColdContext jet check, medians): sema.effects 87.05 → 28.85 ms (p200: 34), sema.finalize 288.3 → 230.6 ms, core_demand 60.6 → 59.0, load 79.1 → 79.2. The p201 sema.effects regression (67399230a6) is reverted by c9c19b4d11."
@@ -35855,8 +35865,8 @@
       "parentId": null,
       "needsAcceptance": false,
       "created": "2026-11-12T04:08:18.925Z",
-      "updated": "2026-11-22T02:10:23.719Z",
-      "updatedBy": "owner",
+      "updated": "2026-11-27T20:04:47.233Z",
+      "updatedBy": "Orchestrator",
       "criteriaLastN": 24
     },
     {
@@ -64333,6 +64343,71 @@
       "needsAcceptance": false,
       "created": "2026-11-27T19:19:25.407Z",
       "updated": "2026-11-27T19:56:04.639Z",
+      "updatedBy": "Orchestrator",
+      "criteriaLastN": 4
+    },
+    {
+      "id": "c0fwmv7h",
+      "num": 7060,
+      "title": "Large-scale effect ergonomics: auto HOF/stored-fn effect inference, monomorphized static trait effects, and dev-only dbg probe",
+      "body": "Three structural effect-system fixes (beyond #7057 G39 named bundles) to prevent action-at-a-distance and unnecessary Maximal collapse in 100K+ LOC codebases: (1) infer multi-callback via pass-through automatically on unannotated higher-order functions and carry callback effect rows per instantiation on generic structs with fn fields instead of collapsing to Maximal; (2) resolve static/generic trait calls (<E: Trait>) against the concrete monomorphized impl effects (eliminating whole-program cross-package union pollution) while requiring explicit ceilings (#FX or call-site bound) on dynamic trait values; (3) provide a dev-only diagnostic probe carrying zero effect inside -[]>/#FX(...) in dev builds and erroring on --release/--deny-warnings (ratifying public Prelude spelling via owner ballot if needed).",
+      "kind": "task",
+      "track": "epoch",
+      "epoch": "G1",
+      "milestoneId": null,
+      "phase": "planning",
+      "priority": "P1",
+      "plan": null,
+      "checkSteps": null,
+      "probe": null,
+      "visualMedia": [],
+      "blockedBy": [],
+      "assignee": null,
+      "log": [],
+      "criteria": [
+        {
+          "n": 1,
+          "text": "Pre-build adversarial audit in Docs/Audits/ attacking inference termination/soundness on recursive HOFs and stored fn fields, monomorphized static vs explicit dynamic trait ceilings, and dev-only probe isolation from --release/--deny-warnings; ballot any new public Prelude spelling before build",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-11-27T20:05:52.313Z"
+        },
+        {
+          "n": 2,
+          "text": "Auto-infer multi-callback via pass-through on unannotated higher-order functions and track callback effect rows per instantiation on generic structs with fn fields, eliminating unnecessary Maximal effect collapse (O0/O1/O2 + golden + UI snapshots)",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-11-27T20:05:53.781Z"
+        },
+        {
+          "n": 3,
+          "text": "Resolve static/generic trait dispatch (<E: Trait>) against concrete monomorphized impl effects so unrelated implementers never pollute pure callers, while requiring explicit ceilings (#FX or per-callsite bound) on dynamic trait values (O0/O1/O2 + multi-module UI snapshots)",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-11-27T20:05:55.235Z"
+        },
+        {
+          "n": 4,
+          "text": "Ship ratified dev-only diagnostic probe that carries zero effect inside -[]>/#FX(...) in dev builds and fails compilation under --release and --deny-warnings, aligned with #7057 G43 policy (O0/O1/O2 + UI snapshots)",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-11-27T20:05:56.709Z"
+        }
+      ],
+      "refs": [],
+      "tags": [],
+      "parentId": null,
+      "needsAcceptance": false,
+      "created": "2026-11-27T20:04:52.447Z",
+      "updated": "2026-11-27T20:05:56.709Z",
       "updatedBy": "Orchestrator",
       "criteriaLastN": 4
     }
@@ -123404,6 +123479,55 @@
     }
   ],
   "events": [
+    {
+      "at": "2026-11-27T20:05:56.709Z",
+      "by": "Orchestrator",
+      "action": "card.criteria-add",
+      "ref": "c0fwmv7h",
+      "note": "#4 Ship ratified dev-only diagnostic probe that carries zero ef"
+    },
+    {
+      "at": "2026-11-27T20:05:55.235Z",
+      "by": "Orchestrator",
+      "action": "card.criteria-add",
+      "ref": "c0fwmv7h",
+      "note": "#3 Resolve static/generic trait dispatch (<E: Trait>) against c"
+    },
+    {
+      "at": "2026-11-27T20:05:53.781Z",
+      "by": "Orchestrator",
+      "action": "card.criteria-add",
+      "ref": "c0fwmv7h",
+      "note": "#2 Auto-infer multi-callback via pass-through on unannotated hi"
+    },
+    {
+      "at": "2026-11-27T20:05:52.313Z",
+      "by": "Orchestrator",
+      "action": "card.criteria-add",
+      "ref": "c0fwmv7h",
+      "note": "#1 Pre-build adversarial audit in Docs/Audits/ attacking infere"
+    },
+    {
+      "at": "2026-11-27T20:04:52.447Z",
+      "by": "Orchestrator",
+      "action": "card.add",
+      "ref": "c0fwmv7h",
+      "note": "Large-scale effect ergonomics: auto HOF/stored-fn effect inference, monomorphized static trait effects, and dev-only dbg probe"
+    },
+    {
+      "at": "2026-11-27T20:04:50.087Z",
+      "by": "Orchestrator",
+      "action": "card.update",
+      "ref": "c031o59x",
+      "note": "logEntry"
+    },
+    {
+      "at": "2026-11-27T20:04:47.233Z",
+      "by": "Orchestrator",
+      "action": "card.update",
+      "ref": "c0ssy5wy",
+      "note": "logEntry"
+    },
     {
       "at": "2026-11-27T19:56:04.639Z",
       "by": "Orchestrator",
