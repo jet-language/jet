@@ -64,7 +64,8 @@ ir_build_function: fn(m: ^IRModule, p: IRProgram, b: ^IRBuilder, function: FnBod
         return
     }
     ^executable: ir_executable_return_in(function, declared)
-    if executable == None {
+    executable_is_unit: if executable == .Val(ret0) -> ir_unit_type(ret0) else -> true
+    if executable_is_unit {
         if b.failure == .Result(ok, err) {
             executable = Val(Type.Result{ok: ok, err: err})
         }

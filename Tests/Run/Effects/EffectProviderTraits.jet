@@ -48,7 +48,7 @@ StrBuf: struct {
 
     impl Emit<String> {
         emit: fn(^self, item: String) {
-            self.items.push(item)
+            self.items.push(item.copy())
         }
     }
 }
@@ -70,9 +70,11 @@ pure_clock_test: fn() -[]> Int {
 }
 
 tracing_clock_test: fn() -[IO]> Int {
+    ^value: 0
     #Context(Clock: TracingClock{at: 7}) {
-        read_clock()
+        value = read_clock()
     }
+    value
 }
 
 emit_both: fn() -[Emit<Int>, Emit<String>]> {

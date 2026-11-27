@@ -1040,15 +1040,65 @@ sema_checked_foreign_c_marshal_gap: fn(graph: SemaRegistrationGraph, target: Sym
     None
 }
 
+// Whether `ty` is an integer-class scalar field supported in a <=16B by-value
+// `#Layout(c)` C struct: `Int`, fixed-width machine integers, `Bool`, or `Char`
+// (including distincts / type aliases over them). Returns its C byte size (1..8)
+// and alignment, or None.
+sema_checked_foreign_c_struct_field_size: fn(graph: SemaRegistrationGraph, ty: Type, module_identity: ModuleID) -> Int? Never! {
+    qualified: sema_checked_qualify_type(graph, ty, module_identity)
+    if qualified == {
+        .Int | .Char -> Val(8)
+        .Bool -> Val(1)
+        .IntN(_, bits) -> if bits <= 8 -> Val(1) else if bits <= 16 -> Val(2) else if bits <= 32 -> Val(4) else if bits <= 64 -> Val(8) else -> None
+        .Tagged(_, inner) -> sema_checked_foreign_c_struct_field_size(graph, inner, module_identity)
+        .Named(name) -> {
+            if name == "Int" || name == "Char" || name == "I64" || name == "U64" || name == "ISize" || name == "USize" -> return Val(8)
+            if name == "I32" || name == "U32" -> return Val(4)
+            if name == "I16" || name == "U16" -> return Val(2)
+            if name == "I8" || name == "U8" || name == "Bool" -> return Val(1)
+            nominal_row: sema_type_resolve_nominal_row(graph, qualified, module_identity) ?? return None
+            nominal: graph.modules[nominal_row.module_index].nominals[nominal_row.row]
+            if nominal.source == .SourceAST(item) {
+                if item == {
+                    .Distinct(definition) -> return sema_checked_foreign_c_struct_field_size(graph, definition.base, nominal.symbol.module_identity)
+                    .TypeAlias(definition) -> return sema_checked_foreign_c_struct_field_size(graph, definition.target, nominal.symbol.module_identity)
+                    .Struct(_) | .Enum(_) | .Func(_) | .UnitFamily(_) | .Trait(_) | .Tag(_) | .EffectDecl(_) | .Impl(_) | .Const(_) | .Test(_) | .ExternRust(_) | .Module(_) | .CModule(_) | .CodeModule(_) | .ErrorConv(_) | .Migration(_) | .ProtocolDecl(_) | .TemplateLoop(_) | .GenericModule(_) | .ModuleAlias(_) | .MarkerDecl(_) | .FactDecl(_) -> {}
+                }
+            }
+            None
+        }
+        .Float | .Float32 | .String | .List(_) | .Option(_) | .Tuple(_) | .Map(_, _, _) | .Result(_, _) | .Shared(_) | .Union(_) | .Case(_, _) | .FixedList(_, _) | .Apply(_, _) | .Fn(_, _, _, _, _, _) | .TraitObject(_) | .InlineRange(_, _, _) | .Quantity(_, _) | .Measure(_) -> None
+    }
+}
+
+sema_checked_foreign_c_value_struct: fn(graph: SemaRegistrationGraph, definition: StructDef, module_identity: ModuleID) -> Bool Never! {
+    if definition.layout == None || definition.type_params.len() > 0 -> return false
+    ^offset: 0
+    ^max_align: 1
+    ^stored: 0
+    loop field in definition.fields {
+        if field.computed != None -> next
+        size: sema_checked_foreign_c_struct_field_size(graph, field.ty, module_identity) ?? return false
+        if size > max_align -> max_align = size
+        rem: offset % size
+        if rem != 0 -> offset += size - rem
+        offset += size
+        stored += 1
+    }
+    if stored == 0 -> return false
+    tail: offset % max_align
+    if tail != 0 -> offset += max_align - tail
+    offset > 0 && offset <= 16
+}
+
 // Whether the native backend marshals `ty` across a C call: by value for a
-// read, moved or returned value, by address for a `written` one. An F32
-// crosses only as a List element. A C handle or a Jet function (a callback,
-// refused on its own) crosses.
+// read, moved or returned value, by address for a `written` one. A C handle or
+// a Jet function (a callback, refused on its own) crosses.
 sema_checked_foreign_c_marshals: fn(graph: SemaRegistrationGraph, ty: Type, module_identity: ModuleID, written: Bool) -> Bool Never! {
     qualified: sema_checked_qualify_type(graph, ty, module_identity)
     if qualified == {
         .Int | .String | .Char | .Bool -> !written
-        .Float32 -> false
+        .Float32 -> true
         .List(element) -> sema_checked_foreign_c_array_element(graph, element, module_identity)
         .Option(_) | .Tuple(_) | .Map(_, _, _) | .Result(_, _) | .Shared(_) | .Union(_) | .Case(_, _) | .FixedList(_, _) -> false
         .Apply(name, args) -> !(name == "Ptr" && args.len() == 1)
@@ -1057,14 +1107,15 @@ sema_checked_foreign_c_marshals: fn(graph: SemaRegistrationGraph, ty: Type, modu
             if name == "Int" || name == "String" || name == "Char" || name == "Bool" {
                 return !written
             }
-            if name == "F32" -> return false
+            if name == "F32" -> return true
             if sema_checked_foreign_builtin_type(name) -> return true
             nominal_row: sema_type_resolve_nominal_row(graph, qualified, module_identity) ?? return true
             nominal: graph.modules[nominal_row.module_index].nominals[nominal_row.row]
             if nominal.source == .SourceAST(item) {
                 if item == {
-                    // A written struct of machine scalars crosses as its bytes.
-                    .Struct(_) -> return written
+                    // A written struct of machine scalars crosses as its bytes;
+                    // a <=16B `#Layout(c)` integer-class struct also crosses by value.
+                    .Struct(definition) -> return written || sema_checked_foreign_c_value_struct(graph, definition, nominal.symbol.module_identity)
                     .Enum(definition) -> {
                         loop variant in definition.variants {
                             if variant.payload == .Unit -> next

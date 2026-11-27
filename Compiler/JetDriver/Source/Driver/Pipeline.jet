@@ -609,7 +609,7 @@ jet_driver_compile_result: fn(
         comptime_debug_trace: trace.debug_trace.join(""),
         soft_stop: trace.soft_stop,
         exit_code: trace.exit_code,
-        failed_stage: failed_stage,
+        failed_stage: if !complete && load.failed_stage == Val(JetDriverStage.Parse) -> Val(JetDriverStage.Parse) else -> failed_stage,
         complete: complete,
         internal_problem: load.internal_problem,
         authority_policy: jet_driver_authority_policy(load),
