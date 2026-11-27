@@ -3,7 +3,7 @@
     "version": 4,
     "project": "Jet",
     "nextNum": 7067,
-    "rev": 115177,
+    "rev": 115180,
     "ui": {
       "toggled": [
         "dec-group:syntax",
@@ -31113,6 +31113,11 @@
         {
           "at": "2026-11-27",
           "by": "Orchestrator",
+          "text": "Root cause of Tests/Run/Foundations/Text/run.jet 40 GB runaway OOM confirmed pre-existing across seed batch91-s4/jet, base, and dev: MappedFile.lines() in Core/Files/Files.jet:379 pushes view slices self.bytes[start..<end] inside scan_logs, and each slice copies/leaks the entire 25 MB mapped buffer (~25 MB x 100k lines). Minimal 2 MB repro hits 4 GB cap with memory allocation of 2000000 bytes failed."
+        },
+        {
+          "at": "2026-11-27",
+          "by": "Orchestrator",
           "text": "Bug observed during golden test run: Tests/Run/Foundations/Text/run.jet leaked 40 GB RAM/swap and was orphaned (reparented to user systemd) when testkit timed out or moved on, triggering OOM kill on the enclosing terminal cgroup. TestKit must isolate each test in its own process group/cgroup with a memory limit and kill the whole process group on timeout."
         },
         {
@@ -31291,7 +31296,7 @@
       "parentId": null,
       "needsAcceptance": false,
       "created": "2026-11-06T19:02:30.892Z",
-      "updated": "2026-11-27T21:21:26.823Z",
+      "updated": "2026-11-27T21:39:43.532Z",
       "updatedBy": "Orchestrator",
       "criteriaLastN": 17
     },
@@ -63892,11 +63897,11 @@
         {
           "n": 1,
           "text": "D28 Design & Adversarial Audit: land Docs/Audits/2026-11-27-two-phase-borrows-review.md attacking aliasing, interior mutability, panic/unwind drops, re-entrant callbacks, and codegen/IR lowering safety; confirm soundness before any build commits",
-          "status": "open",
-          "metBy": null,
+          "status": "met",
+          "metBy": "Orchestrator",
           "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-11-27T18:21:45.430Z"
+          "evidence": "dev 689d0d6c978 (before build commit 6aa7d780891): Docs/Audits/2026-11-27-two-phase-borrows-review.md landed, attacking aliasing, interior mutability, nested stale-element write hole, Link<T> deref exclusion, panic/unwind drops, re-entrant callbacks, and IR lowering.",
+          "at": "2026-11-27T21:39:41.202Z"
         },
         {
           "n": 2,
@@ -63922,7 +63927,7 @@
       "parentId": null,
       "needsAcceptance": false,
       "created": "2026-11-27T18:21:44.641Z",
-      "updated": "2026-11-27T18:21:46.986Z",
+      "updated": "2026-11-27T21:39:41.202Z",
       "updatedBy": "Orchestrator",
       "criteriaLastN": 3
     },
@@ -63957,11 +63962,11 @@
         {
           "n": 2,
           "text": "D29 Adversarial Audit (GATE BEFORE BUILD): land Docs/Audits/2026-11-27-shared-scoped-borrow-review.md attacking opener drop/move/reassign of ^hits during task.group, escaping into detached tasks/closures/returns, panic/cancel unwind, lock-order tracking, and ABI/codegen; confirm soundness before any build commits",
-          "status": "open",
-          "metBy": null,
+          "status": "met",
+          "metBy": "Orchestrator",
           "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-11-27T18:29:44.481Z"
+          "evidence": "dev 689d0d6c978 (before build commit 6aa7d780891): Docs/Audits/2026-11-27-shared-scoped-borrow-review.md landed, attacking opener drop/move/reassign during task.group, escaping/detached captures, panic/cancel unwind, lock-order tracking, non-Send fallback, and ABI/codegen.",
+          "at": "2026-11-27T21:39:42.108Z"
         },
         {
           "n": 3,
@@ -63987,7 +63992,7 @@
       "parentId": null,
       "needsAcceptance": false,
       "created": "2026-11-27T18:29:42.883Z",
-      "updated": "2026-11-27T18:59:01.841Z",
+      "updated": "2026-11-27T21:39:42.108Z",
       "updatedBy": "Orchestrator",
       "criteriaLastN": 4
     },
@@ -123847,6 +123852,27 @@
     }
   ],
   "events": [
+    {
+      "at": "2026-11-27T21:39:43.532Z",
+      "by": "Orchestrator",
+      "action": "card.update",
+      "ref": "c00ctwqw",
+      "note": "logEntry"
+    },
+    {
+      "at": "2026-11-27T21:39:42.108Z",
+      "by": "Orchestrator",
+      "action": "card.criteria-meet",
+      "ref": "c0i65t1o",
+      "note": "#2"
+    },
+    {
+      "at": "2026-11-27T21:39:41.203Z",
+      "by": "Orchestrator",
+      "action": "card.criteria-meet",
+      "ref": "c0sx4qnw",
+      "note": "#1"
+    },
     {
       "at": "2026-11-27T21:29:09.208Z",
       "by": "Orchestrator",
