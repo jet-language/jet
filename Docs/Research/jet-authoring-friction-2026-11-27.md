@@ -10,9 +10,9 @@
 > - **#7045 [P0]:** `B10` Part 1 (Option 1A: bare `Float` default, exact contextual `Decimal`/`Float`, `Type{value}` scalars, `#UnitFamily(Time)` `hour`/`day` replacing `h`/`d`, delete magic `f` suffix)
 > - **#7046 [P0]:** `B10` Part 2 (Unified unquoted `Type{...}` / `Type{{{...}}}` `DSL` trait: type-owned `parse`, hole spans, LSP Semantic Tokens `highlight`, `jet fmt`, cutover of `SQL`/`HTML`/`Sh`/`Regex`/`Path`/`URL`/`DateTime`/`Grammar`/`Complex`/`Quaternion` + FFI foundation, delete magic `i`/`j`/`k` suffixes)
 > - **#7047 [P0]:** Option 1 (`!` / `!(context)` / `!!` exclusively for Fallible `T E!`, reserving `?` / `?.` / `??` strictly for Optional `T?`, superseding `#7034`'s `?` failure-mark spelling)
-> - **#7048 [P0]:** `A3` (`task {}` return inference), `A4` (chained pattern guards + guard extraction), `A5-1` (uniform `{}` arms), `A6` (`E0078` span on `loop`), `A7` (non-moving `_: expr` discard + `.drop` for linear), `A8` (rename loop `next` -> `skip`)
+> - **#7048 [P0]:** `A3` (`task {}` return inference), `A4` (chained pattern guards + guard extraction), `A5` (uniform `{}` arms + `L0514` at 2+ distinct variants), `A6` (`E0078` span on `loop`), `A7` (non-moving `_: expr` discard + `.drop` for linear), `A8` (rename loop `next` -> `skip`)
 >
-> **Remaining in this TODO list for owner discussion & decision:** **32 items** (`A2`, `A5-2`, `B9`, `B11`, `B13`, `B16–B17`, `C18–C19`, `C22`, `C24–C25`, `D27–D30`, `E31`, `E33`, `E51–E53`, `F34`, `F36`, `F38`, `G39–G40`, `G42–G43`, `H45`, `I46–I47`, `J48–J50`). Item numbers are kept stable as items are removed.
+> **Remaining in this TODO list for owner discussion & decision:** **31 items** (`A2`, `B9`, `B11`, `B13`, `B16–B17`, `C18–C19`, `C22`, `C24–C25`, `D27–D30`, `E31`, `E33`, `E51–E53`, `F34`, `F36`, `F38`, `G39–G40`, `G42–G43`, `H45`, `I46–I47`, `J48–J50`). Item numbers are kept stable as items are removed.
 
 ---
 
@@ -20,8 +20,8 @@
 
 1. [The Bottom Line: Would Fixing These Make Jet Near-Perfect?](#1-the-bottom-line-would-fixing-these-make-jet-near-perfect)
 2. [Productive Friction Worth Keeping (What Forces *Good* Code)](#2-productive-friction-worth-keeping-what-forces-good-code)
-3. [Remaining TODO Items to Discuss & Decide (32 Items)](#3-remaining-todo-items-to-discuss--decide-32-items)
-   - [A. Control Flow, Patterns & Matching (`A2`, `A5-2`)](#a-control-flow-patterns--matching)
+3. [Remaining TODO Items to Discuss & Decide (31 Items)](#3-remaining-todo-items-to-discuss--decide-31-items)
+   - [A. Control Flow, Patterns & Matching (`A2`)](#a-control-flow-patterns--matching)
    - [B. Syntax, Braces, Literals & Strings (`B9`, `B11`, `B13`, `B16–B17`)](#b-syntax-braces-literals--strings)
    - [C. Types, Structs, Enums, Generics & Signatures (`C18–C19`, `C22`, `C24–C25`)](#c-types-structs-enums-generics--signatures)
    - [D. Ownership, Borrowing & Copying (`D27–D30`)](#d-ownership-borrowing--copying)
@@ -75,7 +75,7 @@ All three agents **explicitly asked Jet to KEEP** these guardrails — annoying 
 
 ---
 
-## 3. Remaining TODO Items to Discuss & Decide (32 Items)
+## 3. Remaining TODO Items to Discuss & Decide (31 Items)
 
 Legend:
 - `COUNTERPRODUCTIVE` = actively pushes authors to write *worse* code.
@@ -87,13 +87,9 @@ Legend:
 
 ### A. Control Flow, Patterns & Matching
 
-#### A2. Dropping `->` on `if` and `loop` & the Exhaustive Lego Composability Law — `ACTIVE DISCUSSION`
-- **What happens:** Today value-producing `if` requires `->` (`if raw_mode -> "a" else -> "b"`), while statement `if` uses `{}` — and `loop x in xs -> expr` uses `->` for comprehensions while `loop x in xs { ... }` runs statements.
-- **Open discussion:** Drop `->` on `if` and `loop` completely (always `{ ... }`, keeping `->` strictly for function signatures, match/table arms, computed fields, and state transitions), plus ratify the exhaustive 8-law Lego Composability specification across every Jet construct.
-
-#### A5-2. `Jet.SameSubjectDispatch` (`L0514`) lint scope on guarded `if` sequences — `ACTIVE DISCUSSION`
-- **What happens:** `L0514` fires on adjacent `if` guards sharing a subject even when one guard carries an extra `&&` condition (or when repeated guards test the *same* variant).
-- **Open discussion:** Keep `L0514` encouraging unified subject tables (now that `#CatchAll` is carded) while tightening false positives (same-variant repeated guards / `< 3` arms) and optionally adding match-arm guards (`.Char if key.text == "q" -> ...`).
+#### A2. Dropping `->` on `if` and `loop` & the Jet Composition Laws — `ADVERSARIAL REVIEW IN PROGRESS`
+- **Owner direction:** Drop `->` on `if` and `loop` completely (always `{ ... }`, keeping `->` strictly for function signatures, match/table arms, computed fields, and state transitions).
+- **Next step:** Review fresh adversarial audit of the Jet Composition Laws before confirming and carding as P0.
 
 ---
 
