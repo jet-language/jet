@@ -14,8 +14,9 @@
 > - **#7049 [P0]:** `A2` + **Jet Composition Laws** (drop `->` on `if`/`loop`, `[loop ...]` comprehensions, zero postfix markers + stacked `#[A, B]` slots + in-body markers, flow-binding pattern algebra, `T?` finite `break val` loops, 3-class jump boundaries, full surface coverage), `B9` (`Type{...}` in `if`/`loop` headers), `B17` (binary `^` and `Int / Int` hints)
 > - **#7050 [P0]:** `B11` (`\u{H}` lexer fix + multi/triple-backtick raw strings), `B13` (`U8{'\n'}` ASCII byte folding), `B16` (`..=` hint + range `.rev()` / descending stride)
 > - **#7051 [P0]:** `C18-A` (`Type{expr}` ascription), `C19` (named enum patterns `.Click{x, y}`), `C22` (canonical `Float`/`Int` `From` ranking), `C24` (generic receiver closure inference like `sort_by`), `C25` (`Name<T>: struct` & `*` call-site label hints)
+> - **#7052 [P0]:** `D28` (two-phase borrows for sequential nested calls — adversarial safety audit first), `D30` (`.in_place()` & `^guard: cell.guard_edit()` diagnostic hints)
 >
-> **Remaining in this TODO list for owner discussion & decision:** **20 items** (`D27–D30`, `E31`, `E33`, `E51–E53`, `F34`, `F36`, `F38`, `G39–G40`, `G42–G43`, `H45`, `I46–I47`, `J48–J50`). Item numbers are kept stable as items are removed.
+> **Remaining in this TODO list for owner discussion & decision:** **18 items** (`D27`, `D29`, `E31`, `E33`, `E51–E53`, `F34`, `F36`, `F38`, `G39–G40`, `G42–G43`, `H45`, `I46–I47`, `J48–J50`). Item numbers are kept stable as items are removed.
 
 ---
 
@@ -23,8 +24,8 @@
 
 1. [The Bottom Line: Would Fixing These Make Jet Near-Perfect?](#1-the-bottom-line-would-fixing-these-make-jet-near-perfect)
 2. [Productive Friction Worth Keeping (What Forces *Good* Code)](#2-productive-friction-worth-keeping-what-forces-good-code)
-3. [Remaining TODO Items to Discuss & Decide (20 Items)](#3-remaining-todo-items-to-discuss--decide-20-items)
-   - [D. Ownership, Borrowing & Copying (`D27–D30`)](#d-ownership-borrowing--copying)
+3. [Remaining TODO Items to Discuss & Decide (18 Items)](#3-remaining-todo-items-to-discuss--decide-18-items)
+   - [D. Ownership, Borrowing & Copying (`D27`, `D29`)](#d-ownership-borrowing--copying)
    - [E. Error Handling & Jet-vs-Go Remaining Items (`E31`, `E33`, `E51–E53`)](#e-error-handling--jet-vs-go-remaining-items)
    - [F. Collections, Strings, Bytes & Stdlib Ergonomics (`F34`, `F36`, `F38`)](#f-collections-strings-bytes--stdlib-ergonomics)
    - [G. Concurrency, Effects & Imports (`G39–G40`, `G42–G43`)](#g-concurrency-effects--imports)
@@ -75,7 +76,7 @@ All three agents **explicitly asked Jet to KEEP** these guardrails — annoying 
 
 ---
 
-## 3. Remaining TODO Items to Discuss & Decide (20 Items)
+## 3. Remaining TODO Items to Discuss & Decide (18 Items)
 
 Legend:
 - `COUNTERPRODUCTIVE` = actively pushes authors to write *worse* code.
@@ -89,27 +90,17 @@ Legend:
 
 #### D27. Returning a borrowed `String` / small struct + `.copy()` ratchet pushes authors into disguised copies — `COUNTERPRODUCTIVE`
 - **What happens:**
-  - Returning a read `String` parameter (`if !color -> return line`) fails with `ReadOnlyValueNotOwned`. Under strict compiler `.copy()` ceilings, authors end up writing `return "{line}"` or `items.push("{value}")` — **still allocating a full copy, just disguised as string interpolation!**
-  - Returning a tiny all-scalar struct like `Complex` (two `Float`s) fails without `.copy()` unless that type was hand-listed in the compiler's internal `Copy.jet` allowlist.
+  - Returning a read `String` parameter (`if !color -> return line`) fails with `ReadOnlyValueNotOwned` (and `View<str>` currently rejects plain `String` parameters without `.trim()`/`.after()`/`.before()`). Under strict compiler `.copy()` ceilings, authors end up writing `return "{line}"` — still allocating a full copy, just disguised as interpolation!
+  - Returning a tiny all-scalar struct like `Complex` (two `Float`s, 16 bytes in registers) fails without `.copy()` unless hand-listed in the compiler's internal `Copy.jet` allowlist.
 - **Proposed fixes / ideas:**
-  - Infer `Copy` **structurally** for small plain all-scalar structs (any `struct` whose fields are all `Copy` and has no `#Close` / `#MoveOnly`), deleting the manual `Copy.jet` allowlist.
-  - Make `View<String>` / borrowed returns effortless for pass-through helpers.
-  - Auto-move last-use local variables into `^^` parameters without forcing `.move()` noise.
-
-#### D28. Over-strict `UseWhileWriteActive` on sequential nested calls — `ACCIDENTAL FRICTION`
-- **What happens:** `jfmt_write(^f, jfmt_float_literal_spelling(f, span, value, raw))` fails with `UseWhileWriteActive`, even though the inner read completes completely before `jfmt_write` begins mutating `f`. Forces hoisting a temp variable onto the line above.
-- **Proposed fixes / ideas:**
-  - Implement Rust-style **two-phase borrows** for calls: reserve the `^arg` write place during argument evaluation, and activate exclusivity only when the callee actually executes.
+  - Infer `Copy` structurally ONLY for small plain all-scalar structs (e.g. `<= 24`–`32` bytes, all fields `Copy`, zero heap pointers, no `#Close`/`#MoveOnly`), keeping all heap/large structs strictly move-only.
+  - Make `View<str>` / `View<T>` accept plain borrowed `String` / `T` parameters directly (zero-copy pass-through).
+  - Auto-move last-use locals into `^^` parameters without `.move()` noise.
 
 #### D29. Capturing `Shared<T>` into multiple tasks/closures requires manual `.copy()` shadow variables — `ACCIDENTAL FRICTION`
 - **What happens:** Even though `Shared<T>` exists specifically to be shared across tasks, spawning two tasks requires manual shadow bindings (`h1: hits.copy(); h2: hits.copy(); task { ... h1 ... }; task { ... h2 ... }`).
 - **Proposed fixes / ideas:**
-  - Either allow an explicit capture list (`task[hits] { ... }`) that cheaply bumps `Shared<T>`'s handle, or auto-clone `Shared<T>` handles on task/closure capture.
-
-#### D30. Non-obvious `.in_place()` and `^guard:` mutability diagnostics — `ACCIDENTAL FRICTION`
-- **What happens:** Mutating a value inside an `Option`/enum requires knowing `.in_place()` (`if x.in_place() == .Val(v)`), and mutating through a `Shared<T>` lock fails unless you write `^guard: cell.guard_edit()`.
-- **Proposed fixes / ideas:**
-  - Have the immutability diagnostic on `Option`/`GuardMut` directly suggest the exact spelling (`add ^ before guard: ^guard: cell.guard_edit()` or `use .in_place()`).
+  - **Best-of-both-worlds:** Borrow `Shared<T>` directly with **zero refcount overhead** inside scoped concurrency (`task.group` / `task.all` / `task.race` / `task.any`), and handle detached tasks cleanly via either auto-clone of `Shared<T>`'s refcounted handle or explicit `hits.share()`.
 
 ---
 
