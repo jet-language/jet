@@ -2,8 +2,8 @@
   "meta": {
     "version": 4,
     "project": "Jet",
-    "nextNum": 7054,
-    "rev": 115109,
+    "nextNum": 7055,
+    "rev": 115114,
     "ui": {
       "toggled": [
         "dec-group:syntax",
@@ -63537,6 +63537,15 @@
           "verifiedBy": null,
           "evidence": "",
           "at": "2026-11-27T16:06:59.927Z"
+        },
+        {
+          "n": 6,
+          "text": "E53 (Go-5): val: f() !! { log(err); return fallback } with implicit err binding works uniformly across fn, lambdas, task {}, and if/loop arms without Unit/type-mismatch surprises (O0/O1/O2 + UI tests)",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-11-27T18:34:44.840Z"
         }
       ],
       "refs": [],
@@ -63544,9 +63553,9 @@
       "parentId": null,
       "needsAcceptance": false,
       "created": "2026-11-27T16:06:40.188Z",
-      "updated": "2026-11-27T16:06:59.927Z",
+      "updated": "2026-11-27T18:34:44.840Z",
       "updatedBy": "Orchestrator",
-      "criteriaLastN": 5
+      "criteriaLastN": 6
     },
     {
       "id": "c0vwceve",
@@ -63944,6 +63953,62 @@
       "needsAcceptance": false,
       "created": "2026-11-27T18:29:42.883Z",
       "updated": "2026-11-27T18:29:45.313Z",
+      "updatedBy": "Orchestrator",
+      "criteriaLastN": 3
+    },
+    {
+      "id": "c0ql4qd5",
+      "num": 7054,
+      "title": "Authoring friction P0: E31/E51 (ordinary fn defaults infallible Never!, run/#Test keep Err!) & E33/E52 (nested Task<T E!>.join() ergonomics)",
+      "body": "Owner-approved Section E P0 items from Docs/Research/jet-authoring-friction-2026-11-27.md: (1) E31/E51 (Go-1): ordinary fn declarations default to infallible (Never!) when no ! error rail is written, while run: fn() and #Test keep Err! as the friendly default so scripts/beginners write zero error annotations; full greenfield cutover deleting redundant Never! boilerplate across Compiler, Core, Examples, Tests, Docs. (2) E33/E52 (Go-4): make Task<T E!>.join() nested Result ((T E!) TaskFailure!) ergonomic — h.join()! cleanly unwraps TaskFailure! to T E!, nested .Ok(.Ok(v))/.Ok(.Err(e))/.Err(tf) matching works smoothly without helper wrappers, and task.all/task.race/task.any support Task<T E!> uniformly.",
+      "kind": "task",
+      "track": "epoch",
+      "epoch": "G1",
+      "milestoneId": null,
+      "phase": "ready",
+      "priority": "P0",
+      "plan": null,
+      "checkSteps": null,
+      "probe": null,
+      "visualMedia": [],
+      "blockedBy": [],
+      "assignee": null,
+      "log": [],
+      "criteria": [
+        {
+          "n": 1,
+          "text": "E31/E51: Ordinary fn declarations without an explicit ! rail default to infallible (Never!), while run: fn() and #Test keep Err! default; explicit fallible fns write -> T E! or -> T Err!; crisp diagnostic suggests adding E! or Err! if ! is used in an infallible fn (UI snapshots + O0/O1/O2/web)",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-11-27T18:34:42.419Z"
+        },
+        {
+          "n": 2,
+          "text": "E31/E51 greenfield cutover: sweep Compiler, Core, Examples, Tests, Tools, and Docs to migrate fallible fns that relied on implicit Err! and drop redundant Never! noise, with zero regressions",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-11-27T18:34:43.254Z"
+        },
+        {
+          "n": 3,
+          "text": "E33/E52: Task<T E!>.join() unwraps cleanly via h.join()! (yielding T E!), supports direct nested .Ok(.Ok(v))/.Ok(.Err(e))/.Err(tf) matching without helper wrappers, and works uniformly in task.all / task.race / task.any across O0/O1/O2",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-11-27T18:34:44.048Z"
+        }
+      ],
+      "refs": [],
+      "tags": [],
+      "parentId": null,
+      "needsAcceptance": false,
+      "created": "2026-11-27T18:34:41.611Z",
+      "updated": "2026-11-27T18:34:44.048Z",
       "updatedBy": "Orchestrator",
       "criteriaLastN": 3
     }
@@ -123015,6 +123080,41 @@
     }
   ],
   "events": [
+    {
+      "at": "2026-11-27T18:34:44.840Z",
+      "by": "Orchestrator",
+      "action": "card.criteria-add",
+      "ref": "c0o31o03",
+      "note": "#6 E53 (Go-5): val: f() !! { log(err); return fallback } with i"
+    },
+    {
+      "at": "2026-11-27T18:34:44.048Z",
+      "by": "Orchestrator",
+      "action": "card.criteria-add",
+      "ref": "c0ql4qd5",
+      "note": "#3 E33/E52: Task<T E!>.join() unwraps cleanly via h.join()! (yi"
+    },
+    {
+      "at": "2026-11-27T18:34:43.254Z",
+      "by": "Orchestrator",
+      "action": "card.criteria-add",
+      "ref": "c0ql4qd5",
+      "note": "#2 E31/E51 greenfield cutover: sweep Compiler, Core, Examples, "
+    },
+    {
+      "at": "2026-11-27T18:34:42.419Z",
+      "by": "Orchestrator",
+      "action": "card.criteria-add",
+      "ref": "c0ql4qd5",
+      "note": "#1 E31/E51: Ordinary fn declarations without an explicit ! rail"
+    },
+    {
+      "at": "2026-11-27T18:34:41.612Z",
+      "by": "Orchestrator",
+      "action": "card.add",
+      "ref": "c0ql4qd5",
+      "note": "Authoring friction P0: E31/E51 (ordinary fn defaults infallible Never!, run/#Test keep Err!) & E33/E52 (nested Task<T E!>.join() ergonomics)"
+    },
     {
       "at": "2026-11-27T18:29:45.313Z",
       "by": "Orchestrator",
