@@ -2,8 +2,8 @@
   "meta": {
     "version": 4,
     "project": "Jet",
-    "nextNum": 7047,
-    "rev": 115038,
+    "nextNum": 7048,
+    "rev": 115045,
     "ui": {
       "toggled": [
         "dec-group:syntax",
@@ -62210,6 +62210,11 @@
       "assignee": null,
       "log": [
         {
+          "at": "2026-11-27",
+          "by": "Orchestrator",
+          "text": "Superseded on syntax spelling by owner-approved P0 #7047 (2026-11-27): Fallible propagation/recovery moves to ! / !! / !(context), reserving ? / ?? strictly for Optional (T?)."
+        },
+        {
           "at": "2026-11-25",
           "by": "Pip",
           "text": "Posted the reframed D-FAIL-VISIBLE2 to the owner."
@@ -62276,8 +62281,8 @@
       "parentId": null,
       "needsAcceptance": false,
       "created": "2026-11-25T18:01:35.588Z",
-      "updated": "2026-11-26T21:26:15.404Z",
-      "updatedBy": "owner"
+      "updated": "2026-11-27T16:06:41.737Z",
+      "updatedBy": "Orchestrator"
     },
     {
       "id": "c028o7uk",
@@ -63459,6 +63464,80 @@
       "updated": "2026-11-27T15:57:52.882Z",
       "updatedBy": "Orchestrator",
       "criteriaLastN": 6
+    },
+    {
+      "id": "c0o31o03",
+      "num": 7047,
+      "title": "Authoring friction P0: Separate ! / !! / !(context) for Fallible (T E!) from ? / ?? for Optional (T?) (E51)",
+      "body": "Owner-approved Option 1 (2026-11-27): align expression-level propagation and recovery 1-to-1 with Jet's type-level split between Optional (T?) and Fallible (T E!). Optional (T?) exclusively uses ? (early-return None in -> T? functions), ?. (optional chaining), and ?? (None fallback / ?? next / ?? return). Fallible (T E!) exclusively uses ! (propagate Err in -> T E!), !(context) (propagate with concise context/breadcrumb, closing E51), and !! (error recovery / !! default / !! { ... err ... } / !! next / !! return). Combined example: find_user(id)! ?? guest propagates DBError! and defaults None without ever silently swallowing errors. Full greenfield cutover superseding #7034's ? failure-mark surface: migrate all Compiler, Core, Examples, Tests, Tools, Docs, syntax registries, formatter, and editor grammars, with crisp diagnostics teaching !/!! vs ?/??.",
+      "kind": "task",
+      "track": "epoch",
+      "epoch": "G1",
+      "milestoneId": null,
+      "phase": "ready",
+      "priority": "P0",
+      "plan": null,
+      "checkSteps": null,
+      "probe": null,
+      "visualMedia": [],
+      "blockedBy": [],
+      "assignee": null,
+      "log": [],
+      "criteria": [
+        {
+          "n": 1,
+          "text": "Lexer, parser, formatter, and syntax registries support postfix ! (propagate Fallible), !(context) (propagate with concise context/breadcrumb, closing E51), and !! (error recovery: !! default, !! { ... err ... }, !! next, !! return), while reserving ?, ?., and ?? strictly for Optional (T?)",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-11-27T16:06:56.089Z"
+        },
+        {
+          "n": 2,
+          "text": "Sema enforces 1-to-1 alignment: T? uses ? / ?. / ?? (including opt? early-return None in -> T? functions), T E! uses ! / !(context) / !!, and combined T? E! chains cleanly (find_user(id)! ?? guest); registered diagnostics with Safe fix-its teach !/!! vs ?/?? on mismatch",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-11-27T16:06:57.373Z"
+        },
+        {
+          "n": 3,
+          "text": "Failure-mark enforcement and jet fmt --explicit-failures emit and check ! on every propagating fallible call (superseding #7034's ? spelling), preserving all #7034 n3/n4/n5 fixes (lambdas, typed lists, loop headers, CLI entry wrapper)",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-11-27T16:06:58.207Z"
+        },
+        {
+          "n": 4,
+          "text": "Full greenfield cutover across Compiler, Core, Examples, Tests (including UI snapshots), Tools, Docs, and editor grammars with zero legacy ?-for-Result or ??-for-Result shims",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-11-27T16:06:59.073Z"
+        },
+        {
+          "n": 5,
+          "text": "Golden feature examples prove Optional (? / ?. / ??), Fallible (! / !(context) / !!), and combined T? E! (find_user(id)! ?? guest) identically across O0, O1, O2, comptime, and web + full suite passes cleanly",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-11-27T16:06:59.927Z"
+        }
+      ],
+      "refs": [],
+      "tags": [],
+      "parentId": null,
+      "needsAcceptance": false,
+      "created": "2026-11-27T16:06:40.188Z",
+      "updated": "2026-11-27T16:06:59.927Z",
+      "updatedBy": "Orchestrator",
+      "criteriaLastN": 5
     }
   ],
   "decisions": [
@@ -122529,6 +122608,55 @@
   ],
   "events": [
     {
+      "at": "2026-11-27T16:06:59.927Z",
+      "by": "Orchestrator",
+      "action": "card.criteria-add",
+      "ref": "c0o31o03",
+      "note": "#5 Golden feature examples prove Optional (? / ?. / ??), Fallib"
+    },
+    {
+      "at": "2026-11-27T16:06:59.073Z",
+      "by": "Orchestrator",
+      "action": "card.criteria-add",
+      "ref": "c0o31o03",
+      "note": "#4 Full greenfield cutover across Compiler, Core, Examples, Tes"
+    },
+    {
+      "at": "2026-11-27T16:06:58.207Z",
+      "by": "Orchestrator",
+      "action": "card.criteria-add",
+      "ref": "c0o31o03",
+      "note": "#3 Failure-mark enforcement and jet fmt --explicit-failures emi"
+    },
+    {
+      "at": "2026-11-27T16:06:57.373Z",
+      "by": "Orchestrator",
+      "action": "card.criteria-add",
+      "ref": "c0o31o03",
+      "note": "#2 Sema enforces 1-to-1 alignment: T? uses ? / ?. / ?? (includi"
+    },
+    {
+      "at": "2026-11-27T16:06:56.089Z",
+      "by": "Orchestrator",
+      "action": "card.criteria-add",
+      "ref": "c0o31o03",
+      "note": "#1 Lexer, parser, formatter, and syntax registries support post"
+    },
+    {
+      "at": "2026-11-27T16:06:41.737Z",
+      "by": "Orchestrator",
+      "action": "card.update",
+      "ref": "c05bs1oq",
+      "note": "logEntry"
+    },
+    {
+      "at": "2026-11-27T16:06:40.188Z",
+      "by": "Orchestrator",
+      "action": "card.add",
+      "ref": "c0o31o03",
+      "note": "Authoring friction P0: Separate ! / !! / !(context) for Fallible (T E!) from ? / ?? for Optional (T?) (E51)"
+    },
+    {
       "at": "2026-11-27T15:57:52.882Z",
       "by": "Orchestrator",
       "action": "card.criteria-add",
@@ -126006,713 +126134,6 @@
       "action": "card.update",
       "ref": "c01dyqov",
       "note": "logEntry"
-    },
-    {
-      "at": "2026-11-26T00:58:20.697Z",
-      "by": "Orchestrator",
-      "action": "card.delete",
-      "ref": "c00tizy7",
-      "note": "Secure, current and reproducible systems in the AI-attack era (JetOS and Jetpack)"
-    },
-    {
-      "at": "2026-11-26T00:58:19.636Z",
-      "by": "Orchestrator",
-      "action": "card.update",
-      "ref": "c0svneex",
-      "note": "body,logEntry"
-    },
-    {
-      "at": "2026-11-26T00:58:17.872Z",
-      "by": "Orchestrator",
-      "action": "card.criteria-edit",
-      "ref": "c0svneex",
-      "note": "#8: Owner order 2026-11-22: JetOS is removed from the project entirely.; was: The native build-and-boot no-Nix contract (#410) holds: the adapter is bypassed for native Jet packages and supplies no boot-time Nix authority."
-    },
-    {
-      "at": "2026-11-26T00:58:16.924Z",
-      "by": "Orchestrator",
-      "action": "card.criteria-edit",
-      "ref": "c0pmy5fy",
-      "note": "#6: Owner order 2026-11-22: JetOS is removed from the project entirely.; was: dc_snapshot_texts (Tests/Guards/diagnostics_coverage.jet) and kit_ui_coverage (JetTestKit Ui.jet) credit only producer-checked snapshots. The E0979 (jetpack_jetos) and E1327 (module-eval-diagnostics) "
-    },
-    {
-      "at": "2026-11-26T00:58:15.977Z",
-      "by": "Orchestrator",
-      "action": "card.criteria-edit",
-      "ref": "c0slc5oo",
-      "note": "#16: Owner order 2026-11-22: JetOS is removed from the project entirely.; was: Jetpack sources pass the corpus_ast dogfood gate with no exception rows: the 246 dogfood-json sites (hand-built JSON wire text) use the typed JSON helper and the 122 dogfood-path-containment sites use"
-    },
-    {
-      "at": "2026-11-26T00:58:14.620Z",
-      "by": "Orchestrator",
-      "action": "card.criteria-edit",
-      "ref": "c0slc5oo",
-      "note": "#4: Owner order 2026-11-22: JetOS is removed from the project entirely.; was: Every non-JetOS Rust module in crates/jetpack (including src/bin), jetpack-bin, jet-nix-eval, jet-store and the Jetpack-owned parts of jet-env-model and jet-pkg-model has a named Jet home under Jetpac"
-    },
-    {
-      "at": "2026-11-26T00:58:13.769Z",
-      "by": "Orchestrator",
-      "action": "card.criteria-edit",
-      "ref": "c0nr5mre",
-      "note": "#5: Owner order 2026-11-22: JetOS is removed from the project entirely.; was: An imperative change to a package writes back into its declaration, and drift from the last good state is reported (system-root and boot attestation wait while JetOS is frozen)."
-    },
-    {
-      "at": "2026-11-26T00:58:12.912Z",
-      "by": "Orchestrator",
-      "action": "card.criteria-edit",
-      "ref": "c0nr5mre",
-      "note": "#1: Owner order 2026-11-22: JetOS is removed from the project entirely.; was: jetpack answers \"is this package affected by advisory X?\" from the exact lock and closure, down to version and build options (JetOS generations stay out of scope while JetOS is frozen). Proof: `jet te"
-    },
-    {
-      "at": "2026-11-26T00:58:11.888Z",
-      "by": "Orchestrator",
-      "action": "card.update",
-      "ref": "c0nr5mre",
-      "note": "body,logEntry"
-    },
-    {
-      "at": "2026-11-26T00:58:09.679Z",
-      "by": "Orchestrator",
-      "action": "card.criteria-remove",
-      "ref": "c0ho9o8j",
-      "note": "#3: Owner order 2026-11-22: JetOS is removed from the project entirely.; was [open]: JetOS module options are package declarations with a stated merge law: two packages set one option and the result follows the law."
-    },
-    {
-      "at": "2026-11-26T00:58:08.646Z",
-      "by": "Orchestrator",
-      "action": "card.update",
-      "ref": "c0ho9o8j",
-      "note": "title,logEntry"
-    },
-    {
-      "at": "2026-11-26T00:58:06.771Z",
-      "by": "Orchestrator",
-      "action": "card.update",
-      "ref": "c0ho9o8j",
-      "note": "body,logEntry"
-    },
-    {
-      "at": "2026-11-26T00:58:04.559Z",
-      "by": "Orchestrator",
-      "action": "card.criteria-edit",
-      "ref": "c0jm0xjt",
-      "note": "#10: Owner order 2026-11-22: JetOS is removed from the project entirely.; was: D-ECO1: One checked Jetspace graph connects package sources, environments, outputs, services, images, systems and fleets; a machine can point to the package it runs. Final names/file law are D-ECO-ROO"
-    },
-    {
-      "at": "2026-11-26T00:58:03.336Z",
-      "by": "Orchestrator",
-      "action": "card.criteria-edit",
-      "ref": "c0jm0xjt",
-      "note": "#8: Owner order 2026-11-22: JetOS is removed from the project entirely.; was: D-ECO-ROOTNAME2: Jetspace names the whole checked graph of sources, environments, outputs, systems and fleets. Package names the graph’s package nodes, not the complete root graph. Proof: `jet test Co"
-    },
-    {
-      "at": "2026-11-26T00:58:02.386Z",
-      "by": "Orchestrator",
-      "action": "card.criteria-remove",
-      "ref": "c0jm0xjt",
-      "note": "#7: Owner order 2026-11-22: JetOS is removed from the project entirely.; was [open]: D-ECO-JETOS2: A System is another typed project value. Jet builds a complete generation, shows its changes, proves it is ready, switches once, and keeps the previous generation. Proof: `jet test Compi"
-    },
-    {
-      "at": "2026-11-26T00:58:01.414Z",
-      "by": "Orchestrator",
-      "action": "card.update",
-      "ref": "c0jm0xjt",
-      "note": "body,logEntry"
-    },
-    {
-      "at": "2026-11-26T00:56:40.597Z",
-      "by": "Orchestrator",
-      "action": "milestone.delete",
-      "ref": "e9-m09-studio",
-      "note": "M09 · Studio makes the whole system inspectable"
-    },
-    {
-      "at": "2026-11-26T00:56:39.300Z",
-      "by": "Orchestrator",
-      "action": "milestone.delete",
-      "ref": "e9-m08-apps",
-      "note": "M08 · Apps run with explicit recoverable capabilities"
-    },
-    {
-      "at": "2026-11-26T00:56:38.164Z",
-      "by": "Orchestrator",
-      "action": "milestone.delete",
-      "ref": "e9-m07-desktop",
-      "note": "M07 · One configuration produces a complete desktop"
-    },
-    {
-      "at": "2026-11-26T00:56:37.129Z",
-      "by": "Orchestrator",
-      "action": "milestone.delete",
-      "ref": "e9-m06-services-fleet",
-      "note": "M06 · Services and fleet updates recover cleanly"
-    },
-    {
-      "at": "2026-11-26T00:56:36.249Z",
-      "by": "Orchestrator",
-      "action": "milestone.delete",
-      "ref": "e9-m05-bootable-machine",
-      "note": "M05 · A bootable machine spans hardware to image"
-    },
-    {
-      "at": "2026-11-26T00:56:35.322Z",
-      "by": "Orchestrator",
-      "action": "milestone.delete",
-      "ref": "e9-m04-identity",
-      "note": "M04 · Accounts and user identity are reproducible"
-    },
-    {
-      "at": "2026-11-26T00:56:34.437Z",
-      "by": "Orchestrator",
-      "action": "milestone.delete",
-      "ref": "e9-m03-live-switching",
-      "note": "M03 · Safe live switching survives failure"
-    },
-    {
-      "at": "2026-11-26T00:56:33.528Z",
-      "by": "Orchestrator",
-      "action": "milestone.delete",
-      "ref": "e9-m02-managed-state",
-      "note": "M02 · Managed system state applies atomically"
-    },
-    {
-      "at": "2026-11-26T00:56:32.606Z",
-      "by": "Orchestrator",
-      "action": "milestone.delete",
-      "ref": "e9-m01-system-description",
-      "note": "M01 · One deterministic system description"
-    },
-    {
-      "at": "2026-11-26T00:56:31.720Z",
-      "by": "Orchestrator",
-      "action": "milestone.delete",
-      "ref": "e9-migration",
-      "note": "Migration from existing systems"
-    },
-    {
-      "at": "2026-11-26T00:56:30.803Z",
-      "by": "Orchestrator",
-      "action": "milestone.delete",
-      "ref": "e9-first-boot",
-      "note": "First boot and acceptance"
-    },
-    {
-      "at": "2026-11-26T00:56:29.894Z",
-      "by": "Orchestrator",
-      "action": "milestone.delete",
-      "ref": "e9-studio",
-      "note": "JetOS Studio"
-    },
-    {
-      "at": "2026-11-26T00:56:29.025Z",
-      "by": "Orchestrator",
-      "action": "milestone.delete",
-      "ref": "e9-fleet",
-      "note": "Deployment and fleet operation"
-    },
-    {
-      "at": "2026-11-26T00:56:28.146Z",
-      "by": "Orchestrator",
-      "action": "milestone.delete",
-      "ref": "e9-generations",
-      "note": "Generations and user data"
-    },
-    {
-      "at": "2026-11-26T00:56:27.263Z",
-      "by": "Orchestrator",
-      "action": "milestone.delete",
-      "ref": "e9-apps-network",
-      "note": "Applications, containers, and network"
-    },
-    {
-      "at": "2026-11-26T00:56:26.362Z",
-      "by": "Orchestrator",
-      "action": "milestone.delete",
-      "ref": "e9-options-services",
-      "note": "Options, services, and programs"
-    },
-    {
-      "at": "2026-11-26T00:56:25.429Z",
-      "by": "Orchestrator",
-      "action": "milestone.delete",
-      "ref": "e9-desktop",
-      "note": "Graphical desktop"
-    },
-    {
-      "at": "2026-11-26T00:56:24.525Z",
-      "by": "Orchestrator",
-      "action": "milestone.delete",
-      "ref": "e9-boot-hardware",
-      "note": "Boot, images, disks, and hardware"
-    },
-    {
-      "at": "2026-11-26T00:56:23.480Z",
-      "by": "Orchestrator",
-      "action": "milestone.delete",
-      "ref": "e9-system-activation",
-      "note": "System model and activation"
-    },
-    {
-      "at": "2026-11-26T00:56:22.194Z",
-      "by": "Orchestrator",
-      "action": "card.delete",
-      "ref": "c018jg16",
-      "note": "jet os engine verbs (plan and the rest of the jetos dispatcher) are not built in the Jet engine"
-    },
-    {
-      "at": "2026-11-26T00:56:20.812Z",
-      "by": "Orchestrator",
-      "action": "card.delete",
-      "ref": "c0xv38ku",
-      "note": "JetOS: jet os migrate compare-nixos has no Jet counterpart (Rust exit gap)"
-    },
-    {
-      "at": "2026-11-26T00:56:19.439Z",
-      "by": "Orchestrator",
-      "action": "card.delete",
-      "ref": "c0r2z34q",
-      "note": "SECURITY: jetos workload builds an implicit sh -c command by interpolating unquoted ports/mounts/secrets/image; workload names reach artifact paths unvalidated"
-    },
-    {
-      "at": "2026-11-26T00:56:13.932Z",
-      "by": "Orchestrator",
-      "action": "card.delete",
-      "ref": "c02h4gry",
-      "note": "jetos user data: restore, conflict, and disaster-recovery proof"
-    },
-    {
-      "at": "2026-11-26T00:56:12.837Z",
-      "by": "Orchestrator",
-      "action": "card.delete",
-      "ref": "c0x0y1os",
-      "note": "jetos user data: backup targets and scheduling"
-    },
-    {
-      "at": "2026-11-26T00:56:11.659Z",
-      "by": "Orchestrator",
-      "action": "card.delete",
-      "ref": "c0mvpscb",
-      "note": "jetos first boot: offline, failure, accessibility, and resume states"
-    },
-    {
-      "at": "2026-11-26T00:56:09.673Z",
-      "by": "Orchestrator",
-      "action": "card.delete",
-      "ref": "c0h2hvwv",
-      "note": "jetos first boot: proprietary driver and codec consent"
-    },
-    {
-      "at": "2026-11-26T00:56:08.328Z",
-      "by": "Orchestrator",
-      "action": "card.delete",
-      "ref": "c0bf48a4",
-      "note": "jetos first boot: hardware and driver detection"
-    },
-    {
-      "at": "2026-11-26T00:56:07.313Z",
-      "by": "Orchestrator",
-      "action": "card.delete",
-      "ref": "c013frzw",
-      "note": "jetos app store: beginner GUI and failure recovery"
-    },
-    {
-      "at": "2026-11-26T00:56:06.434Z",
-      "by": "Orchestrator",
-      "action": "card.delete",
-      "ref": "c0vquonw",
-      "note": "jetos app store: install, remove, and generation transactions"
-    },
-    {
-      "at": "2026-11-26T00:56:05.475Z",
-      "by": "Orchestrator",
-      "action": "card.delete",
-      "ref": "c0lm8b0h",
-      "note": "jetos networking: Bluetooth"
-    },
-    {
-      "at": "2026-11-26T00:56:04.559Z",
-      "by": "Orchestrator",
-      "action": "card.delete",
-      "ref": "c0fr9gl2",
-      "note": "jetos networking: printing"
-    },
-    {
-      "at": "2026-11-26T00:56:03.722Z",
-      "by": "Orchestrator",
-      "action": "card.delete",
-      "ref": "c0a4dfud",
-      "note": "jetos networking: firewall and WireGuard"
-    },
-    {
-      "at": "2026-11-26T00:56:02.840Z",
-      "by": "Orchestrator",
-      "action": "card.delete",
-      "ref": "c0ycfgad",
-      "note": "jetos VM tests: generation switch and rollback proof"
-    },
-    {
-      "at": "2026-11-26T00:56:01.961Z",
-      "by": "Orchestrator",
-      "action": "card.delete",
-      "ref": "c0i1vxui",
-      "note": "jetos options: full contender provenance and explain"
-    },
-    {
-      "at": "2026-11-26T00:56:01.086Z",
-      "by": "Orchestrator",
-      "action": "card.delete",
-      "ref": "c08g84nj",
-      "note": "jetos users: proof, explain, and audit"
-    },
-    {
-      "at": "2026-11-26T00:56:00.146Z",
-      "by": "Orchestrator",
-      "action": "card.delete",
-      "ref": "c02xubmv",
-      "note": "jetos users: atomic switch and rollback"
-    },
-    {
-      "at": "2026-11-26T00:55:59.237Z",
-      "by": "Orchestrator",
-      "action": "card.delete",
-      "ref": "c0x2g69u",
-      "note": "jetos users: plan and build"
-    },
-    {
-      "at": "2026-11-26T00:55:58.236Z",
-      "by": "Orchestrator",
-      "action": "card.delete",
-      "ref": "c04s3toz",
-      "note": "jetos baselines: full user override and provenance proof"
-    },
-    {
-      "at": "2026-11-26T00:55:57.000Z",
-      "by": "Orchestrator",
-      "action": "card.delete",
-      "ref": "c0ze7k0c",
-      "note": "jetos baselines: graphical defaults"
-    },
-    {
-      "at": "2026-11-26T00:55:55.889Z",
-      "by": "Orchestrator",
-      "action": "card.delete",
-      "ref": "c0pfw87t",
-      "note": "jetos desktops: Hyprland and Niri modules"
-    },
-    {
-      "at": "2026-11-26T00:55:54.918Z",
-      "by": "Orchestrator",
-      "action": "card.delete",
-      "ref": "c0kbw9dr",
-      "note": "jetos desktops: GNOME and KDE modules"
-    },
-    {
-      "at": "2026-11-26T00:55:53.844Z",
-      "by": "Orchestrator",
-      "action": "card.delete",
-      "ref": "c0ae8vxy",
-      "note": "jetos graphical substrate: PipeWire services and permissions"
-    },
-    {
-      "at": "2026-11-26T00:55:52.925Z",
-      "by": "Orchestrator",
-      "action": "card.delete",
-      "ref": "c051psx0",
-      "note": "jetos graphical substrate: portals and polkit"
-    },
-    {
-      "at": "2026-11-26T00:55:52.018Z",
-      "by": "Orchestrator",
-      "action": "card.delete",
-      "ref": "c0v25706",
-      "note": "jetos boot: rollback selection and boot GC roots"
-    },
-    {
-      "at": "2026-11-26T00:55:51.034Z",
-      "by": "Orchestrator",
-      "action": "card.delete",
-      "ref": "c0kodh8n",
-      "note": "jetos boot: first-party kernel packaging"
-    },
-    {
-      "at": "2026-11-26T00:55:49.873Z",
-      "by": "Orchestrator",
-      "action": "card.delete",
-      "ref": "c0av1t1i",
-      "note": "jetos systemd: hardening controls and explain proof"
-    },
-    {
-      "at": "2026-11-26T00:55:48.529Z",
-      "by": "Orchestrator",
-      "action": "card.delete",
-      "ref": "c000i200",
-      "note": "jetos composition: fontconfig and session environment"
-    },
-    {
-      "at": "2026-11-26T00:55:47.077Z",
-      "by": "Orchestrator",
-      "action": "card.delete",
-      "ref": "c0rgy9zq",
-      "note": "jetos composition: udev and hwdb generators"
-    },
-    {
-      "at": "2026-11-26T00:55:45.819Z",
-      "by": "Orchestrator",
-      "action": "card.delete",
-      "ref": "c0fwzyiv",
-      "note": "jetos PAM: /etc/pam.d generation and hostile proof"
-    },
-    {
-      "at": "2026-11-26T00:55:44.832Z",
-      "by": "Orchestrator",
-      "action": "card.delete",
-      "ref": "c05glk9b",
-      "note": "jetos accounts: mutable-state preservation and atomic recovery"
-    },
-    {
-      "at": "2026-11-26T00:55:43.323Z",
-      "by": "Orchestrator",
-      "action": "card.delete",
-      "ref": "c002nhca",
-      "note": "jetos accounts: shadow and secret handling"
-    },
-    {
-      "at": "2026-11-26T00:55:42.212Z",
-      "by": "Orchestrator",
-      "action": "card.delete",
-      "ref": "c0ptq2fy",
-      "note": "jetos live switch: transactional restart, reload, stop, and start"
-    },
-    {
-      "at": "2026-11-26T00:55:41.088Z",
-      "by": "Orchestrator",
-      "action": "card.delete",
-      "ref": "c0fttoym",
-      "note": "jetos activation: dry-run and atomic generation flip"
-    },
-    {
-      "at": "2026-11-26T00:55:40.133Z",
-      "by": "Orchestrator",
-      "action": "card.delete",
-      "ref": "c05968om",
-      "note": "jetos activation: setuid wrapper and tmpfiles realization"
-    },
-    {
-      "at": "2026-11-26T00:55:39.168Z",
-      "by": "Orchestrator",
-      "action": "card.delete",
-      "ref": "c0v3x1cu",
-      "note": "jetos /etc: mutable-versus-managed conflict policy"
-    },
-    {
-      "at": "2026-11-26T00:55:37.660Z",
-      "by": "Orchestrator",
-      "action": "card.delete",
-      "ref": "c0pllqqs",
-      "note": "jetos /etc: atomic apply and crash recovery"
-    },
-    {
-      "at": "2026-11-26T00:55:36.032Z",
-      "by": "Orchestrator",
-      "action": "card.delete",
-      "ref": "c0ff4rd6",
-      "note": "jetos profiles: gschema, MIME, and XDG composition"
-    },
-    {
-      "at": "2026-11-26T00:55:34.890Z",
-      "by": "Orchestrator",
-      "action": "card.delete",
-      "ref": "c08ehiis",
-      "note": "jetos tuning: sched-ext"
-    },
-    {
-      "at": "2026-11-26T00:55:33.828Z",
-      "by": "Orchestrator",
-      "action": "card.delete",
-      "ref": "c0dwvyof",
-      "note": "jetos tuning: zram"
-    },
-    {
-      "at": "2026-11-26T00:55:32.776Z",
-      "by": "Orchestrator",
-      "action": "card.delete",
-      "ref": "c0x1bnix",
-      "note": "jetos apps: foreign application ecosystems"
-    },
-    {
-      "at": "2026-11-26T00:55:31.764Z",
-      "by": "Orchestrator",
-      "action": "card.delete",
-      "ref": "c0njkjtb",
-      "note": "jetos desktop breadth: localization"
-    },
-    {
-      "at": "2026-11-26T00:55:30.775Z",
-      "by": "Orchestrator",
-      "action": "card.delete",
-      "ref": "c0i3v9v2",
-      "note": "jetos desktop breadth: gaming"
-    },
-    {
-      "at": "2026-11-26T00:55:29.733Z",
-      "by": "Orchestrator",
-      "action": "card.delete",
-      "ref": "c0cslm3b",
-      "note": "jetos desktop breadth: virtualization"
-    },
-    {
-      "at": "2026-11-26T00:55:28.710Z",
-      "by": "Orchestrator",
-      "action": "card.delete",
-      "ref": "c07a88xb",
-      "note": "jetos desktop breadth: desktop environments"
-    },
-    {
-      "at": "2026-11-26T00:55:27.771Z",
-      "by": "Orchestrator",
-      "action": "card.delete",
-      "ref": "c0x0ur5x",
-      "note": "jetos theming: preview, explain, and rollback"
-    },
-    {
-      "at": "2026-11-26T00:55:26.752Z",
-      "by": "Orchestrator",
-      "action": "card.delete",
-      "ref": "c0rec6tv",
-      "note": "jetos theming: desktop and application adapters"
-    },
-    {
-      "at": "2026-11-26T00:55:25.648Z",
-      "by": "Orchestrator",
-      "action": "card.delete",
-      "ref": "c0gqfgov",
-      "note": "jetos programs: catalog parity and contribution proof"
-    },
-    {
-      "at": "2026-11-26T00:55:24.670Z",
-      "by": "Orchestrator",
-      "action": "card.delete",
-      "ref": "c08en8ex",
-      "note": "jetos programs: developer and media modules"
-    },
-    {
-      "at": "2026-11-26T00:55:23.717Z",
-      "by": "Orchestrator",
-      "action": "card.delete",
-      "ref": "c0xnjpjq",
-      "note": "jetos programs: browser and communication modules"
-    },
-    {
-      "at": "2026-11-26T00:55:22.722Z",
-      "by": "Orchestrator",
-      "action": "card.delete",
-      "ref": "c0r7qh3o",
-      "note": "jetos programs: shell, terminal, and editor modules"
-    },
-    {
-      "at": "2026-11-26T00:55:21.759Z",
-      "by": "Orchestrator",
-      "action": "card.delete",
-      "ref": "c0u8cs6x",
-      "note": "jetos services: journal query and retention"
-    },
-    {
-      "at": "2026-11-26T00:55:20.776Z",
-      "by": "Orchestrator",
-      "action": "card.delete",
-      "ref": "c0p1zm2a",
-      "note": "jetos services: tmpfiles and hardening controls"
-    },
-    {
-      "at": "2026-11-26T00:55:19.791Z",
-      "by": "Orchestrator",
-      "action": "card.delete",
-      "ref": "c0jsg61e",
-      "note": "jetos services: timers"
-    },
-    {
-      "at": "2026-11-26T00:55:18.788Z",
-      "by": "Orchestrator",
-      "action": "card.delete",
-      "ref": "c09hoi6l",
-      "note": "jetos impermanence: persistent-path policy and recovery proof"
-    },
-    {
-      "at": "2026-11-26T00:55:17.602Z",
-      "by": "Orchestrator",
-      "action": "card.delete",
-      "ref": "c0zu27v0",
-      "note": "jetos lifecycle: automatic upgrade, failure, and rollback"
-    },
-    {
-      "at": "2026-11-26T00:55:16.135Z",
-      "by": "Orchestrator",
-      "action": "card.delete",
-      "ref": "c0ufilnz",
-      "note": "jetos lifecycle: channels and update planning"
-    },
-    {
-      "at": "2026-11-26T00:55:15.178Z",
-      "by": "Orchestrator",
-      "action": "card.delete",
-      "ref": "c0kv3mji",
-      "note": "jetos hardware: named specialisations and boot selection"
-    },
-    {
-      "at": "2026-11-26T00:55:14.256Z",
-      "by": "Orchestrator",
-      "action": "card.delete",
-      "ref": "c0fryjkw",
-      "note": "jetos hardware: source-backed hardware profiles"
-    },
-    {
-      "at": "2026-11-26T00:55:13.354Z",
-      "by": "Orchestrator",
-      "action": "card.delete",
-      "ref": "c06791le",
-      "note": "jetos images: appliance image variant"
-    },
-    {
-      "at": "2026-11-26T00:55:12.489Z",
-      "by": "Orchestrator",
-      "action": "card.delete",
-      "ref": "c00xg57g",
-      "note": "jetos images: netboot image variant"
-    },
-    {
-      "at": "2026-11-26T00:55:11.546Z",
-      "by": "Orchestrator",
-      "action": "card.delete",
-      "ref": "c0vb58xt",
-      "note": "jetos images: SD-card image variant"
-    },
-    {
-      "at": "2026-11-26T00:55:10.613Z",
-      "by": "Orchestrator",
-      "action": "card.delete",
-      "ref": "c0lgsfwe",
-      "note": "jetos microVMs: declarative microVM lifecycle"
-    },
-    {
-      "at": "2026-11-26T00:55:09.669Z",
-      "by": "Orchestrator",
-      "action": "card.delete",
-      "ref": "c0aatck7",
-      "note": "jetos options: LSP hover, completion, and provenance links"
-    },
-    {
-      "at": "2026-11-26T00:55:08.738Z",
-      "by": "Orchestrator",
-      "action": "card.delete",
-      "ref": "c04ucjza",
-      "note": "jetos options: CLI and web reference views"
-    },
-    {
-      "at": "2026-11-26T00:55:07.814Z",
-      "by": "Orchestrator",
-      "action": "card.delete",
-      "ref": "c0v77oqp",
-      "note": "jet deploy: per-host proof and durable rollout report"
     }
   ],
   "nextNum": 368,
