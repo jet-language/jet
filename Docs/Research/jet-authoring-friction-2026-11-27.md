@@ -9,15 +9,16 @@
 > - **#7044 [P0]:** `C23` (`Neg` operator trait), `D26` (`_: expr` read discard), `H44` (`#Layout(c)` typed struct pointers in `#Unsafe`)
 > - **#7045 [P0]:** `B10` Part 1 (Option 1A: bare `Float` default, exact contextual `Decimal`/`Float`, `Type{value}` scalars, `#UnitFamily(Time)` `hour`/`day` replacing `h`/`d`, delete magic `f` suffix)
 > - **#7046 [P0]:** `B10` Part 2 (Unified unquoted `Type{...}` / `Type{{{...}}}` `DSL` trait: type-owned `parse`, hole spans, LSP Semantic Tokens `highlight`, `jet fmt`, cutover of `SQL`/`HTML`/`Sh`/`Regex`/`Path`/`URL`/`DateTime`/`Grammar`/`Complex`/`Quaternion` + FFI foundation, delete magic `i`/`j`/`k` suffixes)
-> - **#7047 [P0]:** Option 1 (`!` / `!(context)` / `!!` exclusively for Fallible `T E!`, reserving `?` / `?.` / `??` strictly for Optional `T?`, superseding `#7034`'s `?` failure-mark spelling)
+> - **#7047 [P0]:** Option 1 (`!` / `!(context)` / `!!` exclusively for Fallible `T E!`, reserving `?` / `?.` / `??` strictly for Optional `T?`, superseding `#7034`'s `?` failure-mark spelling) + `E53` (`!! { ... err ... }` everywhere)
 > - **#7048 [P0]:** `A3` (`task {}` return inference), `A4` (chained pattern guards + guard extraction), `A5` (uniform `{}` arms + `L0514` at 2+ distinct variants), `A6` (`E0078` span on `loop`), `A7` (non-moving `_: expr` discard + `.drop` for linear), `A8` (rename loop `next` -> `skip`)
 > - **#7049 [P0]:** `A2` + **Jet Composition Laws** (drop `->` on `if`/`loop`, `[loop ...]` comprehensions, zero postfix markers + stacked `#[A, B]` slots + in-body markers, flow-binding pattern algebra, `T?` finite `break val` loops, 3-class jump boundaries, full surface coverage), `B9` (`Type{...}` in `if`/`loop` headers), `B17` (binary `^` and `Int / Int` hints)
 > - **#7050 [P0]:** `B11` (`\u{H}` lexer fix + multi/triple-backtick raw strings), `B13` (`U8{'\n'}` ASCII byte folding), `B16` (`..=` hint + range `.rev()` / descending stride)
 > - **#7051 [P0]:** `C18-A` (`Type{expr}` ascription), `C19` (named enum patterns `.Click{x, y}`), `C22` (canonical `Float`/`Int` `From` ranking), `C24` (generic receiver closure inference like `sort_by`), `C25` (`Name<T>: struct` & `*` call-site label hints)
 > - **#7052 [P0]:** `D28` (two-phase borrows for sequential nested calls — adversarial safety audit first), `D30` (`.in_place()` & `^guard: cell.guard_edit()` diagnostic hints)
 > - **#7053 [P0]:** `D27 Part A` (structural `Copy` for small plain all-scalar structs), `D29` (zero-refcount `Shared<T>` borrow in scoped tasks — adversarial safety audit first)
+> - **#7054 [P0]:** `E31`/`E51` (ordinary `fn` defaults infallible `Never!`, `run`/`#Test` keep `Err!`), `E33`/`E52` (nested `Task<T E!>.join()` ergonomics)
 >
-> **Remaining in this TODO list for owner discussion & decision:** **17 items** (`D27 Part B`, `E31`, `E33`, `E51–E53`, `F34`, `F36`, `F38`, `G39–G40`, `G42–G43`, `H45`, `I46–I47`, `J48–J50`). Item numbers are kept stable as items are removed.
+> **Remaining in this TODO list for owner discussion & decision:** **14 items** (`D27 Part B`, `F34`, `F36`, `F38`, `G39–G40`, `G42–G43`, `H45`, `I46–I47`, `J48–J50`). Item numbers are kept stable as items are removed.
 
 ---
 
@@ -25,9 +26,8 @@
 
 1. [The Bottom Line: Would Fixing These Make Jet Near-Perfect?](#1-the-bottom-line-would-fixing-these-make-jet-near-perfect)
 2. [Productive Friction Worth Keeping (What Forces *Good* Code)](#2-productive-friction-worth-keeping-what-forces-good-code)
-3. [Remaining TODO Items to Discuss & Decide (17 Items)](#3-remaining-todo-items-to-discuss--decide-17-items)
+3. [Remaining TODO Items to Discuss & Decide (14 Items)](#3-remaining-todo-items-to-discuss--decide-14-items)
    - [D. Ownership, Borrowing & Copying (`D27 Part B`)](#d-ownership-borrowing--copying)
-   - [E. Error Handling & Jet-vs-Go Remaining Items (`E31`, `E33`, `E51–E53`)](#e-error-handling--jet-vs-go-remaining-items)
    - [F. Collections, Strings, Bytes & Stdlib Ergonomics (`F34`, `F36`, `F38`)](#f-collections-strings-bytes--stdlib-ergonomics)
    - [G. Concurrency, Effects & Imports (`G39–G40`, `G42–G43`)](#g-concurrency-effects--imports)
    - [H. Lints & Low-Level Code (`H45`)](#h-lints--low-level-code)
@@ -77,7 +77,7 @@ All three agents **explicitly asked Jet to KEEP** these guardrails — annoying 
 
 ---
 
-## 3. Remaining TODO Items to Discuss & Decide (17 Items)
+## 3. Remaining TODO Items to Discuss & Decide (14 Items)
 
 Legend:
 - `COUNTERPRODUCTIVE` = actively pushes authors to write *worse* code.
@@ -89,33 +89,13 @@ Legend:
 
 ### D. Ownership, Borrowing & Copying
 
-#### D27 Part B. Functional `View<str>` / `View<T>` pass-through returns & last-use auto-move — `COUNTERPRODUCTIVE`
-- **What happens:** Returning a plain borrowed `String` parameter as `View<str> from line` currently fails (`E2307` in `StringViews.jet:302` refuses plain `String` without `.trim()`/`.before()`/`.after()`), pushing authors into disguised allocations (`return "{line}"`). Also last-use local moves into `^^` params still sometimes require `.move()` noise.
-- **Interaction with `#7031` (`D-HANDLE-NAV1`):** `#7031` replaces stored `@T` live links with `Pool<T>`/`ID<T>` handles while **explicitly keeping `View<T>`/`View<str>`** for temporary zero-copy borrows — zero conflict!
+#### D27 Part B. Functional `View<str>` / `View<T>` with inferred provenance (no `from var` boilerplate) & last-use auto-move — `COUNTERPRODUCTIVE`
+- **What happens:** Returning a plain borrowed `String` parameter as `View<str>` currently fails (`E2307` in `StringViews.jet:302` refuses plain `String` without `.trim()`/`.before()`/`.after()`), AND requires noisy `from line` provenance even when there's only 1 borrowable input or `self`. Also last-use local moves into `^^` params still sometimes require `.move()` noise.
+- **Interaction with `Docs/Proposals/memory-model-2026-10-05.md:396` & `#7031`:** Matches the memory-model proposal directly (`-> View<str>` infers `from self` on methods and `from param` on single-input fns; `from a | b` only needed when disambiguating multiple public inputs), and `#7031` explicitly keeps `View<T>`/`View<str>`.
 - **Proposed fixes / ideas:**
+  - Infer `View` provenance automatically on `self` methods and single-input functions (no `from var` needed!).
   - Allow `View<str>` / `View<T>` to accept plain borrowed `String` / `T` parameters directly (zero-copy pass-through).
   - Auto-move last-use locals into `^^` parameters without `.move()` noise.
-
----
-
-### E. Error Handling & Jet-vs-Go Remaining Items
-
-*(Note: `E32`, `Go-2`, and `Go-3` are already approved & carded as P0 in `#7043`!)*
-
-#### E31 / E51 (Go-1). Bare `fn() -> T` silently means `T Err!` instead of infallible (`Never!`) — `COUNTERPRODUCTIVE`
-- **What happens:** In Go, `func add(a, b int) int` is obviously infallible. In Jet, omitting the error rail on `add: fn(a: Int, b: Int) -> Int` silently makes it fallible (`Int Err!`), forcing almost every pure/internal helper in `Compiler/` and `Core/` to repeat `Never!` on every single signature (`-> Bool Never!`, `-> Int Never!`).
-- **Proposed fixes / ideas:**
-  - Keep `Err!` as the friendly default for `run: fn()` and `#Test` (so beginners and scripts write zero error annotations), and let ordinary library/helper `fn` declarations default to infallible (`Never!`) when no `!` rail is written!
-
-#### E33 / E52 (Go-4). Nested `Result` ergonomics (`(T E!) TaskFailure!`) — `ACCIDENTAL FRICTION`
-- **What happens:** `Task<Int DomainError!>.join()` returns `(Int DomainError!) TaskFailure!`, which is awkward to bind or unwrap without passing the handle to a helper function.
-- **Proposed fixes / ideas:**
-  - Ensure `h.join()!` cleanly unwraps the outer `TaskFailure!` into `T E!`, make nested `.Ok(.Ok(v))` / `.Ok(.Err(e))` / `.Err(tf)` matching smooth without helper wrappers, and support `Task<T E!>` uniformly across `task.all` / `task.race` / `task.any`.
-
-#### E53 (Go-5). Rock-solid `!!` block/error binding everywhere (`val: f() !! { log(err); return fallback }`) — `ACCIDENTAL FRICTION`
-- **What happens:** Replacing Go's 3-line `if err != nil { log(err); return fallback }` relies on `val: f() !! { log(err); return fallback }` working cleanly in *every* expression position (including inside `task { ... }`, lambdas, and multi-statement blocks) with `err` bound cleanly on the failure branch.
-- **Proposed fixes / ideas:**
-  - Audit and ensure `!! { ... }` with implicit `err` binding works uniformly across `fn`, lambdas, `task { ... }`, and `if`/loop arms, with zero surprising `Unit`/type-mismatch rejections (can roll directly into `#7047` if approved).
 
 ---
 
