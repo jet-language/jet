@@ -2,8 +2,8 @@
   "meta": {
     "version": 4,
     "project": "Jet",
-    "nextNum": 7059,
-    "rev": 115133,
+    "nextNum": 7060,
+    "rev": 115140,
     "ui": {
       "toggled": [
         "dec-group:syntax",
@@ -51,7 +51,7 @@
         "radar:G8"
       ]
     },
-    "completionCursor": "2026-11-27T17:44:34.100Z",
+    "completionCursor": "2026-11-27T19:14:01.260Z",
     "dayStart": {
       "date": "2026-11-27",
       "openCards": 302,
@@ -61936,6 +61936,11 @@
       "assignee": null,
       "log": [
         {
+          "at": "2026-11-27",
+          "by": "Orchestrator",
+          "text": "Owner rejected D-HANDLE-NAV1 ambient pool-guessing magic (2026-11-27) in favor of the clean, zero-magic 3-part architecture tracked in P0 #7059 (COW/SSO String + direct-field Shared<T>/Weak<T> retiring @T + plain explicit Pool<T>/ID<T>)."
+        },
+        {
           "at": "2026-11-25",
           "by": "Pip",
           "text": "Posted D-HANDLE-NAV1 to the owner; audit draft ready to land on dev."
@@ -62008,7 +62013,7 @@
       "parentId": null,
       "needsAcceptance": false,
       "created": "2026-11-25T17:58:59.300Z",
-      "updated": "2026-11-26T10:42:13.610Z",
+      "updated": "2026-11-27T19:19:30.142Z",
       "updatedBy": "Orchestrator"
     },
     {
@@ -64253,6 +64258,71 @@
       "updated": "2026-11-27T18:59:53.063Z",
       "updatedBy": "Orchestrator",
       "criteriaLastN": 3
+    },
+    {
+      "id": "c0nnf642",
+      "num": 7059,
+      "title": "Authoring friction P0: Zero-magic memory trio — COW/SSO String (D27 Part B), direct-field Shared<T>/Weak<T> (retiring @T), and honest Pool<T>/ID<T> (superseding D-HANDLE-NAV1)",
+      "body": "Owner-approved zero-magic 3-part memory architecture (2026-11-27, aligning with Jai/Odin honesty and superseding D-HANDLE-NAV1 ambient pool-guessing magic on #7031 + closing D27 Part B): (1) Everyday values + COW/SSO zero-copy String (<= 23B inline SSO or shared immutable slice buffer so line.trim()/before()/return line return plain String with zero byte copy and zero View<str>/from-var boilerplate). (2) Direct-field Shared<T> + Weak<T> (bob.parent?.name, bob.parent?.hp -= 1 on ordinary structs, single-thread ~1ns lock-elided fast path upgrading only across task boundaries, Weak ?. stale safety, retiring @T and freeing @). (3) Plain, honest Pool<T> + ID<T> (people[bob]?.hp -= 1, contiguous cache-friendly memory, O(1) drop, zero ambient store guessing, works cleanly with 1 or 10 pools). MANDATORY adversarial audit in Docs/Audits/ BEFORE any build commits.",
+      "kind": "task",
+      "track": "epoch",
+      "epoch": "G1",
+      "milestoneId": null,
+      "phase": "ready",
+      "priority": "P0",
+      "plan": null,
+      "checkSteps": null,
+      "probe": null,
+      "visualMedia": [],
+      "blockedBy": [],
+      "assignee": null,
+      "log": [],
+      "criteria": [
+        {
+          "n": 1,
+          "text": "Adversarial Design Audit (GATE BEFORE BUILD): land Docs/Audits/2026-11-27-zero-magic-memory-trio-review.md attacking (a) Shared<T> single-thread lock elision + re-entrancy/aliasing safety, (b) COW/SSO String ABI & Jet/peer < 1.00 memory/perf parity vs Rust, (c) View<T> role for mutable buffers, and (d) full @T retirement cutover list",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-11-27T19:19:26.198Z"
+        },
+        {
+          "n": 2,
+          "text": "D27 Part B (COW/SSO String): implement zero-copy COW/SSO String slicing so line.trim()/before()/after()/return line return plain String with zero byte copy and zero View<str>/from-var boilerplate, verified across O0/O1/O2/web + paired perf/memory benchmark vs Rust",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-11-27T19:19:27.008Z"
+        },
+        {
+          "n": 3,
+          "text": "Shared<T>/Weak<T> + @T retirement: support direct field reads/writes through Shared<T> and Weak<T> (bob.parent?.hp -= 1) with proven single-thread fast path and thread-safe task crossing; retire @T live links cleanly (freeing @ in Spellings.jet) across Compiler/Core/Examples/Tests/Docs",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-11-27T19:19:27.826Z"
+        },
+        {
+          "n": 4,
+          "text": "Honest Pool<T>/ID<T>: clean Pool<T> indexing & optional stale-ID safety (people[bob]?.name, people[bob]?.hp -= 1) with zero ambient pool-guessing magic, O0/O1/O2 goldens + UI snapshots + full suite green",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-11-27T19:19:28.613Z"
+        }
+      ],
+      "refs": [],
+      "tags": [],
+      "parentId": null,
+      "needsAcceptance": false,
+      "created": "2026-11-27T19:19:25.407Z",
+      "updated": "2026-11-27T19:19:28.613Z",
+      "updatedBy": "Orchestrator",
+      "criteriaLastN": 4
     }
   ],
   "decisions": [
@@ -123322,6 +123392,55 @@
     }
   ],
   "events": [
+    {
+      "at": "2026-11-27T19:19:30.142Z",
+      "by": "Orchestrator",
+      "action": "card.update",
+      "ref": "c0clpv28",
+      "note": "logEntry"
+    },
+    {
+      "at": "2026-11-27T19:19:28.613Z",
+      "by": "Orchestrator",
+      "action": "card.criteria-add",
+      "ref": "c0nnf642",
+      "note": "#4 Honest Pool<T>/ID<T>: clean Pool<T> indexing & optional stal"
+    },
+    {
+      "at": "2026-11-27T19:19:27.826Z",
+      "by": "Orchestrator",
+      "action": "card.criteria-add",
+      "ref": "c0nnf642",
+      "note": "#3 Shared<T>/Weak<T> + @T retirement: support direct field read"
+    },
+    {
+      "at": "2026-11-27T19:19:27.008Z",
+      "by": "Orchestrator",
+      "action": "card.criteria-add",
+      "ref": "c0nnf642",
+      "note": "#2 D27 Part B (COW/SSO String): implement zero-copy COW/SSO Str"
+    },
+    {
+      "at": "2026-11-27T19:19:26.198Z",
+      "by": "Orchestrator",
+      "action": "card.criteria-add",
+      "ref": "c0nnf642",
+      "note": "#1 Adversarial Design Audit (GATE BEFORE BUILD): land Docs/Audi"
+    },
+    {
+      "at": "2026-11-27T19:19:25.407Z",
+      "by": "Orchestrator",
+      "action": "card.add",
+      "ref": "c0nnf642",
+      "note": "Authoring friction P0: Zero-magic memory trio — COW/SSO String (D27 Part B), direct-field Shared<T>/Weak<T> (retiring @T), and honest Pool<T>/ID<T> (superseding D-HANDLE-NAV1)"
+    },
+    {
+      "at": "2026-11-27T19:14:01.260Z",
+      "by": "owner",
+      "action": "done.clear",
+      "ref": null,
+      "note": "2026-11-27T19:14:01.260Z"
+    },
     {
       "at": "2026-11-27T19:08:02.732Z",
       "by": "Orchestrator",
