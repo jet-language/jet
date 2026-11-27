@@ -10,8 +10,9 @@
 > - **#7045 [P0]:** `B10` Part 1 (Option 1A: bare `Float` default, exact contextual `Decimal`/`Float`, `Type{value}` scalars, `#UnitFamily(Time)` `hour`/`day` replacing `h`/`d`, delete magic `f` suffix)
 > - **#7046 [P0]:** `B10` Part 2 (Unified unquoted `Type{...}` / `Type{{{...}}}` `DSL` trait: type-owned `parse`, hole spans, LSP Semantic Tokens `highlight`, `jet fmt`, cutover of `SQL`/`HTML`/`Sh`/`Regex`/`Path`/`URL`/`DateTime`/`Grammar`/`Complex`/`Quaternion` + FFI foundation, delete magic `i`/`j`/`k` suffixes)
 > - **#7047 [P0]:** Option 1 (`!` / `!(context)` / `!!` exclusively for Fallible `T E!`, reserving `?` / `?.` / `??` strictly for Optional `T?`, superseding `#7034`'s `?` failure-mark spelling)
+> - **#7048 [P0]:** `A3` (`task {}` return inference), `A4` (chained pattern guards + guard extraction), `A5-1` (uniform `{}` arms), `A6` (`E0078` span on `loop`), `A7` (non-moving `_: expr` discard + `.drop` for linear), `A8` (rename loop `next` -> `skip`)
 >
-> **Remaining in this TODO list for owner discussion & decision:** **37 items** (`A2–A8`, `B9`, `B11`, `B13`, `B16–B17`, `C18–C19`, `C22`, `C24–C25`, `D27–D30`, `E31`, `E33`, `E51–E53`, `F34`, `F36`, `F38`, `G39–G40`, `G42–G43`, `H45`, `I46–I47`, `J48–J50`). Item numbers are kept stable as items are removed.
+> **Remaining in this TODO list for owner discussion & decision:** **32 items** (`A2`, `A5-2`, `B9`, `B11`, `B13`, `B16–B17`, `C18–C19`, `C22`, `C24–C25`, `D27–D30`, `E31`, `E33`, `E51–E53`, `F34`, `F36`, `F38`, `G39–G40`, `G42–G43`, `H45`, `I46–I47`, `J48–J50`). Item numbers are kept stable as items are removed.
 
 ---
 
@@ -19,8 +20,8 @@
 
 1. [The Bottom Line: Would Fixing These Make Jet Near-Perfect?](#1-the-bottom-line-would-fixing-these-make-jet-near-perfect)
 2. [Productive Friction Worth Keeping (What Forces *Good* Code)](#2-productive-friction-worth-keeping-what-forces-good-code)
-3. [Remaining TODO Items to Discuss & Decide (37 Items)](#3-remaining-todo-items-to-discuss--decide-37-items)
-   - [A. Control Flow, Patterns & Matching (`A2–A8`)](#a-control-flow-patterns--matching)
+3. [Remaining TODO Items to Discuss & Decide (32 Items)](#3-remaining-todo-items-to-discuss--decide-32-items)
+   - [A. Control Flow, Patterns & Matching (`A2`, `A5-2`)](#a-control-flow-patterns--matching)
    - [B. Syntax, Braces, Literals & Strings (`B9`, `B11`, `B13`, `B16–B17`)](#b-syntax-braces-literals--strings)
    - [C. Types, Structs, Enums, Generics & Signatures (`C18–C19`, `C22`, `C24–C25`)](#c-types-structs-enums-generics--signatures)
    - [D. Ownership, Borrowing & Copying (`D27–D30`)](#d-ownership-borrowing--copying)
@@ -74,7 +75,7 @@ All three agents **explicitly asked Jet to KEEP** these guardrails — annoying 
 
 ---
 
-## 3. Remaining TODO Items to Discuss & Decide (37 Items)
+## 3. Remaining TODO Items to Discuss & Decide (32 Items)
 
 Legend:
 - `COUNTERPRODUCTIVE` = actively pushes authors to write *worse* code.
@@ -86,61 +87,13 @@ Legend:
 
 ### A. Control Flow, Patterns & Matching
 
-#### A2. Value-producing `if` requires `->`, while statement `if` uses `{}` — `COUNTERPRODUCTIVE`
-- **What happens:** Writing:
-  ```jet
-  hint: if raw_mode {
-      "Press Tab to complete, F1 for docs, Ctrl-C to stop."
-  } else {
-      "Type :help for commands or :quit to exit."
-  }
-  ```
-  fails with `Expected -> after the condition of a value-producing if, found {`. Putting long strings after `->` breaks the 100-column formatter limit, so authors **give up on immutability** and rewrite it as `^hint: ""; if raw_mode { hint = ... } else { hint = ... }`.
-- **Proposed fixes / ideas:**
-  - Allow standard `{ ... } else { ... }` blocks on value-producing `if` expressions (keeping `->` as the concise one-liner shorthand).
-  - Ensure `jet fmt` never forces rewriting a readable multi-line `{ ... }` branch onto an over-long `->` line.
+#### A2. Dropping `->` on `if` and `loop` & the Exhaustive Lego Composability Law — `ACTIVE DISCUSSION`
+- **What happens:** Today value-producing `if` requires `->` (`if raw_mode -> "a" else -> "b"`), while statement `if` uses `{}` — and `loop x in xs -> expr` uses `->` for comprehensions while `loop x in xs { ... }` runs statements.
+- **Open discussion:** Drop `->` on `if` and `loop` completely (always `{ ... }`, keeping `->` strictly for function signatures, match/table arms, computed fields, and state transitions), plus ratify the exhaustive 8-law Lego Composability specification across every Jet construct.
 
-#### A3. Multi-statement `task { ... }` blocks can't return a value naturally — `BUG / COMPILER GAP` · `COUNTERPRODUCTIVE`
-- **What happens:**
-  ```jet
-  h: task {
-      ^sum: 0
-      loop n in items -> sum += n
-      sum
-  }
-  ```
-  fails with `This line computes a value but doesn't do anything with it` on `sum`; changing it to `return sum` then fails with `This needs Unit, but the value is Int`. Meanwhile `task fn() -> Int { ... }` fails to parse. Authors have to extract throwaway top-level helper functions just to return a value from a multi-statement task.
-- **Proposed fixes / ideas:**
-  - Make trailing value expressions work uniformly across `fn`, lambdas, `task { ... }`, `if { ... }`, and block expressions.
-  - Fix `task { ... }` return-type inference when a multi-statement body ends in an expression or `return value`.
-
-#### A4. Deep nested `if` ladders for multi-step pattern unwrapping — `ACCIDENTAL FRICTION`
-- **What happens:** Checking an `Option` whose payload contains another `Option` or `Result` requires 3–4 levels of nested `if` blocks (`if a == .Val(x) { if f(x) == .Val(y) { ... } }`), because `if a == .Val(x) && f(x) == .Val(y)` and guard-clause unwrapping on arbitrary enum variants aren't generally supported.
-- **Proposed fixes / ideas:**
-  - Support chained pattern guards (`if a == .Val(x) && x > 0 && f(x) == .Val(y) { ... }`).
-  - Generalize guard-clause extraction (`Val(x): opt ?? return`) or `else` guards cleanly across `Option`/`Result`/enum variants.
-
-#### A5. Competing `if` / `else` forms & overly rigid `Jet.SameSubjectDispatch` lint — `ACCIDENTAL FRICTION`
-- **What happens:** `if { c1 -> a; c2 -> b; else -> c }`, `if c1 -> a else if c2 { b }`, and `if x == { ... }` coexist with subtle arrow/brace rules. Switching one branch from 1 statement to 2 forces rewriting both branches. Meanwhile, `Jet.SameSubjectDispatch` warns even on flat guarded early-return `if` statements (`if key.kind == F1 { ... } if key.kind == CHAR && key.text == "q" { ... }`).
-- **Proposed fixes / ideas:**
-  - Allow `{ ... }` uniformly on single-statement branches without forcing `->` churn.
-  - Exempt guarded or early-return `if` statements with heterogeneous conditions from `SameSubjectDispatch`.
-
-#### A6. Finite value-loop `??` requirement (`E0078`) has an unclear span — `ACCIDENTAL FRICTION`
-- **What happens:** `found: loop x in xs { if ok(x) -> break x }` requires a trailing `?? fallback` after the closing `}`, and the `E0078` error points at the closing `}` instead of the `loop` header.
-- **Proposed fixes / ideas:**
-  - Anchor `E0078` on the `loop` keyword with a clear fix-it showing `?? default_value` after the closing brace.
-
-#### A7. Three competing discard idioms (`_:`, `^_:`, `.drop("reason")`, `?? ()`) — `ACCIDENTAL FRICTION`
-- **What happens:** Ignoring a value sometimes requires `_: expr`, sometimes `^_: list.pop()`, sometimes `.drop("reason")`, and sometimes `?? ()`. It's hard to predict which one the compiler wants.
-- **Proposed fixes / ideas:**
-  - Unify non-linear discards under plain `_: expr` (never requiring `^_:`).
-  - Reserve mandatory `.drop("reason")` strictly for linear/resource/error values (handles, tasks, `Result`).
-
-#### A8. `next` keyword collides with common variable names — `ACCIDENTAL FRICTION`
-- **What happens:** Jet uses `next` instead of `continue` in loops, yet `next` is one of the most common local variable names in iterators, parsers, and linked/state code (`.Ok(next) ->`, `next: ir_body_stmt(...)`).
-- **Proposed fixes / ideas:**
-  - Keep a crisp diagnostic when someone writes `continue` suggesting `next`, and warn cleanly if a local named `next` shadows loop `next` inside a loop body.
+#### A5-2. `Jet.SameSubjectDispatch` (`L0514`) lint scope on guarded `if` sequences — `ACTIVE DISCUSSION`
+- **What happens:** `L0514` fires on adjacent `if` guards sharing a subject even when one guard carries an extra `&&` condition (or when repeated guards test the *same* variant).
+- **Open discussion:** Keep `L0514` encouraging unified subject tables (now that `#CatchAll` is carded) while tightening false positives (same-variant repeated guards / `< 3` arms) and optionally adding match-arm guards (`.Char if key.text == "q" -> ...`).
 
 ---
 
