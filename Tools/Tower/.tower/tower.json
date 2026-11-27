@@ -2,8 +2,8 @@
   "meta": {
     "version": 4,
     "project": "Jet",
-    "nextNum": 7056,
-    "rev": 115118,
+    "nextNum": 7058,
+    "rev": 115125,
     "ui": {
       "toggled": [
         "dec-group:syntax",
@@ -63945,6 +63945,15 @@
           "verifiedBy": null,
           "evidence": "",
           "at": "2026-11-27T18:29:45.313Z"
+        },
+        {
+          "n": 4,
+          "text": "D27 auto-move: Auto-move last-use local variables into ^^ parameters without requiring .move() noise (independent of #7031 View/Handle decision), verified O0/O1/O2 + UI tests",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-11-27T18:59:01.841Z"
         }
       ],
       "refs": [],
@@ -63952,9 +63961,9 @@
       "parentId": null,
       "needsAcceptance": false,
       "created": "2026-11-27T18:29:42.883Z",
-      "updated": "2026-11-27T18:29:45.313Z",
+      "updated": "2026-11-27T18:59:01.841Z",
       "updatedBy": "Orchestrator",
-      "criteriaLastN": 3
+      "criteriaLastN": 4
     },
     {
       "id": "c0ql4qd5",
@@ -64067,6 +64076,100 @@
       "updated": "2026-11-27T18:45:52.637Z",
       "updatedBy": "Orchestrator",
       "criteriaLastN": 3
+    },
+    {
+      "id": "c00j49ue",
+      "num": 7056,
+      "title": "Authoring friction P0: I46 Single Source of Truth for Core library exports, canonical nominal type identity, single-file Core check, and monolith splits",
+      "body": "Owner-approved architectural P0 card (I46 from Docs/Research/jet-authoring-friction-2026-11-27.md): eliminate 6-7 manual parallel Core compiler tables in favor of ONE single source of truth derived from Core/ declarations. Fix bare vs <corelib>/... nominal type identity mismatch in type_identity_equal; make single-file jet check Core/<file>.jet recognize Core/package.jet identically to jet test; split massive monoliths (Core/Math/Math.jet 46.7K lines, Sema/Expressions.jet 8.5K, Loader.jet 8K) into focused submodules. Design review in Docs/Audits/ before build commits.",
+      "kind": "task",
+      "track": "epoch",
+      "epoch": "G1",
+      "milestoneId": null,
+      "phase": "ready",
+      "priority": "P0",
+      "plan": null,
+      "checkSteps": null,
+      "probe": null,
+      "visualMedia": [],
+      "blockedBy": [],
+      "assignee": null,
+      "log": [],
+      "criteria": [
+        {
+          "n": 1,
+          "text": "Design review in Docs/Audits/ naming all parallel Core export/metadata tables (Core.rows, CoreModules.jet, Copy.jet, Loader.jet, CoreUsage.jet, Expressions.jet) with a binding cutover list collapsing them to one single source of truth",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-11-27T18:59:02.793Z"
+        },
+        {
+          "n": 2,
+          "text": "Normalize nominal type identities in type_identity_equal (one canonical ID, eliminating bare vs <corelib>/... mismatch) and collapse manual Core export tables to one generated/derived source of truth",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-11-27T18:59:03.802Z"
+        },
+        {
+          "n": 3,
+          "text": "Make jet check Core/<file>.jet recognize Core/package.jet identically to jet test, and split Core/Math/Math.jet, Sema/Expressions.jet, and Loader.jet into clean focused submodules with S2==S3 fixed-point parity and full suite green",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-11-27T18:59:04.686Z"
+        }
+      ],
+      "refs": [],
+      "tags": [],
+      "parentId": null,
+      "needsAcceptance": false,
+      "created": "2026-11-27T18:58:34.535Z",
+      "updated": "2026-11-27T18:59:04.686Z",
+      "updatedBy": "Orchestrator",
+      "criteriaLastN": 3
+    },
+    {
+      "id": "c07z82uc",
+      "num": 7057,
+      "title": "Authoring friction P0: G39 (effect bundles & callback polymorphism), G42 (import hints/E0003/shadowing), G43 (dev warnings vs --deny-warnings/--release), H45 (exempt scripts/tests from public-API lints)",
+      "body": "Owner-approved G39, G42, G43, H45 from Docs/Research/jet-authoring-friction-2026-11-27.md: (1) G39: named effect bundles/aliases supporting scoped effects (e.g. FS.Read(\"/etc/ssl\")) plus effect-row polymorphism on higher-order callbacks/traits and LSP hover display. (2) G42: crisp parser hints for use ... as ... -> use alias: path and pkg[a, b] -> pkg.[a, b]; print exact unresolved path & searched dirs in E0003; allow local params to shadow unused module aliases cleanly + direct qualified module access. (3) G43: single consistent diagnostic policy across compiler, Diagnostics.jet, Docs/Spec/diagnostics.md, and Tower — tidy/style lints (UnusedImport, UnusedPrivateFn, style lints) warn in local dev + auto-prune in jet fix/jet fmt and error under --deny-warnings / CI / --release, while correctness/safety rules remain hard errors everywhere; remove contradictory \"Jet has no warnings\" text. (4) H45: exempt #Test files and run-entry scripts/examples from public-library API lints (L2401, L2421).",
+      "kind": "task",
+      "track": "epoch",
+      "epoch": "G1",
+      "milestoneId": null,
+      "phase": "ready",
+      "priority": "P0",
+      "plan": null,
+      "checkSteps": null,
+      "probe": null,
+      "visualMedia": [],
+      "blockedBy": [],
+      "assignee": null,
+      "log": [],
+      "criteria": [
+        {
+          "n": 1,
+          "text": "G39: Support named effect bundles/aliases (including scoped effects like FS.Read(\"path/\")) and effect-row polymorphism on callbacks/traits + LSP hover showing callback effect rows (O0/O1/O2 + golden)",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-11-27T18:59:22.019Z"
+        }
+      ],
+      "refs": [],
+      "tags": [],
+      "parentId": null,
+      "needsAcceptance": false,
+      "created": "2026-11-27T18:59:20.698Z",
+      "updated": "2026-11-27T18:59:22.019Z",
+      "updatedBy": "Orchestrator",
+      "criteriaLastN": 1
     }
   ],
   "decisions": [
@@ -123136,6 +123239,55 @@
     }
   ],
   "events": [
+    {
+      "at": "2026-11-27T18:59:22.019Z",
+      "by": "Orchestrator",
+      "action": "card.criteria-add",
+      "ref": "c07z82uc",
+      "note": "#1 G39: Support named effect bundles/aliases (including scoped "
+    },
+    {
+      "at": "2026-11-27T18:59:20.698Z",
+      "by": "Orchestrator",
+      "action": "card.add",
+      "ref": "c07z82uc",
+      "note": "Authoring friction P0: G39 (effect bundles & callback polymorphism), G42 (import hints/E0003/shadowing), G43 (dev warnings vs --deny-warnings/--release), H45 (exempt scripts/tests from public-API lints)"
+    },
+    {
+      "at": "2026-11-27T18:59:04.686Z",
+      "by": "Orchestrator",
+      "action": "card.criteria-add",
+      "ref": "c00j49ue",
+      "note": "#3 Make jet check Core/<file>.jet recognize Core/package.jet id"
+    },
+    {
+      "at": "2026-11-27T18:59:03.802Z",
+      "by": "Orchestrator",
+      "action": "card.criteria-add",
+      "ref": "c00j49ue",
+      "note": "#2 Normalize nominal type identities in type_identity_equal (on"
+    },
+    {
+      "at": "2026-11-27T18:59:02.793Z",
+      "by": "Orchestrator",
+      "action": "card.criteria-add",
+      "ref": "c00j49ue",
+      "note": "#1 Design review in Docs/Audits/ naming all parallel Core expor"
+    },
+    {
+      "at": "2026-11-27T18:59:01.841Z",
+      "by": "Orchestrator",
+      "action": "card.criteria-add",
+      "ref": "c0i65t1o",
+      "note": "#4 D27 auto-move: Auto-move last-use local variables into ^^ pa"
+    },
+    {
+      "at": "2026-11-27T18:58:34.536Z",
+      "by": "Orchestrator",
+      "action": "card.add",
+      "ref": "c00j49ue",
+      "note": "Authoring friction P0: I46 Single Source of Truth for Core library exports, canonical nominal type identity, single-file Core check, and monolith splits"
+    },
     {
       "at": "2026-11-27T18:45:52.637Z",
       "by": "Orchestrator",
