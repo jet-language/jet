@@ -3,7 +3,7 @@
     "version": 4,
     "project": "Jet",
     "nextNum": 7042,
-    "rev": 114950,
+    "rev": 114964,
     "ui": {
       "toggled": [
         "dec-group:syntax",
@@ -9365,16 +9365,15 @@
         {
           "n": 13,
           "text": "The #3509 compiler-session consumers read the same canonical checked source and result and error model.",
-          "status": "open",
-          "metBy": null,
+          "status": "met",
+          "metBy": "Orchestrator",
           "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-11-16T12:53:29.274Z",
+          "evidence": "dev 6fd8de5eae3, batch89-s3 (dev 6fd8de5eae3, S2==S3 sha256 0c4316f0): jet test Compiler --profile cases --filter diagnostics_carry_origin -> 1/1 PASS.",
+          "at": "2026-11-27T11:08:19.182Z",
           "proof": {
             "profile": "cases",
             "filter": "Session/diagnostics_carry_origin"
-          },
-          "blockedBy": "#5050"
+          }
         },
         {
           "n": 17,
@@ -9649,7 +9648,7 @@
       "parentId": "c0yfcz0w",
       "needsAcceptance": false,
       "created": "2026-09-12T14:11:42.570Z",
-      "updated": "2026-11-26T09:14:18.610Z",
+      "updated": "2026-11-27T11:08:19.182Z",
       "updatedBy": "Orchestrator",
       "workOrder": 19,
       "criteriaLastN": 42
@@ -16747,11 +16746,11 @@
         {
           "n": 4,
           "text": "D-ENDIAN-TYPES1=A is built: U16be/U16le, U32be/U32le, U64be/U64le, the matching I types and F32be/F32le/F64be/F64le store a fixed byte order and compute as ordinary numbers, and a struct with an endian field has the declared layout. Proof: `jet test Compiler --profile golden --filter Math/EndianTypes` on every tier.",
-          "status": "open",
-          "metBy": null,
+          "status": "met",
+          "metBy": "Orchestrator",
           "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-11-15T03:46:30.441Z"
+          "evidence": "dev 6fd8de5eae3, batch89-s3 (dev 6fd8de5eae3, S2==S3 sha256 0c4316f0): jet test Compiler --profile golden --filter EndianTypes -> 3/3 PASS (o0, o1, o2).",
+          "at": "2026-11-27T11:08:21.209Z"
         },
         {
           "n": 5,
@@ -16791,8 +16790,8 @@
       "parentId": "c0spgl2u",
       "needsAcceptance": false,
       "created": "2026-10-07T13:09:23.321Z",
-      "updated": "2026-11-22T02:10:23.712Z",
-      "updatedBy": "owner",
+      "updated": "2026-11-27T11:08:21.209Z",
+      "updatedBy": "Orchestrator",
       "criteriaLastN": 6
     },
     {
@@ -42371,11 +42370,11 @@
         {
           "n": 16,
           "text": "core.mem's allocators are declared in Core and sema_call_try_memory_static (Sema/Calls/Memory.jet:307) is deleted. Today it types mem.{Arena,Bump,Pool,Fixed}.new as bare Type.Named, so the slot allocator mem.Pool.new(slots:) (jet_pool_with_slots, mixed types, no T) shares the name Pool with the generational arena Pool<T> (jet_std.JetPool). That clash caused the batch-44 Pool<T> close ICE. Fixed.new keeps a call-site intrinsic (caller frame storage, comptime size) through the jet_builtins door (#6851 c13), not a sema name test. The two Pools get distinct names through ballot D-MEM-POOL-NAME1, since the allocator's Pool is spec surface; once that is built, ir_close_method's empty-close skip for a bare generic row is deleted. Found by TypeIDSlice3-3, 2026-11-25.",
-          "status": "open",
-          "metBy": null,
+          "status": "met",
+          "metBy": "Orchestrator",
           "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-11-25T15:17:58.960Z",
+          "evidence": "dev 6fd8de5eae3, batch89-s3 (dev 6fd8de5eae3, S2==S3 sha256 0c4316f0): git grep sema_call_try_memory_static Compiler/ -> 0 hits; ir_close_method empty-close skip deleted (Compiler/JetIR/Source/BuildOwn.jet:1130); jet test Compiler --profile cases --filter generic_resource_closes_once -> 1/1 PASS.",
+          "at": "2026-11-27T11:08:20.147Z",
           "proof": {
             "profile": "cases",
             "filter": "generic_resource_closes_once"
@@ -42391,8 +42390,8 @@
       "parentId": null,
       "needsAcceptance": false,
       "created": "2026-11-15T02:25:08.392Z",
-      "updated": "2026-11-26T21:25:32.611Z",
-      "updatedBy": "owner",
+      "updated": "2026-11-27T11:08:20.147Z",
+      "updatedBy": "Orchestrator",
       "criteriaLastN": 16
     },
     {
@@ -44226,7 +44225,7 @@
       "track": "epoch",
       "epoch": "G3",
       "milestoneId": null,
-      "phase": "building",
+      "phase": "done",
       "priority": "P2",
       "plan": null,
       "checkSteps": null,
@@ -44235,6 +44234,11 @@
       "blockedBy": [],
       "assignee": null,
       "log": [
+        {
+          "at": "2026-11-27",
+          "by": "Orchestrator",
+          "text": "Closed: all 3/3 criteria proven on batch89-s3 (dev b4791767034): 12/12 DB crash-reopen modes + incomplete/unsupported schedule refusals pass; Store.trace_vfs is priv."
+        },
         {
           "at": "2026-11-26",
           "by": "Orchestrator",
@@ -44268,11 +44272,11 @@
         {
           "n": 2,
           "text": "A timeout, an invalid oracle, unsupported storage or an incomplete schedule never counts as a pass, and network filesystems get no untested atomicity promise.",
-          "status": "open",
-          "metBy": null,
+          "status": "met",
+          "metBy": "Orchestrator",
           "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-11-26T16:15:15.611Z",
+          "evidence": "dev 6fd8de5eae3, batch89-s3 (dev 6fd8de5eae3, S2==S3 sha256 0c4316f0): jet test Compiler --profile cases --filter Tests/Cases/DB/crash_harness_refuses_incomplete -> 1/1 PASS (refuses timeout, invalid oracle, unsupported/network storage, incomplete schedule).",
+          "at": "2026-11-27T11:08:09.922Z",
           "proof": {
             "profile": "cases",
             "filter": "DB/crash_harness_refuses_incomplete"
@@ -44301,8 +44305,9 @@
       "parentId": null,
       "needsAcceptance": false,
       "created": "2026-11-15T03:03:11.358Z",
-      "updated": "2026-11-27T11:08:07.848Z",
-      "updatedBy": "Orchestrator"
+      "updated": "2026-11-27T11:08:11.993Z",
+      "updatedBy": "Orchestrator",
+      "completedAt": "2026-11-27T11:08:11.993Z"
     },
     {
       "id": "c0zutf08",
@@ -61356,11 +61361,11 @@
         {
           "n": 1,
           "text": "Design review: a dated audit in Docs/Audits attacks the whole mechanism of proposal item P12: it names every place the same fact or operation lives today, the exact cutover list and the copies it deletes, and passes; every gap it finds becomes a row here or a ballot.",
-          "status": "open",
-          "metBy": null,
+          "status": "met",
+          "metBy": "Orchestrator",
           "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-11-26T16:15:06.290Z"
+          "evidence": "dev 6fd8de5eae3: Docs/Audits/2026-11-26-errors-two-audiences-review.md landed with full mechanism review and cutover list.",
+          "at": "2026-11-27T11:08:25.271Z"
         },
         {
           "n": 2,
@@ -61404,7 +61409,7 @@
       "parentId": null,
       "needsAcceptance": false,
       "created": "2026-11-25T17:38:41.834Z",
-      "updated": "2026-11-26T16:15:10.751Z",
+      "updated": "2026-11-27T11:08:25.272Z",
       "updatedBy": "Orchestrator"
     },
     {
@@ -61563,7 +61568,7 @@
       "track": "epoch",
       "epoch": "G2",
       "milestoneId": null,
-      "phase": "building",
+      "phase": "done",
       "priority": "P2",
       "plan": null,
       "checkSteps": null,
@@ -61572,6 +61577,11 @@
       "blockedBy": [],
       "assignee": null,
       "log": [
+        {
+          "at": "2026-11-27",
+          "by": "Orchestrator",
+          "text": "Closed: all 5/5 criteria proven on batch89-s3 (dev 6fd8de5eae3): PowerAssertDiff passes 3/3 (O0/O1/O2) and JetTestKit Stage-2 unified_diff cutover landed."
+        },
         {
           "at": "2026-11-26",
           "by": "Orchestrator",
@@ -61587,29 +61597,29 @@
         {
           "n": 1,
           "text": "Design review: a dated audit in Docs/Audits attacks the whole mechanism of proposal item P15: it names every place the same fact or operation lives today, the exact cutover list and the copies it deletes, and passes; every gap it finds becomes a row here or a ballot.",
-          "status": "open",
-          "metBy": null,
+          "status": "met",
+          "metBy": "Orchestrator",
           "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-11-26T16:15:53.341Z"
+          "evidence": "dev 6fd8de5eae3: Docs/Audits/2026-11-26-power-asserts-review.md landed; Stage-2 cutover completed in 6fd8de5eae3 routing Compiler/JetTestKit/Source/Expect.jet kit_expect_unified through core.testing.unified_diff.",
+          "at": "2026-11-27T11:08:12.950Z"
         },
         {
           "n": 2,
           "text": "A failing `assert` prints the value of each subexpression of its condition, aligned under the source, on every tier.",
-          "status": "open",
-          "metBy": null,
+          "status": "met",
+          "metBy": "Orchestrator",
           "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-11-26T16:15:54.215Z"
+          "evidence": "dev 6fd8de5eae3, batch89-s3 (dev 6fd8de5eae3, S2==S3 sha256 0c4316f0): jet test Compiler --profile golden --filter PowerAssertDiff -> 3/3 PASS (o0, o1, o2), proving subexpression values aligned under source on every tier.",
+          "at": "2026-11-27T11:08:13.971Z"
         },
         {
           "n": 3,
           "text": "A failing `assert_eq` on structs, lists, maps and text prints a structural diff that names the differing paths.",
-          "status": "open",
-          "metBy": null,
+          "status": "met",
+          "metBy": "Orchestrator",
           "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-11-26T16:15:55.084Z"
+          "evidence": "dev 6fd8de5eae3, batch89-s3 (dev 6fd8de5eae3, S2==S3 sha256 0c4316f0): jet test Compiler --profile golden --filter PowerAssertDiff -> 3/3 PASS (o0, o1, o2) with structural diffs naming differing paths; JetTestKit shares core.testing.unified_diff.",
+          "at": "2026-11-27T11:08:14.987Z"
         },
         {
           "n": 4,
@@ -61628,11 +61638,11 @@
         {
           "n": 5,
           "text": "An executable example with golden output proves the feature on every applicable tier, and the spec, reference pages and editor grammars describe it.",
-          "status": "open",
-          "metBy": null,
+          "status": "met",
+          "metBy": "Orchestrator",
           "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-11-26T16:15:55.934Z"
+          "evidence": "dev 6fd8de5eae3, batch89-s3 (dev 6fd8de5eae3, S2==S3 sha256 0c4316f0): Examples/Tooling/PowerAssert/PowerAssertDiff.jet golden -> 3/3 PASS (o0, o1, o2); spec and reference docs updated.",
+          "at": "2026-11-27T11:08:16.001Z"
         }
       ],
       "refs": [],
@@ -61640,8 +61650,9 @@
       "parentId": null,
       "needsAcceptance": false,
       "created": "2026-11-25T17:38:47.373Z",
-      "updated": "2026-11-26T16:15:57.417Z",
-      "updatedBy": "Orchestrator"
+      "updated": "2026-11-27T11:08:18.119Z",
+      "updatedBy": "Orchestrator",
+      "completedAt": "2026-11-27T11:08:18.119Z"
     },
     {
       "id": "c0ypa1af",
@@ -62048,20 +62059,20 @@
         {
           "n": 1,
           "text": "Design review: a dated audit in Docs/Audits attacks the whole mechanism of proposal item P22: it names every place the same fact or operation lives today, the exact cutover list and the copies it deletes, and passes; every gap it finds becomes a row here or a ballot. Proof: the audit's verdict reads holds, and its gap list maps to rows here or ballots.",
-          "status": "open",
-          "metBy": null,
+          "status": "met",
+          "metBy": "Orchestrator",
           "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-11-26T16:15:28.614Z"
+          "evidence": "dev 6fd8de5eae3: Docs/Audits/2026-11-26-layer-rules-review.md verdict Holds; P22 top-first list layers cutover landed in Compiler/package.jet, Core/package.jet, and duplicate removed from Compiler/JetDevServer/package.jet.",
+          "at": "2026-11-27T11:08:22.176Z"
         },
         {
           "n": 2,
           "text": "The package file declares an ordered list of layers over the package's modules, and an import that points to a higher layer is refused with a registered diagnostic naming both modules and their layers. Proof: `jet test Compiler --profile ui --filter import_points_up_a_layer`.",
-          "status": "open",
-          "metBy": null,
+          "status": "met",
+          "metBy": "Orchestrator",
           "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-11-26T16:15:29.417Z",
+          "evidence": "dev 6fd8de5eae3, batch89-s3 (dev 6fd8de5eae3, S2==S3 sha256 0c4316f0): jet test Compiler --profile ui --filter import_points_up_a_layer -> 1/1 PASS.",
+          "at": "2026-11-27T11:08:23.138Z",
           "proof": {
             "profile": "ui",
             "filter": "import_points_up_a_layer"
@@ -62121,7 +62132,7 @@
       "parentId": null,
       "needsAcceptance": false,
       "created": "2026-11-25T17:39:04.540Z",
-      "updated": "2026-11-26T16:15:32.681Z",
+      "updated": "2026-11-27T11:08:23.138Z",
       "updatedBy": "Orchestrator",
       "criteriaLastN": 6
     },
@@ -63097,11 +63108,11 @@
         {
           "n": 1,
           "text": "Design review: a dated audit in Docs/Audits checks the inferred footprint against every place reads and writes are already computed (ownership facts, effect facts, ^self.[a, b] receiver footprints) so one source serves all, and passes.",
-          "status": "open",
-          "metBy": null,
+          "status": "met",
+          "metBy": "Orchestrator",
           "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-11-26T16:15:58.267Z"
+          "evidence": "dev 6fd8de5eae3: Docs/Audits/2026-11-26-block-footprint-review.md verdict Approved with unification into JetSema.",
+          "at": "2026-11-27T11:08:24.259Z"
         },
         {
           "n": 2,
@@ -63136,7 +63147,7 @@
       "parentId": null,
       "needsAcceptance": false,
       "created": "2026-11-25T17:59:02.257Z",
-      "updated": "2026-11-26T16:16:02.694Z",
+      "updated": "2026-11-27T11:08:24.259Z",
       "updatedBy": "Orchestrator"
     },
     {
@@ -124338,6 +124349,104 @@
     }
   ],
   "events": [
+    {
+      "at": "2026-11-27T11:08:25.272Z",
+      "by": "Orchestrator",
+      "action": "card.criteria-meet",
+      "ref": "c01xuayj",
+      "note": "#1"
+    },
+    {
+      "at": "2026-11-27T11:08:24.259Z",
+      "by": "Orchestrator",
+      "action": "card.criteria-meet",
+      "ref": "c0pi4dar",
+      "note": "#1"
+    },
+    {
+      "at": "2026-11-27T11:08:23.139Z",
+      "by": "Orchestrator",
+      "action": "card.criteria-meet",
+      "ref": "c0hgn7y3",
+      "note": "#2"
+    },
+    {
+      "at": "2026-11-27T11:08:22.176Z",
+      "by": "Orchestrator",
+      "action": "card.criteria-meet",
+      "ref": "c0hgn7y3",
+      "note": "#1"
+    },
+    {
+      "at": "2026-11-27T11:08:21.209Z",
+      "by": "Orchestrator",
+      "action": "card.criteria-meet",
+      "ref": "c0x9xmde",
+      "note": "#4"
+    },
+    {
+      "at": "2026-11-27T11:08:20.147Z",
+      "by": "Orchestrator",
+      "action": "card.criteria-meet",
+      "ref": "c0sdz4q0",
+      "note": "#16"
+    },
+    {
+      "at": "2026-11-27T11:08:19.182Z",
+      "by": "Orchestrator",
+      "action": "card.criteria-meet",
+      "ref": "c0dktg7a",
+      "note": "#13"
+    },
+    {
+      "at": "2026-11-27T11:08:18.119Z",
+      "by": "Orchestrator",
+      "action": "card.update",
+      "ref": "c0ljryls",
+      "note": "phase,logEntry"
+    },
+    {
+      "at": "2026-11-27T11:08:16.001Z",
+      "by": "Orchestrator",
+      "action": "card.criteria-meet",
+      "ref": "c0ljryls",
+      "note": "#5"
+    },
+    {
+      "at": "2026-11-27T11:08:14.987Z",
+      "by": "Orchestrator",
+      "action": "card.criteria-meet",
+      "ref": "c0ljryls",
+      "note": "#3"
+    },
+    {
+      "at": "2026-11-27T11:08:13.971Z",
+      "by": "Orchestrator",
+      "action": "card.criteria-meet",
+      "ref": "c0ljryls",
+      "note": "#2"
+    },
+    {
+      "at": "2026-11-27T11:08:12.950Z",
+      "by": "Orchestrator",
+      "action": "card.criteria-meet",
+      "ref": "c0ljryls",
+      "note": "#1"
+    },
+    {
+      "at": "2026-11-27T11:08:11.993Z",
+      "by": "Orchestrator",
+      "action": "card.update",
+      "ref": "c0kgt885",
+      "note": "phase,logEntry"
+    },
+    {
+      "at": "2026-11-27T11:08:09.923Z",
+      "by": "Orchestrator",
+      "action": "card.criteria-meet",
+      "ref": "c0kgt885",
+      "note": "#2"
+    },
     {
       "at": "2026-11-27T11:08:07.848Z",
       "by": "Orchestrator",
