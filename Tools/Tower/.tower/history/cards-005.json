@@ -45118,6 +45118,155 @@
       "completedAt": "2026-11-24T11:48:36.463Z",
       "questions": [],
       "retiredAt": "2026-11-27T11:52:29.151Z"
+    },
+    {
+      "id": "c0eve9h3",
+      "num": 4624,
+      "title": "Unused fields and enum cases are tidy errors: fields never read and cases never built (D-MEMBER-LIVE1=A)",
+      "body": "New card hosting owner ballot D-MEMBER-LIVE1. Extends D-STRUCT-LIVE1=A (four name-level liveness verdicts, card #2052/#2132) to members; reuses its `_name` repair (D-NAME-SIGIL1) and D-LINTPOLICY1 (warnings never block). Library `pub` stays exempt exactly as in D-STRUCT-LIVE1. No new spelling, suppression marker or tool.\n\nJob: an application grows; fields and cases from old experiments stay in types, mislead newcomers, and cost bytes and fetches.\n\nToday (exercised 2026-10-05 with release jet dev-05ea86f65, probe $JET_SCRATCH_ROOT/mine/legwork/languages-b/probes/F-member-liveness.*): `jet check` warns L0104 on a private `unused_helper`, but says nothing about `User.nickname` (written once, never read) or `Plan.Legacy` (matched, never built). D-STRUCT-LIVE1 covers imports, bindings, private functions and unreachable exports only (Docs/spec/syntax-decisions.md:7596-7601).\n\nSource witness: ReScript reanalyze (Gabriel Nordeborn, yKl2fSdnw7w 52:39-60:06): whole-program detection of never-read record fields and never-constructed variant cases; teams 'switch it on, get thousands of errors' and delete old experiments; ReScript-Relay uses the same facts to drop unused GraphQL selections in CI. Rule-9 research (legwork resources 11-15): reanalyze README (case dead if never constructed, matching does not count; field dead if never read, creating does not count; needs @live for FFI); Rust dead_code ('field is never read', 'variant is never constructed'; 1.57 PR 85200 stopped derived Clone/Debug from counting as reads, which broke deny(dead_code) builds); Periphery (external indexer: synthesized Codable/Equatable code invisible, false positives need retain flags); staticcheck U1000 (field accesses use fields; anonymous structs assumed fully used).\n\nThe ballot decides whether these become compiler warnings. Implementation after ratification: member facts in the existing liveness pass (closed package/application graph), use rules from the ballot technical text, machine fix (delete or `_` rename), UI goldens, `jet explain` rows.\n\nNoise evidence for the loss mitigation: Jon Blow (youtube DaJWWePhRsM) disables unused-variable warnings globally because macro-only uses make them noisy, and calls Go's unused-is-error annoying; Jet keeps every liveness warning advisory (D-LINTPOLICY1) and counts encode/decode, derive, reflection and FFI as uses.\n\nDistilled 2026-10-05 by DistillLang from the six mining batches; Tower snapshot rev 74843 (jet-state digest INCONSISTENT during collection: rerun before posting).",
+      "kind": "feature",
+      "track": "epoch",
+      "epoch": "G2",
+      "milestoneId": null,
+      "phase": "done",
+      "priority": "P3",
+      "plan": null,
+      "checkSteps": null,
+      "probe": null,
+      "visualMedia": [],
+      "blockedBy": [],
+      "assignee": null,
+      "log": [
+        {
+          "at": "2026-11-24",
+          "by": "Orchestrator",
+          "text": "All criteria met; closed in the near-done sweep."
+        },
+        {
+          "at": "2026-11-24",
+          "by": "Orchestrator",
+          "text": "c3 defect found on the batch 16 compiler: in cases MarkerDeclarations/marker_check_rules_hear_calls, jet check values/main.jet reports Jet.UnreadField for Account.user_name and Holder.item, fields reached only through a #Encoded marker's reflected parameters. Sent to its owner as 4624-marker-reflect-reads, proof cases --filter marker_check_rules_hear_calls."
+        },
+        {
+          "at": "2026-11-18",
+          "by": "Main",
+          "text": "p297 landed member-liveness.r6 (cd0c8e0519); its suite lost 436 rows (L0106/L0107 tidy errors fail jet build o1/o2 across Examples/Tests, e.g. Basics/PrintLines Greeting.text read only by printing). Reverted on dev as 1fc15138cc. Returns as r7 with a whole-repo sweep and the printing-as-read decision."
+        },
+        {
+          "at": "2026-10-23",
+          "by": "agent",
+          "text": "Related liveness defect found by PeerLauncher (2026-10-23, dev fa0ceede61): L0101/L0102 ignore reads inside a return expression (arrow or block form); a tail expression counts. Repro $JET_SCRATCH_ROOT/lanes/PeerLauncher/bugs/b6_interp_lint.jet: fn f(name: String, loud: Bool) -> String Never! { if loud -> return name.copy(); \"hello\" } warns name is never used. Home: Compiler/JetSema/Source/Sema/Ownership/Checks.jet. Fix with this card's liveness work."
+        }
+      ],
+      "criteria": [
+        {
+          "n": 1,
+          "text": "D-MEMBER-LIVE1 is ratified.",
+          "status": "met",
+          "metBy": "Main",
+          "verifiedBy": null,
+          "evidence": "`tower decision show D-MEMBER-LIVE1` reports status ratified (checked 2026-11-18).",
+          "at": "2026-11-18T03:13:35.073Z",
+          "closure": "decision"
+        },
+        {
+          "n": 2,
+          "text": "Probe F reports `nickname` (never read) and `Legacy` (never built) once each as tidy errors with a delete-or-rename fix: `jet check` and `jet build` list them and exit non-zero, and `jet run` runs with unchanged output and prints neither.",
+          "status": "met",
+          "metBy": "Orchestrator",
+          "verifiedBy": null,
+          "evidence": "Sweep of open criteria against the full suite of the batch-7 -O1 compiler (dev 3019343199 + landed stack): jet test Compiler --profile ui --filter member_liveness_probe_f -> 1/1 PASS (member_liveness_probe_f.jet).",
+          "at": "2026-11-23T20:53:35.395Z",
+          "proof": {
+            "profile": "ui",
+            "filter": "member_liveness_probe_f"
+          }
+        },
+        {
+          "n": 3,
+          "text": "A field read only by encode or decode, by derived equality, hashing or ordering, by reflection, or across an FFI boundary is not reported, and a field read only by derived printing or cloning is reported (D-MEMBER-LIVE1=A). Proof: `jet test Compiler --profile ui --filter member_liveness_field_uses_`, one snapshot per use kind.",
+          "status": "met",
+          "metBy": "Main",
+          "verifiedBy": null,
+          "evidence": "jet test Compiler --profile ui --filter member_liveness_field_uses_: PASS 10, FAIL 0 on batch compiler p326 (dev c701f02c42) (landed 00423901c4), one snapshot per use kind: encode, decode, derived_eq, derived_hash, derived_order, reflection, ffi and test not reported; print and clone reported.",
+          "at": "2026-11-19T18:19:41.666Z"
+        },
+        {
+          "n": 4,
+          "text": "A case created by decode or returned from foreign code counts as built, and matching a case never makes it built.",
+          "status": "met",
+          "metBy": "Orchestrator",
+          "verifiedBy": null,
+          "evidence": "Sweep of open criteria against the full suite of the batch-7 -O1 compiler (dev 3019343199 + landed stack): jet test Compiler --profile ui --filter member_liveness_case_built_ -> 3/3 PASS (member_liveness_case_built_decode.jet, member_liveness_case_built_foreign.jet, member_liveness_case_built_match_only.jet).",
+          "at": "2026-11-23T20:53:36.405Z",
+          "proof": {
+            "profile": "ui",
+            "filter": "member_liveness_case_built_"
+          }
+        },
+        {
+          "n": 5,
+          "text": "Library `pub` members stay exempt, package-private and application members are checked, and the findings never stop `jet run` or `jet dev` (D-NO-WARNINGS1=A).",
+          "status": "met",
+          "metBy": "Orchestrator",
+          "verifiedBy": null,
+          "evidence": "Sweep of open criteria against the full suite of the batch-7 -O1 compiler (dev 3019343199 + landed stack): jet test Compiler --profile cases --filter member_liveness_pub_exempt_and_run_unblocked -> 1/1 PASS (member_liveness_pub_exempt_and_run_unblocked.case).",
+          "at": "2026-11-23T20:53:37.355Z",
+          "proof": {
+            "profile": "cases",
+            "filter": "member_liveness_pub_exempt_and_run_unblocked"
+          }
+        },
+        {
+          "n": 6,
+          "text": "Both compilers produce identical member verdicts on the corpus.",
+          "status": "met",
+          "metBy": "Main",
+          "verifiedBy": null,
+          "evidence": "CardClose-1 2026-10-31 (wave 9b tree): the second (Rust) compiler is gone, so \"both compilers\" no longer applies: in the w9b tree `rg --files -g Cargo.toml -g '*.rs' | wc -l` -> 0, and no root Cargo.toml; commit fd75133808 \"stop pointing users at a Rust-hosted jet or Rust tools\"",
+          "at": "2026-10-31T15:17:23.053Z"
+        },
+        {
+          "n": 7,
+          "text": "A Jetpack area check judges member liveness (L0106) only for members its own area declares: a dependency area's private member read only by that area's Tests is reported in the owning area's check, never in a consumer's slice. The four Store fields made public in 4624-member-liveness.r6 only because consumer slices lack Store's Tests (ExternalRootView.closure_size, ExternalRootView.prepared, LifecycleSnapshot.protected_targets, LifecycleSnapshot.store_revision) return to priv. Proof: jet Jetpack/Bootstrap/Check.jet --each exits 0 with those fields priv.",
+          "status": "met",
+          "metBy": "Orchestrator",
+          "verifiedBy": null,
+          "evidence": "Landed in e0f33ca31b (on dev); the four Store fields are priv on dev e271dd7f56. tip22 (compiler built from landed dev e271dd7f56): jet Jetpack/Bootstrap/Check.jet --each on an e271dd7f56 export -> rc 0, all 16 areas OK, JETPACK EACH OK (run by G1Facts-2).",
+          "at": "2026-11-24T12:00:33.759Z"
+        },
+        {
+          "n": 8,
+          "text": "Member liveness (UnreadField, UnbuiltCase) judges a declaration only in the program of the package that declares it: a dependent package build never reports a path dependency s fields or cases, which its own package check judges. Today the hosted Jetpack build (Jetpack/Bootstrap/Check.jet --hosted on the p325 tree) fails with 847 errors, nearly all UnreadField/UnbuiltCase on Compiler/JetFoundation, JetLexer and other Compiler packages that Jetpack reads only in part, so the suite s jetpack cannot be rebuilt from dev and the next release cannot build jetpack. Proof: Jetpack/Bootstrap/Check.jet --hosted exits 0 on the batch compiler, plus a case where package B uses package A and leaves an A field unread, which reports nothing on B and the field on A.",
+          "status": "met",
+          "metBy": "Orchestrator",
+          "verifiedBy": null,
+          "evidence": "Landed in 136a8fad29 (on dev). Batch 22 compiler: cases TidyErrors/member_liveness_dependency_own_check PASS; Jetpack hosted build ends JETPACK HOSTED OK on the batch 22 and batch 23 compilers (the 847-error hosted failure is gone).",
+          "at": "2026-11-24T12:00:35.185Z"
+        }
+      ],
+      "refs": [
+        "#2052",
+        "D-STRUCT-LIVE1",
+        "D-LINTPOLICY1",
+        "D-NAME-SIGIL1"
+      ],
+      "tags": [
+        "lint",
+        "liveness",
+        "owner-choice",
+        "mine-2026-10-05",
+        "wayfinder:task"
+      ],
+      "parentId": "c018gdah",
+      "needsAcceptance": false,
+      "created": "2026-10-05T21:07:47.924Z",
+      "updated": "2026-11-24T12:00:39.541Z",
+      "updatedBy": "Orchestrator",
+      "criteriaLastN": 9,
+      "completedAt": "2026-11-24T12:00:39.541Z",
+      "questions": [],
+      "retiredAt": "2026-11-27T12:24:52.819Z"
     }
   ]
 }

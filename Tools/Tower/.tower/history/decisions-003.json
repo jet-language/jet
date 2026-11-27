@@ -85494,6 +85494,198 @@
       "outcome": "A",
       "ratifiedAt": "2026-11-18",
       "retiredAt": "2026-11-27T11:52:29.151Z"
+    },
+    {
+      "id": "D-MEMBER-LIVE1",
+      "cardId": "c0eve9h3",
+      "group": "tooling",
+      "title": "Should unused-name warnings reach fields never read and cases never built?",
+      "situation": "Jet already warns about unused imports, unused variables, private functions nobody calls, and exports nobody imports. It says nothing about a struct field that is written but never read, or an enum case that is matched but never created. In a growing app these leftovers mislead new readers about which data matters and can keep costly data moving. You are deciding whether the existing unused-name warnings reach inside types; we recommend yes, with encoding and foreign code counted as real use.",
+      "gist": "Should Jet warn about struct fields no code reads and enum cases no code creates?",
+      "lesson": "A field is one named part of a struct. A case is one choice in an enum. Today Jet's unused warnings stop at whole names, so a dead field or case stays silent. Whichever option wins, library `pub` items stay exempt and warnings never block a build.",
+      "explainer": "",
+      "story": "Ravi joins a team whose `User` type has a `nickname` field and whose `Plan` enum has a `Legacy` case. He spends an afternoon preserving both in a refactor before learning that no code reads `nickname` and nothing ever creates `Legacy`.",
+      "inWild": "// Rust: dead_code lint\nstruct User { name: String, nickname: String }\n// warning: field `nickname` is never read\nenum Plan { Free, Legacy }\n// warning: variant `Legacy` is never constructed\n// Since Rust 1.57, derived Clone and Debug no longer count as reads (PR 85200).",
+      "detail": "Exercised 2026-10-05 with release jet $JET_SCRATCH_ROOT/candidates/dev-05ea86f65/jet on probe $JET_SCRATCH_ROOT/mine/legwork/languages-b/probes/F-member-liveness.jet. `jet check` exits 0 with exactly one Warning [L0104] (unused_private_fn) for `unused_helper`. No warning names `nickname` or `Legacy`. `jet run` prints a, 3, free, pro.\n\nCurrent law: D-STRUCT-LIVE1=A (Docs/spec/syntax-decisions.md:7596-7601) warns on unused imports, bindings, private functions and unreachable package or application exports. Warnings follow D-LINTPOLICY1, the repair is delete or `_name`, and library `pub` is exempt. Its recommendation called this one law: every declared name is reachable or carries the `_` mark. Fields and cases are declared names it does not yet reach.\n\nSource witness: the ReScript interview (yKl2fSdnw7w 52:39-60:06). reanalyze finds 'you're never actually reading the name field' and 'this variant you're never constructing'. Teams switch it on, get thousands of findings, and remove old experiments. ReScript-Relay reuses the facts in CI to drop over-fetched GraphQL selections.\n\nRule-9 research, legwork resources 11-15. Rust 1.57 release notes and PR 85200: derived Clone and Debug no longer count as reads, a compatibility break for deny(dead_code). reanalyze README: the use rules above, @dead and @live annotations, and automatic annotation writing.\n\nPeriphery README: index-store analysis misses synthesized Codable, Equatable and Hashable reads, so it needs retain flags. Objective-C dynamic dispatch is unanalyzable. staticcheck U1000: field accesses use fields, and unnamed structs are assumed fully used.\n\nWhat worked: in-compiler analysis (Rust) sees derives and runs in normal checks. ReScript users report large cleanups. What failed: external tools such as Periphery raise false alarms where they cannot see synthesized code. Counting trivial derived reads hid real dead fields until Rust changed the rule. Evidence gap: no measured false-positive rates; adoption claims are speaker and README testimony.\n\nDesign-away in A: Jet's compiler sees its own derives, encoding and reflection, so A counts them precisely instead of offering retain flags. FFI-exported layouts and foreign returns count as use, replacing reanalyze's @live. The existing `_` rename replaces @dead.",
+      "options": [
+        {
+          "key": "A",
+          "name": "Fields and cases join the unused warnings",
+          "detail": "Jet's unused-name warnings also cover struct fields that no code reads and enum cases that no code creates. Writing a field does not count as reading it. Matching a case does not count as creating it.\n\nEncoding or decoding, derived equality, hashing or ordering, reflection, and foreign code all count as real use. So data that leaves the program never warns. Derived printing and cloning do not count, because they touch every field by construction.\n\nThe fix is the one Jet already teaches: delete it, or rename it with a leading underscore.",
+          "technical": "Extends the D-STRUCT-LIVE1 liveness pass to members over the closed package or application graph.\n\nA field is live if a field access, a destructuring pattern, encode or decode derivation (Dyn.from, decode<T>), derived Eq, Hash or Ord, reflection (D-METADEPTH1), or an FFI-exported layout reads it. A case is live if an expression, decode, or a foreign return constructs it.\n\nDerived printing and Clone do not make members live, the Rust PR 85200 lesson. Library `pub` members are exempt. The warning class follows D-LINTPOLICY1, the machine fix is delete or `_` rename (D-NAME-SIGIL1), and both compilers give the same verdicts.",
+          "code": "struct User {\n    name: String\n    nickname: String\n}\n// warning: field `nickname` is never read\n// fix: delete it, or rename it `_nickname`\nenum Plan { Free Pro Legacy }\n// warning: case `Legacy` is never created"
+        },
+        {
+          "key": "B",
+          "name": "Report only when asked",
+          "detail": "Normal checks stay as they are. A separate check option lists dead fields and cases for cleanup sessions. This is how ReScript's reanalyze and Swift's Periphery work, as tools users run on purpose.",
+          "technical": "Same member analysis as A behind an opt-in `jet check --members` report; no default warnings.",
+          "code": "// jet check: unchanged\n// jet check --members:\n//   User.nickname is never read\n//   Plan.Legacy is never created"
+        },
+        {
+          "key": "C",
+          "name": "Whole names only",
+          "detail": "Keep D-STRUCT-LIVE1's four warnings: imports, bindings, private functions and unreachable exports. Fields and cases stay unchecked.",
+          "technical": "Status quo; exercised by probe F (only L0104 fires).",
+          "code": "struct User {\n    name: String\n    nickname: String   // silent\n}\nenum Plan { Free Pro Legacy }   // silent"
+        }
+      ],
+      "comparisons": [
+        {
+          "lang": "Rust",
+          "note": "Built-in dead_code warns 'field is never read' and 'variant is never constructed'. Rust 1.57 (PR 85200) stopped derived Clone and Debug from counting as reads; the release notes warn this broke builds that deny dead_code.",
+          "code": "// warning: field `nickname` is never read"
+        },
+        {
+          "lang": "ReScript",
+          "note": "reanalyze is a separate analyzer. A case is dead if never constructed, and matching does not count. A field is dead if never read, and creating does not count. @live marks FFI uses it cannot see.",
+          "code": "reanalyze.exe -dce-cmt root/containing/cmt/files\n// reports dead record labels and variant cases (README rules; output text not captured)"
+        },
+        {
+          "lang": "Swift (Periphery)",
+          "note": "External indexer finds assign-only properties, but synthesized Codable, Equatable and Hashable code is invisible to it, so it needs retain flags to avoid false alarms.",
+          "code": "periphery scan --retain-codable-properties"
+        },
+        {
+          "lang": "Go (staticcheck U1000)",
+          "note": "Field accesses mark fields used; unnamed struct types are assumed to use all fields to avoid false positives.",
+          "code": "staticcheck -checks U1000 ./...\n// reports unused fields of named structs (output text not captured)"
+        }
+      ],
+      "rec": "A",
+      "recommendation": {
+        "why": "A finishes the rule Jet already teaches: every declared name is used or marked with `_`. Counting encoding and foreign code as use avoids the false alarms external tools suffer.",
+        "gains": [
+          "Dead fields and cases appear where people already look.",
+          "No new marker or command."
+        ],
+        "losses": [
+          {
+            "loss": "An older app may see many new warnings.",
+            "mitigation": "Warnings never block, and each carries a one-step delete or rename fix."
+          },
+          {
+            "loss": "A field kept for later warns until renamed.",
+            "mitigation": "Renaming it with a leading `_` records the intent and silences it."
+          }
+        ],
+        "whyNot": [
+          {
+            "key": "B",
+            "reason": "B hides the finding behind a command most people never run, as ReScript's separate analyzer shows."
+          },
+          {
+            "key": "C",
+            "reason": "C leaves the longest-lived dead code invisible while smaller dead names warn."
+          }
+        ],
+        "tradeoff": "Jet accepts a one-time burst of warnings in older apps to keep dead data visible from then on."
+      },
+      "hybrid": null,
+      "ballotMode": "short",
+      "shortAuthorizedBy": null,
+      "ballotProcessVersion": 4,
+      "reviewPasses": null,
+      "checkInstructions": null,
+      "surface": {
+        "gist": "Should Jet warn about struct fields no code reads and enum cases no code creates?",
+        "lesson": "A field is one named part of a struct. A case is one choice in an enum. Today Jet's unused warnings stop at whole names, so a dead field or case stays silent. Whichever option wins, library `pub` items stay exempt and warnings never block a build.",
+        "trio": {
+          "current": {
+            "note": "Run on today's release: only the unused helper warns; `nickname` and `Legacy` are silent.",
+            "code": "struct User {\n    name: String\n    nickname: String   // written once, never read\n}\nenum Plan { Free Pro Legacy }   // Legacy never created\nfn unused_helper() {}\n// jet check: warning L0104 for unused_helper only"
+          },
+          "wild": {
+            "lang": "Rust",
+            "note": "Rust's built-in unused warning names fields never read and cases never constructed.",
+            "code": "struct User { name: String, nickname: String }\n// warning: field `nickname` is never read\nenum Plan { Free, Pro, Legacy }\n// warning: variant `Legacy` is never constructed"
+          }
+        },
+        "options": [
+          {
+            "key": "A",
+            "name": "Fields and cases join the unused warnings",
+            "gist": "Warn on a field no code reads and a case no code creates.",
+            "gains": [
+              "Dead data shows up during normal checks.",
+              "Same fix as today: delete or add `_`.",
+              "Encoding and foreign code count as use."
+            ],
+            "losses": [
+              "An older app may see many new warnings.",
+              "A field kept for later warns until renamed."
+            ],
+            "proposed": {
+              "code": "struct User {\n    name: String\n    nickname: String\n}\n// warning: field `nickname` is never read\n// fix: delete it, or rename it `_nickname`\nenum Plan { Free Pro Legacy }\n// warning: case `Legacy` is never created"
+            }
+          },
+          {
+            "key": "B",
+            "name": "Report only when asked",
+            "gist": "A separate check lists dead fields and cases; normal checks stay quiet.",
+            "gains": [
+              "No new warnings in daily work.",
+              "Cleanup happens on demand."
+            ],
+            "losses": [
+              "Most people never run the extra check.",
+              "Adds a second command for one question."
+            ],
+            "proposed": {
+              "code": "// jet check: unchanged\n// jet check --members:\n//   User.nickname is never read\n//   Plan.Legacy is never created"
+            }
+          },
+          {
+            "key": "C",
+            "name": "Whole names only",
+            "gist": "Keep today's four unused warnings.",
+            "gains": [
+              "Nothing changes."
+            ],
+            "losses": [
+              "Dead fields and cases stay invisible."
+            ],
+            "proposed": {
+              "code": "struct User {\n    name: String\n    nickname: String   // silent\n}\nenum Plan { Free Pro Legacy }   // silent"
+            }
+          }
+        ],
+        "recommendation": {
+          "rec": "A",
+          "why": "A finishes the rule Jet already teaches: every declared name is used or marked with `_`. Counting encoding and foreign code as use avoids the false alarms external tools suffer.",
+          "gains": [
+            "Dead fields and cases appear where people already look.",
+            "No new marker or command."
+          ],
+          "losses": [
+            {
+              "loss": "An older app may see many new warnings.",
+              "mitigation": "Warnings never block, and each carries a one-step delete or rename fix."
+            },
+            {
+              "loss": "A field kept for later warns until renamed.",
+              "mitigation": "Renaming it with a leading `_` records the intent and silences it."
+            }
+          ],
+          "whyNot": [
+            {
+              "key": "B",
+              "reason": "B hides the finding behind a command most people never run, as ReScript's separate analyzer shows."
+            },
+            {
+              "key": "C",
+              "reason": "C leaves the longest-lived dead code invisible while smaller dead names warn."
+            }
+          ],
+          "tradeoff": "Jet accepts a one-time burst of warnings in older apps to keep dead data visible from then on."
+        }
+      },
+      "draft": false,
+      "status": "ratified",
+      "created": "2026-10-05T21:09:18.746Z",
+      "outcome": "A",
+      "ratifiedAt": "2026-10-05",
+      "retiredAt": "2026-11-27T12:24:52.819Z"
     }
   ]
 }

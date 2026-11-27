@@ -3,7 +3,7 @@
     "version": 4,
     "project": "Jet",
     "nextNum": 7042,
-    "rev": 114985,
+    "rev": 114987,
     "ui": {
       "toggled": [
         "dec-group:syntax",
@@ -15811,153 +15811,6 @@
       "criteriaLastN": 16
     },
     {
-      "id": "c0eve9h3",
-      "num": 4624,
-      "title": "Unused fields and enum cases are tidy errors: fields never read and cases never built (D-MEMBER-LIVE1=A)",
-      "body": "New card hosting owner ballot D-MEMBER-LIVE1. Extends D-STRUCT-LIVE1=A (four name-level liveness verdicts, card #2052/#2132) to members; reuses its `_name` repair (D-NAME-SIGIL1) and D-LINTPOLICY1 (warnings never block). Library `pub` stays exempt exactly as in D-STRUCT-LIVE1. No new spelling, suppression marker or tool.\n\nJob: an application grows; fields and cases from old experiments stay in types, mislead newcomers, and cost bytes and fetches.\n\nToday (exercised 2026-10-05 with release jet dev-05ea86f65, probe $JET_SCRATCH_ROOT/mine/legwork/languages-b/probes/F-member-liveness.*): `jet check` warns L0104 on a private `unused_helper`, but says nothing about `User.nickname` (written once, never read) or `Plan.Legacy` (matched, never built). D-STRUCT-LIVE1 covers imports, bindings, private functions and unreachable exports only (Docs/spec/syntax-decisions.md:7596-7601).\n\nSource witness: ReScript reanalyze (Gabriel Nordeborn, yKl2fSdnw7w 52:39-60:06): whole-program detection of never-read record fields and never-constructed variant cases; teams 'switch it on, get thousands of errors' and delete old experiments; ReScript-Relay uses the same facts to drop unused GraphQL selections in CI. Rule-9 research (legwork resources 11-15): reanalyze README (case dead if never constructed, matching does not count; field dead if never read, creating does not count; needs @live for FFI); Rust dead_code ('field is never read', 'variant is never constructed'; 1.57 PR 85200 stopped derived Clone/Debug from counting as reads, which broke deny(dead_code) builds); Periphery (external indexer: synthesized Codable/Equatable code invisible, false positives need retain flags); staticcheck U1000 (field accesses use fields; anonymous structs assumed fully used).\n\nThe ballot decides whether these become compiler warnings. Implementation after ratification: member facts in the existing liveness pass (closed package/application graph), use rules from the ballot technical text, machine fix (delete or `_` rename), UI goldens, `jet explain` rows.\n\nNoise evidence for the loss mitigation: Jon Blow (youtube DaJWWePhRsM) disables unused-variable warnings globally because macro-only uses make them noisy, and calls Go's unused-is-error annoying; Jet keeps every liveness warning advisory (D-LINTPOLICY1) and counts encode/decode, derive, reflection and FFI as uses.\n\nDistilled 2026-10-05 by DistillLang from the six mining batches; Tower snapshot rev 74843 (jet-state digest INCONSISTENT during collection: rerun before posting).",
-      "kind": "feature",
-      "track": "epoch",
-      "epoch": "G2",
-      "milestoneId": null,
-      "phase": "done",
-      "priority": "P3",
-      "plan": null,
-      "checkSteps": null,
-      "probe": null,
-      "visualMedia": [],
-      "blockedBy": [],
-      "assignee": null,
-      "log": [
-        {
-          "at": "2026-11-24",
-          "by": "Orchestrator",
-          "text": "All criteria met; closed in the near-done sweep."
-        },
-        {
-          "at": "2026-11-24",
-          "by": "Orchestrator",
-          "text": "c3 defect found on the batch 16 compiler: in cases MarkerDeclarations/marker_check_rules_hear_calls, jet check values/main.jet reports Jet.UnreadField for Account.user_name and Holder.item, fields reached only through a #Encoded marker's reflected parameters. Sent to its owner as 4624-marker-reflect-reads, proof cases --filter marker_check_rules_hear_calls."
-        },
-        {
-          "at": "2026-11-18",
-          "by": "Main",
-          "text": "p297 landed member-liveness.r6 (cd0c8e0519); its suite lost 436 rows (L0106/L0107 tidy errors fail jet build o1/o2 across Examples/Tests, e.g. Basics/PrintLines Greeting.text read only by printing). Reverted on dev as 1fc15138cc. Returns as r7 with a whole-repo sweep and the printing-as-read decision."
-        },
-        {
-          "at": "2026-10-23",
-          "by": "agent",
-          "text": "Related liveness defect found by PeerLauncher (2026-10-23, dev fa0ceede61): L0101/L0102 ignore reads inside a return expression (arrow or block form); a tail expression counts. Repro $JET_SCRATCH_ROOT/lanes/PeerLauncher/bugs/b6_interp_lint.jet: fn f(name: String, loud: Bool) -> String Never! { if loud -> return name.copy(); \"hello\" } warns name is never used. Home: Compiler/JetSema/Source/Sema/Ownership/Checks.jet. Fix with this card's liveness work."
-        }
-      ],
-      "criteria": [
-        {
-          "n": 1,
-          "text": "D-MEMBER-LIVE1 is ratified.",
-          "status": "met",
-          "metBy": "Main",
-          "verifiedBy": null,
-          "evidence": "`tower decision show D-MEMBER-LIVE1` reports status ratified (checked 2026-11-18).",
-          "at": "2026-11-18T03:13:35.073Z",
-          "closure": "decision"
-        },
-        {
-          "n": 2,
-          "text": "Probe F reports `nickname` (never read) and `Legacy` (never built) once each as tidy errors with a delete-or-rename fix: `jet check` and `jet build` list them and exit non-zero, and `jet run` runs with unchanged output and prints neither.",
-          "status": "met",
-          "metBy": "Orchestrator",
-          "verifiedBy": null,
-          "evidence": "Sweep of open criteria against the full suite of the batch-7 -O1 compiler (dev 3019343199 + landed stack): jet test Compiler --profile ui --filter member_liveness_probe_f -> 1/1 PASS (member_liveness_probe_f.jet).",
-          "at": "2026-11-23T20:53:35.395Z",
-          "proof": {
-            "profile": "ui",
-            "filter": "member_liveness_probe_f"
-          }
-        },
-        {
-          "n": 3,
-          "text": "A field read only by encode or decode, by derived equality, hashing or ordering, by reflection, or across an FFI boundary is not reported, and a field read only by derived printing or cloning is reported (D-MEMBER-LIVE1=A). Proof: `jet test Compiler --profile ui --filter member_liveness_field_uses_`, one snapshot per use kind.",
-          "status": "met",
-          "metBy": "Main",
-          "verifiedBy": null,
-          "evidence": "jet test Compiler --profile ui --filter member_liveness_field_uses_: PASS 10, FAIL 0 on batch compiler p326 (dev c701f02c42) (landed 00423901c4), one snapshot per use kind: encode, decode, derived_eq, derived_hash, derived_order, reflection, ffi and test not reported; print and clone reported.",
-          "at": "2026-11-19T18:19:41.666Z"
-        },
-        {
-          "n": 4,
-          "text": "A case created by decode or returned from foreign code counts as built, and matching a case never makes it built.",
-          "status": "met",
-          "metBy": "Orchestrator",
-          "verifiedBy": null,
-          "evidence": "Sweep of open criteria against the full suite of the batch-7 -O1 compiler (dev 3019343199 + landed stack): jet test Compiler --profile ui --filter member_liveness_case_built_ -> 3/3 PASS (member_liveness_case_built_decode.jet, member_liveness_case_built_foreign.jet, member_liveness_case_built_match_only.jet).",
-          "at": "2026-11-23T20:53:36.405Z",
-          "proof": {
-            "profile": "ui",
-            "filter": "member_liveness_case_built_"
-          }
-        },
-        {
-          "n": 5,
-          "text": "Library `pub` members stay exempt, package-private and application members are checked, and the findings never stop `jet run` or `jet dev` (D-NO-WARNINGS1=A).",
-          "status": "met",
-          "metBy": "Orchestrator",
-          "verifiedBy": null,
-          "evidence": "Sweep of open criteria against the full suite of the batch-7 -O1 compiler (dev 3019343199 + landed stack): jet test Compiler --profile cases --filter member_liveness_pub_exempt_and_run_unblocked -> 1/1 PASS (member_liveness_pub_exempt_and_run_unblocked.case).",
-          "at": "2026-11-23T20:53:37.355Z",
-          "proof": {
-            "profile": "cases",
-            "filter": "member_liveness_pub_exempt_and_run_unblocked"
-          }
-        },
-        {
-          "n": 6,
-          "text": "Both compilers produce identical member verdicts on the corpus.",
-          "status": "met",
-          "metBy": "Main",
-          "verifiedBy": null,
-          "evidence": "CardClose-1 2026-10-31 (wave 9b tree): the second (Rust) compiler is gone, so \"both compilers\" no longer applies: in the w9b tree `rg --files -g Cargo.toml -g '*.rs' | wc -l` -> 0, and no root Cargo.toml; commit fd75133808 \"stop pointing users at a Rust-hosted jet or Rust tools\"",
-          "at": "2026-10-31T15:17:23.053Z"
-        },
-        {
-          "n": 7,
-          "text": "A Jetpack area check judges member liveness (L0106) only for members its own area declares: a dependency area's private member read only by that area's Tests is reported in the owning area's check, never in a consumer's slice. The four Store fields made public in 4624-member-liveness.r6 only because consumer slices lack Store's Tests (ExternalRootView.closure_size, ExternalRootView.prepared, LifecycleSnapshot.protected_targets, LifecycleSnapshot.store_revision) return to priv. Proof: jet Jetpack/Bootstrap/Check.jet --each exits 0 with those fields priv.",
-          "status": "met",
-          "metBy": "Orchestrator",
-          "verifiedBy": null,
-          "evidence": "Landed in e0f33ca31b (on dev); the four Store fields are priv on dev e271dd7f56. tip22 (compiler built from landed dev e271dd7f56): jet Jetpack/Bootstrap/Check.jet --each on an e271dd7f56 export -> rc 0, all 16 areas OK, JETPACK EACH OK (run by G1Facts-2).",
-          "at": "2026-11-24T12:00:33.759Z"
-        },
-        {
-          "n": 8,
-          "text": "Member liveness (UnreadField, UnbuiltCase) judges a declaration only in the program of the package that declares it: a dependent package build never reports a path dependency s fields or cases, which its own package check judges. Today the hosted Jetpack build (Jetpack/Bootstrap/Check.jet --hosted on the p325 tree) fails with 847 errors, nearly all UnreadField/UnbuiltCase on Compiler/JetFoundation, JetLexer and other Compiler packages that Jetpack reads only in part, so the suite s jetpack cannot be rebuilt from dev and the next release cannot build jetpack. Proof: Jetpack/Bootstrap/Check.jet --hosted exits 0 on the batch compiler, plus a case where package B uses package A and leaves an A field unread, which reports nothing on B and the field on A.",
-          "status": "met",
-          "metBy": "Orchestrator",
-          "verifiedBy": null,
-          "evidence": "Landed in 136a8fad29 (on dev). Batch 22 compiler: cases TidyErrors/member_liveness_dependency_own_check PASS; Jetpack hosted build ends JETPACK HOSTED OK on the batch 22 and batch 23 compilers (the 847-error hosted failure is gone).",
-          "at": "2026-11-24T12:00:35.185Z"
-        }
-      ],
-      "refs": [
-        "#2052",
-        "D-STRUCT-LIVE1",
-        "D-LINTPOLICY1",
-        "D-NAME-SIGIL1"
-      ],
-      "tags": [
-        "lint",
-        "liveness",
-        "owner-choice",
-        "mine-2026-10-05",
-        "wayfinder:task"
-      ],
-      "parentId": "c018gdah",
-      "needsAcceptance": false,
-      "created": "2026-10-05T21:07:47.924Z",
-      "updated": "2026-11-24T12:00:39.541Z",
-      "updatedBy": "Orchestrator",
-      "criteriaLastN": 9,
-      "completedAt": "2026-11-24T12:00:39.541Z"
-    },
-    {
       "id": "c0yvgmgj",
       "num": 4629,
       "title": "Constant ranges that can never run: one advisory lint and one written stride law (S19/S22)",
@@ -26495,11 +26348,11 @@
         {
           "n": 5,
           "text": "A JET_KEEP_GOING check of a package that mixes Compiler, Tools and Core (the mutnever regen umbrella checks) no longer stalls at Core/Sys.jet:45 `$layout`: SYS_TARGET_POINTER_BYTES lands, and the check finishes every body. Proof: the umbrella check of Tools-2 from the #6324 regen reports no comptime stall.",
-          "status": "open",
-          "metBy": null,
+          "status": "met",
+          "metBy": "Orchestrator",
           "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-11-18T06:18:23.775Z"
+          "evidence": "dev 444c72023dc, batch89-s3 (S2==S3 sha256 0c4316f0): Core/Sys/Sys.jet:57 computes SYS_TARGET_POINTER_BYTES via #run reflect().layout.size with no stall; JET_KEEP_GOING=1 jet check --keep-going completes cleanly across Tools/Agent/CoreRecordRows.jet (0 problems), Tools/Agent/VerifyFull.jet (0 errors), and Tools/Agent/LaneCheck.jet with zero comptime stall.",
+          "at": "2026-11-27T12:24:54.279Z"
         },
         {
           "n": 6,
@@ -26525,7 +26378,7 @@
       "parentId": null,
       "needsAcceptance": false,
       "created": "2026-10-30T15:50:54.660Z",
-      "updated": "2026-11-27T11:59:18.075Z",
+      "updated": "2026-11-27T12:24:54.279Z",
       "updatedBy": "Orchestrator",
       "criteriaLastN": 7
     },
@@ -53580,11 +53433,11 @@
         {
           "n": 2,
           "text": "A captured async callback registration keeps its capture alive, the borrowed event can stop without waiting on itself, in-flight calls drain before release, and a later invocation is refused (D-FFI-CALLBACK2=A).",
-          "status": "open",
-          "metBy": null,
+          "status": "met",
+          "metBy": "Orchestrator",
           "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-11-26T16:15:11.590Z",
+          "evidence": "dev ed39b2064a6, batch89-s3 (S2==S3 sha256 0c4316f0): jet test Compiler --profile cases --filter FFICallbacksTasks/ -> 5/5 PASS (0 FAIL, 0 KNOWN-FAILING), including managed_async_callback_lifecycle.case (capture lifetime, non-blocking event.stop(), post-stop refusal, foreign-pthread drain before unsubscribe, stale refusal) and managed_callback_enforces_foreign_thread_and_sendable_captures.case (E3218, E1102, E1101).",
+          "at": "2026-11-27T12:24:52.714Z",
           "proof": {
             "profile": "cases",
             "filter": "FFICallbacksTasks/registration_lifetime_"
@@ -53622,7 +53475,7 @@
       "parentId": null,
       "needsAcceptance": false,
       "created": "2026-11-15T04:57:32.582Z",
-      "updated": "2026-11-26T16:15:13.961Z",
+      "updated": "2026-11-27T12:24:52.714Z",
       "updatedBy": "Orchestrator",
       "criteriaLastN": 4
     },
@@ -80032,197 +79885,6 @@
       "draft": false,
       "status": "ratified",
       "created": "2026-10-05T21:09:10.987Z",
-      "outcome": "A",
-      "ratifiedAt": "2026-10-05"
-    },
-    {
-      "id": "D-MEMBER-LIVE1",
-      "cardId": "c0eve9h3",
-      "group": "tooling",
-      "title": "Should unused-name warnings reach fields never read and cases never built?",
-      "situation": "Jet already warns about unused imports, unused variables, private functions nobody calls, and exports nobody imports. It says nothing about a struct field that is written but never read, or an enum case that is matched but never created. In a growing app these leftovers mislead new readers about which data matters and can keep costly data moving. You are deciding whether the existing unused-name warnings reach inside types; we recommend yes, with encoding and foreign code counted as real use.",
-      "gist": "Should Jet warn about struct fields no code reads and enum cases no code creates?",
-      "lesson": "A field is one named part of a struct. A case is one choice in an enum. Today Jet's unused warnings stop at whole names, so a dead field or case stays silent. Whichever option wins, library `pub` items stay exempt and warnings never block a build.",
-      "explainer": "",
-      "story": "Ravi joins a team whose `User` type has a `nickname` field and whose `Plan` enum has a `Legacy` case. He spends an afternoon preserving both in a refactor before learning that no code reads `nickname` and nothing ever creates `Legacy`.",
-      "inWild": "// Rust: dead_code lint\nstruct User { name: String, nickname: String }\n// warning: field `nickname` is never read\nenum Plan { Free, Legacy }\n// warning: variant `Legacy` is never constructed\n// Since Rust 1.57, derived Clone and Debug no longer count as reads (PR 85200).",
-      "detail": "Exercised 2026-10-05 with release jet $JET_SCRATCH_ROOT/candidates/dev-05ea86f65/jet on probe $JET_SCRATCH_ROOT/mine/legwork/languages-b/probes/F-member-liveness.jet. `jet check` exits 0 with exactly one Warning [L0104] (unused_private_fn) for `unused_helper`. No warning names `nickname` or `Legacy`. `jet run` prints a, 3, free, pro.\n\nCurrent law: D-STRUCT-LIVE1=A (Docs/spec/syntax-decisions.md:7596-7601) warns on unused imports, bindings, private functions and unreachable package or application exports. Warnings follow D-LINTPOLICY1, the repair is delete or `_name`, and library `pub` is exempt. Its recommendation called this one law: every declared name is reachable or carries the `_` mark. Fields and cases are declared names it does not yet reach.\n\nSource witness: the ReScript interview (yKl2fSdnw7w 52:39-60:06). reanalyze finds 'you're never actually reading the name field' and 'this variant you're never constructing'. Teams switch it on, get thousands of findings, and remove old experiments. ReScript-Relay reuses the facts in CI to drop over-fetched GraphQL selections.\n\nRule-9 research, legwork resources 11-15. Rust 1.57 release notes and PR 85200: derived Clone and Debug no longer count as reads, a compatibility break for deny(dead_code). reanalyze README: the use rules above, @dead and @live annotations, and automatic annotation writing.\n\nPeriphery README: index-store analysis misses synthesized Codable, Equatable and Hashable reads, so it needs retain flags. Objective-C dynamic dispatch is unanalyzable. staticcheck U1000: field accesses use fields, and unnamed structs are assumed fully used.\n\nWhat worked: in-compiler analysis (Rust) sees derives and runs in normal checks. ReScript users report large cleanups. What failed: external tools such as Periphery raise false alarms where they cannot see synthesized code. Counting trivial derived reads hid real dead fields until Rust changed the rule. Evidence gap: no measured false-positive rates; adoption claims are speaker and README testimony.\n\nDesign-away in A: Jet's compiler sees its own derives, encoding and reflection, so A counts them precisely instead of offering retain flags. FFI-exported layouts and foreign returns count as use, replacing reanalyze's @live. The existing `_` rename replaces @dead.",
-      "options": [
-        {
-          "key": "A",
-          "name": "Fields and cases join the unused warnings",
-          "detail": "Jet's unused-name warnings also cover struct fields that no code reads and enum cases that no code creates. Writing a field does not count as reading it. Matching a case does not count as creating it.\n\nEncoding or decoding, derived equality, hashing or ordering, reflection, and foreign code all count as real use. So data that leaves the program never warns. Derived printing and cloning do not count, because they touch every field by construction.\n\nThe fix is the one Jet already teaches: delete it, or rename it with a leading underscore.",
-          "technical": "Extends the D-STRUCT-LIVE1 liveness pass to members over the closed package or application graph.\n\nA field is live if a field access, a destructuring pattern, encode or decode derivation (Dyn.from, decode<T>), derived Eq, Hash or Ord, reflection (D-METADEPTH1), or an FFI-exported layout reads it. A case is live if an expression, decode, or a foreign return constructs it.\n\nDerived printing and Clone do not make members live, the Rust PR 85200 lesson. Library `pub` members are exempt. The warning class follows D-LINTPOLICY1, the machine fix is delete or `_` rename (D-NAME-SIGIL1), and both compilers give the same verdicts.",
-          "code": "struct User {\n    name: String\n    nickname: String\n}\n// warning: field `nickname` is never read\n// fix: delete it, or rename it `_nickname`\nenum Plan { Free Pro Legacy }\n// warning: case `Legacy` is never created"
-        },
-        {
-          "key": "B",
-          "name": "Report only when asked",
-          "detail": "Normal checks stay as they are. A separate check option lists dead fields and cases for cleanup sessions. This is how ReScript's reanalyze and Swift's Periphery work, as tools users run on purpose.",
-          "technical": "Same member analysis as A behind an opt-in `jet check --members` report; no default warnings.",
-          "code": "// jet check: unchanged\n// jet check --members:\n//   User.nickname is never read\n//   Plan.Legacy is never created"
-        },
-        {
-          "key": "C",
-          "name": "Whole names only",
-          "detail": "Keep D-STRUCT-LIVE1's four warnings: imports, bindings, private functions and unreachable exports. Fields and cases stay unchecked.",
-          "technical": "Status quo; exercised by probe F (only L0104 fires).",
-          "code": "struct User {\n    name: String\n    nickname: String   // silent\n}\nenum Plan { Free Pro Legacy }   // silent"
-        }
-      ],
-      "comparisons": [
-        {
-          "lang": "Rust",
-          "note": "Built-in dead_code warns 'field is never read' and 'variant is never constructed'. Rust 1.57 (PR 85200) stopped derived Clone and Debug from counting as reads; the release notes warn this broke builds that deny dead_code.",
-          "code": "// warning: field `nickname` is never read"
-        },
-        {
-          "lang": "ReScript",
-          "note": "reanalyze is a separate analyzer. A case is dead if never constructed, and matching does not count. A field is dead if never read, and creating does not count. @live marks FFI uses it cannot see.",
-          "code": "reanalyze.exe -dce-cmt root/containing/cmt/files\n// reports dead record labels and variant cases (README rules; output text not captured)"
-        },
-        {
-          "lang": "Swift (Periphery)",
-          "note": "External indexer finds assign-only properties, but synthesized Codable, Equatable and Hashable code is invisible to it, so it needs retain flags to avoid false alarms.",
-          "code": "periphery scan --retain-codable-properties"
-        },
-        {
-          "lang": "Go (staticcheck U1000)",
-          "note": "Field accesses mark fields used; unnamed struct types are assumed to use all fields to avoid false positives.",
-          "code": "staticcheck -checks U1000 ./...\n// reports unused fields of named structs (output text not captured)"
-        }
-      ],
-      "rec": "A",
-      "recommendation": {
-        "why": "A finishes the rule Jet already teaches: every declared name is used or marked with `_`. Counting encoding and foreign code as use avoids the false alarms external tools suffer.",
-        "gains": [
-          "Dead fields and cases appear where people already look.",
-          "No new marker or command."
-        ],
-        "losses": [
-          {
-            "loss": "An older app may see many new warnings.",
-            "mitigation": "Warnings never block, and each carries a one-step delete or rename fix."
-          },
-          {
-            "loss": "A field kept for later warns until renamed.",
-            "mitigation": "Renaming it with a leading `_` records the intent and silences it."
-          }
-        ],
-        "whyNot": [
-          {
-            "key": "B",
-            "reason": "B hides the finding behind a command most people never run, as ReScript's separate analyzer shows."
-          },
-          {
-            "key": "C",
-            "reason": "C leaves the longest-lived dead code invisible while smaller dead names warn."
-          }
-        ],
-        "tradeoff": "Jet accepts a one-time burst of warnings in older apps to keep dead data visible from then on."
-      },
-      "hybrid": null,
-      "ballotMode": "short",
-      "shortAuthorizedBy": null,
-      "ballotProcessVersion": 4,
-      "reviewPasses": null,
-      "checkInstructions": null,
-      "surface": {
-        "gist": "Should Jet warn about struct fields no code reads and enum cases no code creates?",
-        "lesson": "A field is one named part of a struct. A case is one choice in an enum. Today Jet's unused warnings stop at whole names, so a dead field or case stays silent. Whichever option wins, library `pub` items stay exempt and warnings never block a build.",
-        "trio": {
-          "current": {
-            "note": "Run on today's release: only the unused helper warns; `nickname` and `Legacy` are silent.",
-            "code": "struct User {\n    name: String\n    nickname: String   // written once, never read\n}\nenum Plan { Free Pro Legacy }   // Legacy never created\nfn unused_helper() {}\n// jet check: warning L0104 for unused_helper only"
-          },
-          "wild": {
-            "lang": "Rust",
-            "note": "Rust's built-in unused warning names fields never read and cases never constructed.",
-            "code": "struct User { name: String, nickname: String }\n// warning: field `nickname` is never read\nenum Plan { Free, Pro, Legacy }\n// warning: variant `Legacy` is never constructed"
-          }
-        },
-        "options": [
-          {
-            "key": "A",
-            "name": "Fields and cases join the unused warnings",
-            "gist": "Warn on a field no code reads and a case no code creates.",
-            "gains": [
-              "Dead data shows up during normal checks.",
-              "Same fix as today: delete or add `_`.",
-              "Encoding and foreign code count as use."
-            ],
-            "losses": [
-              "An older app may see many new warnings.",
-              "A field kept for later warns until renamed."
-            ],
-            "proposed": {
-              "code": "struct User {\n    name: String\n    nickname: String\n}\n// warning: field `nickname` is never read\n// fix: delete it, or rename it `_nickname`\nenum Plan { Free Pro Legacy }\n// warning: case `Legacy` is never created"
-            }
-          },
-          {
-            "key": "B",
-            "name": "Report only when asked",
-            "gist": "A separate check lists dead fields and cases; normal checks stay quiet.",
-            "gains": [
-              "No new warnings in daily work.",
-              "Cleanup happens on demand."
-            ],
-            "losses": [
-              "Most people never run the extra check.",
-              "Adds a second command for one question."
-            ],
-            "proposed": {
-              "code": "// jet check: unchanged\n// jet check --members:\n//   User.nickname is never read\n//   Plan.Legacy is never created"
-            }
-          },
-          {
-            "key": "C",
-            "name": "Whole names only",
-            "gist": "Keep today's four unused warnings.",
-            "gains": [
-              "Nothing changes."
-            ],
-            "losses": [
-              "Dead fields and cases stay invisible."
-            ],
-            "proposed": {
-              "code": "struct User {\n    name: String\n    nickname: String   // silent\n}\nenum Plan { Free Pro Legacy }   // silent"
-            }
-          }
-        ],
-        "recommendation": {
-          "rec": "A",
-          "why": "A finishes the rule Jet already teaches: every declared name is used or marked with `_`. Counting encoding and foreign code as use avoids the false alarms external tools suffer.",
-          "gains": [
-            "Dead fields and cases appear where people already look.",
-            "No new marker or command."
-          ],
-          "losses": [
-            {
-              "loss": "An older app may see many new warnings.",
-              "mitigation": "Warnings never block, and each carries a one-step delete or rename fix."
-            },
-            {
-              "loss": "A field kept for later warns until renamed.",
-              "mitigation": "Renaming it with a leading `_` records the intent and silences it."
-            }
-          ],
-          "whyNot": [
-            {
-              "key": "B",
-              "reason": "B hides the finding behind a command most people never run, as ReScript's separate analyzer shows."
-            },
-            {
-              "key": "C",
-              "reason": "C leaves the longest-lived dead code invisible while smaller dead names warn."
-            }
-          ],
-          "tradeoff": "Jet accepts a one-time burst of warnings in older apps to keep dead data visible from then on."
-        }
-      },
-      "draft": false,
-      "status": "ratified",
-      "created": "2026-10-05T21:09:18.746Z",
       "outcome": "A",
       "ratifiedAt": "2026-10-05"
     },
@@ -122509,6 +122171,20 @@
     }
   ],
   "events": [
+    {
+      "at": "2026-11-27T12:24:54.279Z",
+      "by": "Orchestrator",
+      "action": "card.criteria-meet",
+      "ref": "c01vsb2c",
+      "note": "#5"
+    },
+    {
+      "at": "2026-11-27T12:24:52.714Z",
+      "by": "Orchestrator",
+      "action": "card.criteria-meet",
+      "ref": "c0kkogun",
+      "note": "#2"
+    },
     {
       "at": "2026-11-27T11:59:18.075Z",
       "by": "Orchestrator",
