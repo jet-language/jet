@@ -3,7 +3,7 @@
     "version": 4,
     "project": "Jet",
     "nextNum": 7042,
-    "rev": 114990,
+    "rev": 114996,
     "ui": {
       "toggled": [
         "dec-group:syntax",
@@ -35112,7 +35112,7 @@
       "parentId": null,
       "needsAcceptance": false,
       "created": "2026-11-09T15:59:02.674Z",
-      "updated": "2026-11-26T16:15:52.518Z",
+      "updated": "2026-11-27T12:33:04.153Z",
       "updatedBy": "Orchestrator",
       "criteriaLastN": 1
     },
@@ -61401,7 +61401,7 @@
       "parentId": null,
       "needsAcceptance": false,
       "created": "2026-11-25T17:39:07.143Z",
-      "updated": "2026-11-26T16:15:05.441Z",
+      "updated": "2026-11-27T12:33:02.698Z",
       "updatedBy": "Orchestrator"
     },
     {
@@ -120026,6 +120026,358 @@
       "created": "2026-11-26T05:25:32.667Z",
       "outcome": "A",
       "ratifiedAt": "2026-11-26"
+    },
+    {
+      "id": "D-CROSSED-ARGS1",
+      "cardId": "c0oi3k2t",
+      "group": "language",
+      "title": "Crossed argument names: refuse swap or rotation cycles of two or more arguments",
+      "situation": "Jet rejects swapped positional arguments such as `copy(dst, src)` into `fn(src, dst)`. A strict one-way rule also rejects single coincidences like `div(g, a)` into `fn(a, b)`. A full sweep of 22,524 Jet files found 290 static one-way hits (~500+ with runtime and methods) across 152+ files, all false positives. Swap or rotation cycles of two or more arguments fired on only 43 calls in 22 files. We recommend Option A: refuse swap and rotation cycles as a compile error.",
+      "gist": "Should crossed-argument checking refuse swap and rotation cycles of two or more arguments, or every single one-way argument-name match?",
+      "lesson": "A compile-time bug check earns its keep when it catches real mistakes without taxing ordinary code. Requiring a swap or rotation cycle catches `copy(dst, src)` and `rotate(b, c, a)` cleanly. Ordinary calls like `div(g, a)` and `byte_text(bytes, end, end + 8)` stay noise-free.",
+      "explainer": "",
+      "story": "Sam writes `copy(dst, src)` for `fn(src: String, dst: String)`. The compiler stops with a crossed-argument error because `dst` and `src` form a swap cycle. Sam fixes the order or writes `copy(src: dst, dst: src)`. Meanwhile, `byte_text(bytes, end, end + 8)` for `fn(bytes, start, end)` compiles with zero noise.",
+      "inWild": "// clang-tidy bugprone-swapped-arguments (C/C++)\n// Uses mutual swap pairs rather than single-argument coincidences\n// to avoid heavy false-positive noise on names like x, y, a, b, start, end.",
+      "detail": "Empirical data from `Docs/Audits/2026-11-26-crossed-argument-names-review.md` covers all 15 repository areas (22,524 `.jet` files, over 500,000 LOC).\n\nOption A enforces directed swap and rotation cycles of length >= 2 (`Compiler/JetSema/Source/Sema/Calls/Checking.jet:2080-2245`, `sema_call_check_crossed_arguments` at line 2131). It fires when two or more unlabeled positional arguments of the same resolved type cross into each other's public parameter names (`copy(dst, src)` or `rotate(b, c, a)`).\n\nIt excludes positional-only parameters before `/`, unnamed function-type parameters, field projections (`a.height`), and duplicate variables (`rect(width, width)`). Across all 22,524 files, it hit 43 calls in 22 files (~0.008% of call sites). All 43 were intentional reversals already labeled on `dev` (`difference(b, a)`, `uint_lt(y, x)`, `bool_level_10(right, left)`).\n\nOption B enforces any single one-way name coincidence. The repo sweep measured 290 static free and intra-package hits in 152 files, plus ~137 live hits in `JetRuntime` and 82 (up from 50) in `Core/`. Together that is ~500+ one-way hits across 170+ files, plus 143 duplicate-variable calls if unexempted.\n\nZero latent bugs were found in those one-way hits (100% false positives on idiomatic code). Rejected calls include `div(g, a)`, `x64_rex(^code.bytes, true, 0, reg)`, and `byte_text(bytes, end, end + 8)`.\n\nOption C keeps the cycle rule of Option A but downgrades `Jet.CrossedArgumentNames` (`E0773`) from a compile error to a warning lint.",
+      "options": [
+        {
+          "key": "A",
+          "name": "Refuse crossed swap and rotation cycles (>= 2 arguments) as an error",
+          "detail": "Keep `Jet.CrossedArgumentNames` as a compile error whenever two or more unlabeled positional arguments form a directed cycle across same-typed label-eligible parameters. Keep registry text, spec, and docs aligned to the cycle rule.",
+          "technical": "Retains the single-source cycle check in `Compiler/JetSema/Source/Sema/Calls/Checking.jet:2131` with `no_fix: .Ambiguous`. `Compiler/Prelude/Diagnostics.jet:11347-11368` (`Jet.CrossedArgumentNames` / `E0773`) already states the exact cycle rule (`Two or more positional arguments form a crossed name cycle across same-typed parameters`). All 43 existing reversals across 22 files are already labeled on `dev`.",
+          "code": "copy: fn(src: String, dst: String) { ... }\ncopy(dst, src)                 // error: Jet.CrossedArgumentNames\ncopy(src: dst, dst: src)       // ok: intentional reversal labeled\nbyte_text(bytes, end, end + 8) // ok: one-way coincidence, no cycle"
+        },
+        {
+          "key": "B",
+          "name": "Refuse every single one-way positional argument name match as an error",
+          "detail": "Reject any unlabeled positional argument whose variable name matches any other same-typed parameter name. Label all ~500+ matching calls across 170+ repository files.",
+          "technical": "Changes `Checking.jet:2131` from cycle detection to single-edge detection while still excluding self-loops (`rect(w, w)`) and positional-only `/` parameters. Requires labeling ~500+ idiomatic calls across 170+ files (`div(a: g, b: a)`, `byte_text(bytes, start: end, end: end + 8)`).",
+          "code": "copy(dst, src)                          // error\ncopy(dst, src.trim())                   // error (catches partial swap)\nbyte_text(bytes, end, end + 8)          // error (must label start: end)"
+        },
+        {
+          "key": "C",
+          "name": "Downgrade swap and rotation cycles to a warning lint",
+          "detail": "Keep the cycle rule from Option A, but report it as a warning rather than a hard compile error.",
+          "technical": "Demotes `Jet.CrossedArgumentNames` (`E0773`) to an L-code warning. Unmistakable swaps like `copy(dst, src)` would still compile unless warnings are denied.",
+          "code": "copy(dst, src) // warning only (still compiles)"
+        }
+      ],
+      "comparisons": [
+        {
+          "lang": "C/C++ (clang-tidy)",
+          "note": "`bugprone-swapped-arguments` relies on mutual swap pairs and similarity heuristics because flagging one-way coincidences produced severe false-positive noise in LLVM and Chromium.",
+          "code": "// clang-tidy: warns on mutual swap pairs, not single coincidences"
+        },
+        {
+          "lang": "Rust (clippy)",
+          "note": "`clippy::similar_names` is pedantic and off by default because single-name heuristics trigger heavy noise on short math and systems variables.",
+          "code": "// rustc allows swapped positional args by default"
+        }
+      ],
+      "rec": "A",
+      "recommendation": {
+        "why": "Option A catches real swaps and rotations as a hard compile error with over 10x less friction (43 calls vs ~500+ in 22,524 files). Ordinary math, systems, and slice calls stay noise-free.",
+        "gains": [
+          "Catches every mutual swap (`copy(dst, src)`) and rotation (`rotate(b, c, a)`) at compile time.",
+          "Zero noise on ~500+ idiomatic one-way calls like `div(g, a)` and `byte_text(bytes, end, end + 8)`.",
+          "Only 43 intentional reversals across 22 files needed labels, and each became clearer."
+        ],
+        "losses": [
+          {
+            "loss": "Non-cyclic one-way swaps (such as `copy(dst, src.trim())` or `copy(dst, tmp)`) do not form a cycle and are not flagged.",
+            "mitigation": "API authors can mark sensitive parameters label-only with `*` (`Jet.LabelOnlyPassedByPosition` / `E0769`), and callers can always write explicit argument labels."
+          }
+        ],
+        "whyNot": [
+          {
+            "key": "B",
+            "reason": "Rejects ~500+ idiomatic calls across 170+ files with zero latent bugs found, taxing correct code."
+          },
+          {
+            "key": "C",
+            "reason": "Lets unmistakable swaps like `copy(dst, src)` compile and ship."
+          }
+        ],
+        "tradeoff": "High-precision compile error on swap and rotation cycles, trading away noisy one-way coincidences."
+      },
+      "hybrid": null,
+      "ballotMode": "full",
+      "shortAuthorizedBy": null,
+      "ballotProcessVersion": 5,
+      "reviewPasses": {
+        "adversarial": "Author model family: Gemini. Adversarial model family: Gemini. Fresh agent: 4e940546. Verified all sweep counts, Checking.jet and Diagnostics.jet quotes, callee-side label-only mitigation, and Tower prose caps against live dev."
+      },
+      "checkInstructions": null,
+      "surface": {
+        "gist": "Should crossed-argument checking refuse swap and rotation cycles of two or more arguments, or every one-way name match?",
+        "lesson": "Requiring a swap or rotation cycle catches `copy(dst, src)` at compile time. Ordinary calls like `div(g, a)` stay noise-free.",
+        "trio": {
+          "current": {
+            "note": "Today Jet enforces swap and rotation cycles while original proposal wording sounded one-way.",
+            "code": "copy(dst, src)                 // refused (cycle)\nbyte_text(bytes, end, end + 8) // allowed (one-way)"
+          },
+          "wild": {
+            "lang": "clang-tidy",
+            "note": "bugprone-swapped-arguments checks mutual swaps to avoid noise on short variable names.",
+            "code": "// mutual swap flagged; single coincidence ignored"
+          }
+        },
+        "options": [
+          {
+            "key": "A",
+            "name": "Refuse swap and rotation cycles (>= 2 args)",
+            "gist": "Hard error on crossed swap or rotation cycles; zero noise on one-way coincidences.",
+            "gains": [
+              "Catches `copy(dst, src)` and `rotate(b, c, a)` as a hard error.",
+              "Only 43 intentional reversals across 22,524 files vs ~500+ for one-way."
+            ],
+            "losses": [
+              "Does not flag non-cyclic one-way swaps like `copy(dst, src.trim())`."
+            ],
+            "proposed": {
+              "code": "copy(dst, src)                 // error: Jet.CrossedArgumentNames\ncopy(src: dst, dst: src)       // ok\nbyte_text(bytes, end, end + 8) // ok"
+            }
+          },
+          {
+            "key": "B",
+            "name": "Refuse any single one-way name match",
+            "gist": "Hard error whenever any one positional argument matches another parameter name.",
+            "gains": [
+              "Also flags non-cyclic swaps like `copy(dst, src.trim())`."
+            ],
+            "losses": [
+              "100% false positives across ~500+ idiomatic calls in 170+ files."
+            ],
+            "proposed": {
+              "code": "copy(dst, src.trim())                      // error\nbyte_text(bytes, start: end, end: end + 8) // forced label"
+            }
+          },
+          {
+            "key": "C",
+            "name": "Warn on swap and rotation cycles",
+            "gist": "Downgrade crossed-argument cycles from a compile error to a warning.",
+            "gains": [
+              "Never breaks compilation on intentional reversals."
+            ],
+            "losses": [
+              "Real `copy(dst, src)` bugs still compile."
+            ],
+            "proposed": {
+              "code": "copy(dst, src) // warning only"
+            }
+          }
+        ],
+        "recommendation": {
+          "rec": "A",
+          "why": "Catches real swap and rotation bugs as a hard error with over 10x less noise than one-way matching.",
+          "gains": [
+            "Hard compile error on mutual swaps and rotations.",
+            "Zero noise on ~500+ idiomatic calls."
+          ],
+          "losses": [
+            {
+              "loss": "Non-cyclic one-way swaps are not caught.",
+              "mitigation": "API authors can use `*` label-only parameters (`Jet.LabelOnlyPassedByPosition`), and callers can label arguments explicitly."
+            }
+          ],
+          "whyNot": [
+            {
+              "key": "B",
+              "reason": "Forces labels on ~500+ correct calls with zero bugs found."
+            },
+            {
+              "key": "C",
+              "reason": "Lets real swapped arguments compile."
+            }
+          ],
+          "tradeoff": "High-precision error on cycles vs noisy one-way checks."
+        }
+      },
+      "reports": [
+        {
+          "title": "Crossed argument names design review (#7020, P23 / C49)",
+          "path": "Docs/Audits/2026-11-26-crossed-argument-names-review.md",
+          "note": "Complete 22,524-file sweep comparing one-way hits (290 static / ~500+ live) vs cycle hits (43 in 22 files)."
+        }
+      ],
+      "draftedBy": "Orchestrator",
+      "reviewedBy": "4e940546",
+      "draft": false,
+      "status": "open",
+      "created": "2026-11-27T12:32:56.652Z"
+    },
+    {
+      "id": "D-NET-DTLS-PEER1",
+      "cardId": "c0qnrbr0",
+      "group": "library",
+      "title": "core.net.dtls external interop peer: OpenSSL DTLS 1.2 instead of deleted vendored mbedtls",
+      "situation": "The original DTLS requirement named vendored mbedtls C peers for external wire interop. Since then, all vendored mbedtls C sources have been deleted from the repository, leaving only pure-Jet crypto and TLS code plus license notices. Bidirectional OpenSSL DTLS 1.2 interop tests already run fail-closed in both client and server roles, alongside loopback and fragmentation tests. We recommend Option A: ratify OpenSSL as the external DTLS 1.2 interop peer.",
+      "gist": "Should `core.net.dtls` use fail-closed OpenSSL DTLS 1.2 tests as its external wire-interop peer instead of re-vendoring deleted mbedtls C code?",
+      "lesson": "Jet removed vendored C crypto libraries so the repository stays pure Jet. Testing our pure-Jet DTLS 1.2 engine against the standard host OpenSSL peer proves real third-party wire interop without bringing C code back. Because our TLS engine shares Mbed TLS lineage, OpenSSL also gives stronger independent verification.",
+      "explainer": "",
+      "story": "Maya runs the DTLS interop test suite on her machine. Jet's pure-Jet DTLS 1.2 client and server exchange cookies, verify certificates, and echo encrypted datagrams with OpenSSL in both directions. If OpenSSL is missing, the test fails loudly instead of silently skipping.",
+      "inWild": "// Independent DTLS 1.2 wire interop: pion/dtls (Go) and webrtc-rs/dtls (Rust) test against host OpenSSL\nopenssl s_server -dtls1_2 -listen -accept 127.0.0.1:PORT ...\nopenssl s_client -dtls1_2 -connect 127.0.0.1:PORT ...",
+      "detail": "Facts verified directly in the live repository:\n\nVendored mbedtls C sources are gone. Only four attribution files remain (`Core/Crypto/LICENSE-mbedtls`, `Core/Crypto/NOTICE-mbedtls`, `Core/Net/SSL/LICENSE-mbedtls`, `Core/Net/SSL/NOTICE-mbedtls`). `Core/Crypto/` and `Core/Net/SSL/` hold the pure-Jet port of Mbed TLS 3.6.7.\n\nBecause Jet's pure-Jet TLS state machine descends from Mbed TLS 3.6.7, testing wire interop against OpenSSL provides stronger third-party independence than testing against C mbedtls.\n\n`Tests/Cases/Net/dtls_interop_openssl.case` already proves fail-closed bidirectional DTLS 1.2 interop. Line 9 declares `tools-any: openssl`, which fails explicitly when `openssl` is missing (`Compiler/JetTestKit/Source/Exec.jet:1078-1082`).\n\nJet client to `openssl s_server -dtls1_2 -listen` verifies HelloVerifyRequest cookies, chain/hostname validation, and datagram exchange across three cipher suites (`ECDHE-ECDSA-AES128-GCM-SHA256`, `ECDHE-RSA-AES256-GCM-SHA384`, `ECDHE-RSA-CHACHA20-POLY1305`) plus mTLS (`ECDHE-ECDSA-AES128-GCM-SHA256` with `-Verify 1`).\n\n`openssl s_client -dtls1_2` to Jet `DTLSListener` verifies three cipher suites (`ECDHE-ECDSA-AES128-GCM-SHA256`, `ECDHE-ECDSA-AES256-GCM-SHA384`, `ECDHE-RSA-CHACHA20-POLY1305`) plus mTLS (`ECDHE-ECDSA-AES128-GCM-SHA256`).\n\nOffline coverage with zero external tools lives in `Tests/Cases/Net/dtls_interop_loopback.case` and `Examples/Network/DTLSEcho.jet` across O0, O1, and O2. `Core/Net/DTLS.jet:1692-1800` also asserts `saw_partial_fragment && saw_nonzero_offset && max_msg_fragments >= 2` (line 1773), anti-replay, and close wipe.",
+      "options": [
+        {
+          "key": "A",
+          "name": "Ratify OpenSSL as the external DTLS 1.2 interop peer (fail-closed)",
+          "detail": "Accept fail-closed bidirectional OpenSSL DTLS 1.2 interop alongside loopback, fragmentation, and the DTLSEcho golden example, without re-vendoring mbedtls C code.",
+          "technical": "Updates `#6737 c1` to accept `Tests/Cases/Net/dtls_interop_openssl.case` (`tools-any: openssl`, fail-closed). Also includes `Tests/Cases/Net/dtls_interop_loopback.case`, `Core/Net/DTLS.jet:1692-1800`, and `Examples/Network/DTLSEcho.jet`. Covers 3 cipher suites plus mTLS in each direction (4 distinct suites total) with zero vendored C sources.",
+          "code": "// Tests/Cases/Net/dtls_interop_openssl.case\ntools-any: openssl\n// Jet client -> openssl s_server -dtls1_2 -listen (3 suites + mTLS)\n// openssl s_client -dtls1_2 -> Jet DTLSListener (3 suites + mTLS)"
+        },
+        {
+          "key": "B",
+          "name": "Re-vendor mbedtls C test peers in the repository",
+          "detail": "Restore vendored mbedtls C sources under Tests/ and build C DTLS 1.2 peer binaries to match the original wording literally.",
+          "technical": "Re-introduces third-party C crypto sources and C build steps into the repository solely for DTLS test peers. Tests against a peer sharing Mbed TLS state-machine lineage rather than an independent implementation.",
+          "code": "// Would re-vendor mbedtls C sources and compile C DTLS test peers"
+        },
+        {
+          "key": "C",
+          "name": "Drop external DTLS interop and keep loopback-only tests",
+          "detail": "Rely only on Jet-to-Jet loopback tests with no third-party DTLS peer.",
+          "technical": "Removes external wire-protocol verification; a symmetric wire bug in both Jet client and Jet server could pass loopback undetected.",
+          "code": "// Loopback only: Jet DTLS client <-> Jet DTLS server"
+        }
+      ],
+      "comparisons": [
+        {
+          "lang": "Go (pion/dtls)",
+          "note": "Tests DTLS 1.2 wire interop against external OpenSSL `s_server` and `s_client` binaries without vendoring C crypto libraries.",
+          "code": "openssl s_server -dtls1_2 -listen ..."
+        },
+        {
+          "lang": "Rust (webrtc-rs/dtls)",
+          "note": "Verifies pure-Rust DTLS 1.2 handshakes and datagrams against host OpenSSL peers rather than vendoring C test peers.",
+          "code": "openssl s_client -dtls1_2 ..."
+        }
+      ],
+      "rec": "A",
+      "recommendation": {
+        "why": "Option A keeps the repository free of vendored C crypto code while proving fail-closed third-party DTLS 1.2 wire interop against OpenSSL in both client and server roles.",
+        "gains": [
+          "Keeps zero vendored mbedtls C sources in the repository.",
+          "Proves bidirectional OpenSSL DTLS 1.2 interop across 3 cipher suites plus mTLS per direction (4 distinct suites total).",
+          "Tests against an independent implementation (OpenSSL) rather than the Mbed TLS lineage Jet ported.",
+          "Fails closed when `openssl` is missing instead of silently skipping."
+        ],
+        "losses": [
+          {
+            "loss": "External interop requires a host `openssl` binary and does not test against a pinned C mbedtls peer.",
+            "mitigation": "`tools-any: openssl` fails closed when missing, and loopback plus in-memory DTLS tests run with zero external tools."
+          }
+        ],
+        "whyNot": [
+          {
+            "key": "B",
+            "reason": "Re-vendors C crypto code solely for a test peer that shares lineage with Jet's own port."
+          },
+          {
+            "key": "C",
+            "reason": "Loses independent third-party wire-protocol verification."
+          }
+        ],
+        "tradeoff": "Requires host `openssl` for external interop (enforced fail-closed), keeping the repo free of vendored C crypto code."
+      },
+      "hybrid": null,
+      "ballotMode": "full",
+      "shortAuthorizedBy": null,
+      "ballotProcessVersion": 5,
+      "reviewPasses": {
+        "adversarial": "Author model family: Gemini. Adversarial model family: Gemini. Fresh agent: 4e940546. Verified the four mbedtls notice files, DTLSEcho path, per-direction OpenSSL suites, fail-closed Exec.jet handling, Option A dependency loss, and Tower prose caps."
+      },
+      "checkInstructions": null,
+      "surface": {
+        "gist": "Should `core.net.dtls` use fail-closed OpenSSL DTLS 1.2 interop instead of re-vendoring deleted mbedtls C peers?",
+        "lesson": "Vendored mbedtls C code is gone. Fail-closed OpenSSL tests prove independent third-party DTLS 1.2 wire interop without bringing C code back.",
+        "trio": {
+          "current": {
+            "note": "Vendored mbedtls C sources are deleted; OpenSSL interop runs in both directions.",
+            "code": "tools-any: openssl\n// Jet <-> OpenSSL DTLS 1.2 (3 suites + mTLS each way)"
+          },
+          "wild": {
+            "lang": "OpenSSL CLI",
+            "note": "Standard third-party DTLS 1.2 wire peer used by pion/dtls and webrtc-rs/dtls.",
+            "code": "openssl s_server -dtls1_2 -listen ...\nopenssl s_client -dtls1_2 ..."
+          }
+        },
+        "options": [
+          {
+            "key": "A",
+            "name": "Use OpenSSL DTLS 1.2 peer (fail-closed)",
+            "gist": "Accept fail-closed bidirectional OpenSSL DTLS 1.2 interop as the external wire peer.",
+            "gains": [
+              "Zero vendored C crypto code in the repository.",
+              "Independent third-party interop across 3 suites plus mTLS each way."
+            ],
+            "losses": [
+              "Requires a host `openssl` binary and skips a pinned C mbedtls peer."
+            ],
+            "proposed": {
+              "code": "jet test Compiler --profile cases --filter Net/dtls_interop_\n// runs fail-closed OpenSSL interop + loopback"
+            }
+          },
+          {
+            "key": "B",
+            "name": "Re-vendor mbedtls C test peers",
+            "gist": "Restore vendored mbedtls C sources to build C test peers.",
+            "gains": [
+              "Matches pre-removal wording literally."
+            ],
+            "losses": [
+              "Re-introduces vendored C crypto code and C build steps."
+            ],
+            "proposed": {
+              "code": "// Re-vendor mbedtls C sources under Tests/"
+            }
+          },
+          {
+            "key": "C",
+            "name": "Loopback-only DTLS tests",
+            "gist": "Drop third-party peer and test Jet-to-Jet only.",
+            "gains": [
+              "No external binary dependency."
+            ],
+            "losses": [
+              "Symmetric wire bugs would go undetected."
+            ],
+            "proposed": {
+              "code": "// Jet DTLS client <-> Jet DTLS server only"
+            }
+          }
+        ],
+        "recommendation": {
+          "rec": "A",
+          "why": "Keeps the repo free of vendored C code while proving fail-closed third-party DTLS 1.2 wire interop.",
+          "gains": [
+            "Zero vendored C code.",
+            "Independent OpenSSL interop across 3 suites plus mTLS each way."
+          ],
+          "losses": [
+            {
+              "loss": "Requires a host `openssl` binary and skips a pinned C mbedtls peer.",
+              "mitigation": "Fails closed when `openssl` is missing, while loopback and unit tests run offline."
+            }
+          ],
+          "whyNot": [
+            {
+              "key": "B",
+              "reason": "Re-vendors C crypto code unnecessarily."
+            },
+            {
+              "key": "C",
+              "reason": "Drops third-party wire verification."
+            }
+          ],
+          "tradeoff": "Uses host `openssl` (fail-closed) instead of vendored C sources."
+        }
+      },
+      "draftedBy": "Orchestrator",
+      "reviewedBy": "4e940546",
+      "draft": false,
+      "status": "open",
+      "created": "2026-11-27T12:32:58.034Z"
     }
   ],
   "questions": [
@@ -122177,6 +122529,48 @@
     }
   ],
   "events": [
+    {
+      "at": "2026-11-27T12:33:04.153Z",
+      "by": "Orchestrator",
+      "action": "decision.post",
+      "ref": "D-NET-DTLS-PEER1",
+      "note": "reviewed by 4e940546"
+    },
+    {
+      "at": "2026-11-27T12:33:02.698Z",
+      "by": "Orchestrator",
+      "action": "decision.post",
+      "ref": "D-CROSSED-ARGS1",
+      "note": "reviewed by 4e940546"
+    },
+    {
+      "at": "2026-11-27T12:33:01.157Z",
+      "by": "4e940546",
+      "action": "decision.review",
+      "ref": "D-NET-DTLS-PEER1",
+      "note": "passed"
+    },
+    {
+      "at": "2026-11-27T12:32:59.611Z",
+      "by": "4e940546",
+      "action": "decision.review",
+      "ref": "D-CROSSED-ARGS1",
+      "note": "passed"
+    },
+    {
+      "at": "2026-11-27T12:32:58.034Z",
+      "by": "Orchestrator",
+      "action": "decision.add",
+      "ref": "D-NET-DTLS-PEER1",
+      "note": "core.net.dtls external interop peer: OpenSSL DTLS 1.2 instead of deleted vendored mbedtls (draft)"
+    },
+    {
+      "at": "2026-11-27T12:32:56.653Z",
+      "by": "Orchestrator",
+      "action": "decision.add",
+      "ref": "D-CROSSED-ARGS1",
+      "note": "Crossed argument names: refuse swap or rotation cycles of two or more arguments (draft)"
+    },
     {
       "at": "2026-11-27T12:32:13.255Z",
       "by": "Orchestrator",
