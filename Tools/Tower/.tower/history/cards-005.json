@@ -44801,6 +44801,323 @@
       "completedAt": "2026-11-24T11:34:40.480Z",
       "questions": [],
       "retiredAt": "2026-11-27T11:37:36.443Z"
+    },
+    {
+      "id": "c0n7zpy3",
+      "num": 6848,
+      "title": "One fact registry: typed rows, one query, uniform flow joins and one gate ledger",
+      "body": "Destination: every compiler fact a user can see (marker rules, knowledge planes, rights, build facts, gates, send-safety, failure attribution) lives in one registry of typed rows, read through one public query, so tools and libraries see the same facts the compiler uses. Why: today facts live in several tables with several readers, so tools drift from the compiler.\n\nGoverning decisions: D-META-REG1=A (one registry substrate, told apart by attachment), D-META-REG2=A (one public `compiler.query`, ratified 2026-11-11), D-LEDGER1=D (three lifetime-separated stores behind one typed query), D-FACT-FLOW1=A, D-FACT-GATE1=A, D-FACT-HOME1=A, D-FACT-OWN1=A. How a fact is declared is D-DECL-TYPES1=A (field-less structs implementing Fact), built on the declarations card. Spec: Docs/spec/reference/metaprogramming.md.\n\nCarried from #4276 (closed 2026-11-14).",
+      "kind": "feature",
+      "track": "epoch",
+      "epoch": "G1",
+      "milestoneId": null,
+      "phase": "done",
+      "priority": "P2",
+      "plan": null,
+      "checkSteps": null,
+      "probe": null,
+      "visualMedia": [],
+      "blockedBy": [],
+      "assignee": null,
+      "log": [
+        {
+          "at": "2026-11-24",
+          "by": "Orchestrator",
+          "text": "All criteria met with recorded batch-compiler evidence; closed in the near-done sweep. Batch 23's full suite rechecks every named row."
+        },
+        {
+          "at": "2026-11-24",
+          "by": "Orchestrator",
+          "text": "Owner ratified D-BUILD-TARGETFACTS1=A, D-DERIV-READ1=A and D-DEBUG-PREP1=A (2026-11-24). Assigned: #5007 c7-c9 and #6848 c8 to G1Facts; #5007 c10-c11 and #6772 c15 to G1Generation-2 after the #6846 c12 family-Self fix."
+        },
+        {
+          "at": "2026-11-23",
+          "by": "Orchestrator",
+          "text": "c3 scope decision: c3a adds JetSema Flow.jet with the one path rule set (meet, loop with exits, arm table with exhaustiveness) and a plane-supplied join; typestate and taint move onto it, which fixes taint's divergent join (fact_flow_join_* cases); ownership's fork join calls the same rule and stays a prover (c6, D-FACT-OWN1); effects keep no per-binding flow facts, so they get no plane. c3b makes the planes on Flow.jet share one store keyed by binding and plane, with a guard against new private per-binding maps."
+        },
+        {
+          "at": "2026-11-23",
+          "by": "Orchestrator",
+          "text": "Landed 299a1d731c: Examples/Metaprogramming/Reflection/FactQuery golden (jet inspect facts and compiler.query give equal marker rows on O0/O1/O2; missing store MetadataError stderr). PASS. c1 not met yet: FactSource has Schema/Program/Run, no plugin store, and no proof that no second registry reader remains."
+        }
+      ],
+      "criteria": [
+        {
+          "n": 1,
+          "text": "`core.compiler` has one public typed query, `compiler.query(store, kind: FactKind) -> [FactRow] MetadataError!`, over the schema, package and plugin fact stores (D-META-REG2=A); `jet inspect facts --store=… --kind=… [--json]` renders the same call with the same rows, identities and errors, and no second registry reader remains; a golden counts marker rows both ways and gets equal counts on O0, O1 and O2, and a missing store reports its MetadataError with a UI snapshot.",
+          "status": "met",
+          "metBy": "Orchestrator",
+          "verifiedBy": null,
+          "evidence": "golden Metaprogramming/Reflection/FactQuery: PASS on the batch 12 compiler (landed on dev, 40 commits ending 00815005b8; dev 4529a137b8).",
+          "at": "2026-11-24T00:21:05.589Z",
+          "proof": {
+            "profile": "golden",
+            "filter": "Metaprogramming/Reflection/FactQuery"
+          }
+        },
+        {
+          "n": 2,
+          "text": "Marker rules, knowledge planes, rights and build facts register in one registry substrate, told apart by attachment (D-META-REG1=A); no second registration table remains in Compiler/.",
+          "status": "met",
+          "metBy": "Orchestrator",
+          "verifiedBy": null,
+          "evidence": "jet test Compiler --profile cases --filter fact_registry_one_table: PASS on the batch 12 compiler (landed on dev, 40 commits ending 00815005b8; dev 4529a137b8) (6848-c2, c2b).",
+          "at": "2026-11-24T00:21:06.588Z",
+          "proof": {
+            "profile": "cases",
+            "filter": "fact_registry_one_table"
+          }
+        },
+        {
+          "n": 3,
+          "text": "One flow-fact store on the checker holds every per-binding fact; each plane supplies only its join rule, and the walker applies joins the same way at every if, loop and arm table for ownership, effects, state and taint (D-FACT-FLOW1=A).",
+          "status": "met",
+          "metBy": "Orchestrator",
+          "verifiedBy": null,
+          "evidence": "jet test Compiler --profile cases --filter fact_flow_join_: 3 PASS on the batch 12 compiler (landed on dev, 40 commits ending 00815005b8; dev 4529a137b8) (state_break_exit, taint_break_exit, taint_return_path; one flow store in 6848-c3a/c3b).",
+          "at": "2026-11-24T00:21:07.634Z",
+          "proof": {
+            "profile": "cases",
+            "filter": "fact_flow_join_"
+          }
+        },
+        {
+          "n": 4,
+          "text": "Every gate lands in one ledger: unsafe regions, impure marks, grants, trust and .Force, taint scrubs, duty drops and precision demotions; `jet inspect gates` prints counts per kind with security kinds first and a filter selects one kind (D-FACT-GATE1=A).",
+          "status": "met",
+          "metBy": "Orchestrator",
+          "verifiedBy": null,
+          "evidence": "jet test Compiler --profile cases --filter inspect_gates: PASS on the batch 12 compiler (landed on dev, 40 commits ending 00815005b8; dev 4529a137b8) (inspect_gates_counts_each_kind_security_first).",
+          "at": "2026-11-24T00:21:08.684Z",
+          "proof": {
+            "profile": "cases",
+            "filter": "inspect_gates"
+          }
+        },
+        {
+          "n": 5,
+          "text": "Facts with user-visible meaning are typed registry rows readable through the fact query: send-safety, failure attribution, #Track, view and unit-scale provenance, and maturity; prover internals such as uninitialized tracking and exhaustiveness stay inside the engine (D-FACT-HOME1=A).",
+          "status": "met",
+          "metBy": "Orchestrator",
+          "verifiedBy": null,
+          "evidence": "jet test Compiler --profile cases --filter fact_registry_user_rows: PASS on the batch 12 compiler (landed on dev, 40 commits ending 00815005b8; dev 4529a137b8).",
+          "at": "2026-11-24T00:21:09.843Z",
+          "proof": {
+            "profile": "cases",
+            "filter": "fact_registry_user_rows"
+          }
+        },
+        {
+          "n": 6,
+          "text": "The borrow checker stays a prover, never a fact plane: the registry has no ownership plane row, and the ownership sigil surface stays as ratified (D-FACT-OWN1=A).",
+          "status": "met",
+          "metBy": "Orchestrator",
+          "verifiedBy": null,
+          "evidence": "jet test Compiler --profile cases --filter fact_registry_no_ownership_plane: PASS on the batch 12 compiler (landed on dev, 40 commits ending 00815005b8; dev 4529a137b8).",
+          "at": "2026-11-24T00:21:11.460Z",
+          "proof": {
+            "profile": "cases",
+            "filter": "fact_registry_no_ownership_plane"
+          }
+        },
+        {
+          "n": 7,
+          "text": "One current version and fact-shape reference links its history, and `compiler-proof checking` reads the version from emitted output, not from a hard-coded number. Proof: `jet test Tests/Guards --filter fact_shape_version_from_output`. (was #3186 c11)",
+          "status": "met",
+          "metBy": "Orchestrator",
+          "verifiedBy": null,
+          "evidence": "dev 4529a137b8: jet test Tests/Guards on the batch 12 compiler, fact_shape_version_from_output PASS (fact_registry_one_table and fact_flow_one_store also PASS).",
+          "at": "2026-11-24T00:28:28.958Z"
+        },
+        {
+          "n": 8,
+          "text": "One interned, checked derivation relation records how each fact was produced across facts, execution and optimization; producers are authoritative, persistence is lossless, and the CLI and LSP read it. Proof: `jet test Compiler --profile cases --filter Explain/derivation_relation_`. (was #3186 c15)",
+          "status": "met",
+          "metBy": "Orchestrator",
+          "verifiedBy": null,
+          "evidence": "jet test Compiler --profile cases --filter Explain/derivation_relation_ (7 pass) on the batch compiler built from dev 568729492f (tip18-chain s1, 1c961ed64b39e1f9): PASS",
+          "at": "2026-11-24T06:34:20.831Z"
+        },
+        {
+          "n": 9,
+          "text": "The 4 known-failing rows this card owns (rehomed by #6843 c7) pass and leave Tests/known-failing.tsv: FactReads/nominal_layout_intrinsic_in_comptime_helper_agrees_on_tiers, CoreLib/tracked_origin_is_a_folded_optional_fact, FactReads/typed_fact_fixture_matches_aot_default_and_o0, GateLedger/source_gate_kinds_keep_their_written_reasons. Proof: each named test passes in its suite on a batch compiler, and no row of Tests/known-failing.tsv names this card for them.",
+          "status": "met",
+          "metBy": "Orchestrator",
+          "verifiedBy": null,
+          "evidence": "On a compiler built from landed dev 6ab0b5a5c8 (tip20), run in an export of that commit: cases, each of the 4 rows one at a time; PASS 4/4; no row in known-failing.tsv",
+          "at": "2026-11-24T08:32:56.521Z"
+        }
+      ],
+      "refs": [],
+      "tags": [
+        "meta",
+        "facts",
+        "metaprogramming"
+      ],
+      "parentId": null,
+      "needsAcceptance": false,
+      "created": "2026-11-15T02:10:43.897Z",
+      "updated": "2026-11-24T11:48:34.213Z",
+      "updatedBy": "Orchestrator",
+      "criteriaLastN": 9,
+      "completedAt": "2026-11-24T11:48:34.213Z",
+      "questions": [],
+      "retiredAt": "2026-11-27T11:52:29.150Z"
+    },
+    {
+      "id": "c0jt78qz",
+      "num": 6895,
+      "title": "Likely bugs are tidy errors: dead constant ranges, unconditional recursion, discarded pure results, N+1 queries and misleading loop and type shapes",
+      "body": "Destination: each likely-bug pattern below is a registered tidy error (D-NO-WARNINGS1=A, #6858): `jet check` and `jet build` list it with what/why/fix text and exit non-zero; `jet run` and `jet dev` never stop on it or print it. Each has a UI snapshot for the firing program and for the accepted fix.\n\nWhy it matters: these shapes compile today and do the wrong thing quietly.\n\nDecisions: D-NO-WARNINGS1=A, D-RANGE-BACKWARD1=A, D-DISCARD1=A, D-TUPLE-ORDER1=A, D-SQL-CLASS1=A (Query class). The two-binding pairs loop is on Main's ballot list (2026-11-15).\n\nSource: Map card #6006 (Lints), batch D05 of the 2026-10-28 consolidation.",
+      "kind": "feature",
+      "track": "epoch",
+      "epoch": "G2",
+      "milestoneId": null,
+      "phase": "done",
+      "priority": "P1",
+      "plan": null,
+      "checkSteps": null,
+      "probe": null,
+      "visualMedia": [],
+      "blockedBy": [],
+      "assignee": null,
+      "log": [
+        {
+          "at": "2026-11-24",
+          "by": "Orchestrator",
+          "text": "All criteria met with recorded batch-compiler evidence; closed in the near-done sweep. Batch 23's full suite rechecks every named row."
+        },
+        {
+          "at": "2026-11-15",
+          "by": "TowerKeeper-2",
+          "text": "Owner-wait sweep 2026-11-15 (TowerKeeper-2, for Main): c7, body reworded; the owner-only choices are on Main's ballot list (2026-11-15) ($JET_SCRATCH_ROOT/lanes/TowerKeeper-2/ballots-needed.tsv); no question for the owner stays on this card."
+        }
+      ],
+      "criteria": [
+        {
+          "n": 1,
+          "text": "A loop over a constant range that can never run (`10..1`, or a step pointing away from the end) is check error E0170 RangeDirectionMismatch offering the minus step, as D-RANGE-BACKWARD1=A states; a computed backward range (`0..n - 1`) stays empty and raises nothing; the stride rule is in the spec.",
+          "status": "met",
+          "metBy": "Orchestrator",
+          "verifiedBy": null,
+          "evidence": "Sweep of open criteria against the full suite of the batch-7 -O1 compiler (dev 3019343199 + landed stack): jet test Compiler --profile ui --filter range_backward_constant -> 5/5 PASS (range_backward_constant.jet, range_backward_constant.jet@o0, range_backward_constant.jet@o1, range_backward_constant.jet@o2, range_backward_constant_quiet.jet). Stride rule in Docs/Spec/spec.md lines 588-592 (E0170).",
+          "at": "2026-11-23T20:53:39.237Z",
+          "proof": {
+            "profile": "ui",
+            "filter": "range_backward_constant"
+          }
+        },
+        {
+          "n": 2,
+          "text": "A function whose every path calls itself again with no exit is a tidy error at the call, found over call-graph cycles.",
+          "status": "met",
+          "metBy": "Orchestrator",
+          "verifiedBy": null,
+          "evidence": "Sweep of open criteria against the full suite of the batch-7 -O1 compiler (dev 3019343199 + landed stack): jet test Compiler --profile ui --filter unconditional_recursion -> 2/2 PASS (unconditional_recursion.jet, unconditional_recursion_quiet.jet).",
+          "at": "2026-11-23T20:53:40.153Z",
+          "proof": {
+            "profile": "ui",
+            "filter": "unconditional_recursion"
+          }
+        },
+        {
+          "n": 3,
+          "text": "A Float binding seeded with infinity but only ever assigned Int values is a tidy error naming the Int form.",
+          "status": "met",
+          "metBy": "Orchestrator",
+          "verifiedBy": null,
+          "evidence": "Sweep of open criteria against the full suite of the batch-7 -O1 compiler (dev 3019343199 + landed stack): jet test Compiler --profile ui --filter float_infinity_seed_int_only -> 2/2 PASS (float_infinity_seed_int_only.jet, float_infinity_seed_int_only_quiet.jet).",
+          "at": "2026-11-23T20:53:41.083Z",
+          "proof": {
+            "profile": "ui",
+            "filter": "float_infinity_seed_int_only"
+          }
+        },
+        {
+          "n": 4,
+          "text": "A field-less struct holding only static functions is a tidy error whose fix makes it a module, and a constructor that does not return its owner type is an error. Proof: `jet test Compiler --profile ui --filter static_only_struct` and `jet test Compiler --profile ui --filter constructor_wrong_owner`.",
+          "status": "met",
+          "metBy": "Orchestrator",
+          "verifiedBy": null,
+          "evidence": "On the batch 16 compiler (tree a2a8d238fb; landed on dev ce3b8e7f59): jet test Compiler --profile ui --filter static_only_struct -> 2/2 PASS (static_only_struct.jet, static_only_struct_quiet.jet); --filter constructor_wrong_owner -> 2/2 PASS (constructor_wrong_owner.jet, constructor_wrong_owner_quiet.jet). Landed as ebe277bc92.",
+          "at": "2026-11-24T04:18:06.588Z"
+        },
+        {
+          "n": 5,
+          "text": "Records compare and sort by written member order (D-RECORD-ORDER1=A): S73 in Docs/Spec/syntax-decisions.md says so, the List.sort and sort_desc docs say so, and an example shows written order and the sort_by spelling. Proof: `jet test Compiler --profile golden --filter Collections/NamedTupleOrder` on O0, O1 and O2.",
+          "status": "met",
+          "metBy": "Main",
+          "verifiedBy": null,
+          "evidence": "p325 batch compiler (dev e6ddae4d43): golden Examples/Collections/NamedTupleOrder.jet PASS on O0, O1 and O2. The example sorts {key, index} pairs in written order and shows the sort_by spelling that puts index first. S73 (D-RECORD-ORDER1) is in Docs/Spec/syntax-decisions.md (the comparison list at line 1620 names sort and sort_desc). The List.sort/sort_desc docs are Docs/Spec/Reference/core-library.md lines 868-871: sort, sort_desc, min and max on named tuples compare members in written order, use sort_by to put another member first, and the example is named. The JetFoundation Collections.jet method rows carry no doc text, so that reference is the sort documentation.",
+          "at": "2026-11-19T16:10:58.510Z"
+        },
+        {
+          "n": 6,
+          "text": "A Query-class SQL statement run inside a loop over rows is one tidy error at the query line naming the batched form (an IN list or a join); a query outside any loop reports nothing. Proof: `jet test Compiler --profile ui --filter sql_query_in_row_loop` with its negative fixture.",
+          "status": "met",
+          "metBy": "Main",
+          "verifiedBy": null,
+          "evidence": "p325 batch compiler (dev e6ddae4d43) ui profile: sql_query_in_row_loop PASS and sql_query_in_row_loop_quiet PASS (no errors). The snapshot is one jet.SqlQueryInRowLoop (L0308) error at the query line (scoped.query at 18:23) whose fix names the batched forms: WHERE key IN (...) or a JOIN. The quiet fixture, with the query outside any loop, reports nothing.",
+          "at": "2026-11-19T16:09:53.245Z"
+        },
+        {
+          "n": 7,
+          "text": "A two-binding loop over a list of 2-tuples (`loop (a, b) in pairs`, which binds index and tuple, not the pair) gets the treatment its ballot chooses (on Main's ballot list (2026-11-15)).",
+          "status": "met",
+          "metBy": "Orchestrator",
+          "verifiedBy": null,
+          "evidence": "jet test Compiler --profile ui --filter loop_two_bindings_over_pairs on the batch compiler built from dev 568729492f (tip18-chain s1, 1c961ed64b39e1f9): PASS",
+          "at": "2026-11-24T06:34:22.574Z",
+          "proof": {
+            "profile": "ui",
+            "filter": "loop_two_bindings_over_pairs"
+          }
+        },
+        {
+          "n": 8,
+          "text": "Under D-DISCARD1=A, a non-unit last line in a function with no written return type and an ignored non-unit result of a pure call are errors (L0508 re-registered as a tidy error), while unit-returning arrow-loop bodies report nothing. Proof: `jet test Compiler --profile ui --filter discarded_pure_result` and its no-fire pair.",
+          "status": "met",
+          "metBy": "Main",
+          "verifiedBy": null,
+          "evidence": "p325 batch compiler (dev e6ddae4d43) ui profile: discarded_pure_result PASS and discarded_pure_result_quiet PASS (no errors). The quiet fixture holds a Unit arrow-loop body (loop n in [...] -> sum += double(n)), a used result, a written return type, an impure call and an explicit .drop, and none reports L0508.",
+          "at": "2026-11-19T16:09:54.109Z"
+        },
+        {
+          "n": 9,
+          "text": "A compiler-discovered `build` function is a liveness root, so it and BuildError are never reported unused, and BuildError is excluded from the Display migration error.",
+          "status": "met",
+          "metBy": "Main",
+          "verifiedBy": null,
+          "evidence": "p352 batch compiler (dev f795cbd503): jet test Compiler --profile ui --filter build_fn_liveness_root PASS (Tests/UILint/build_fn_liveness_root.jet).",
+          "at": "2026-11-20T11:50:41.165Z",
+          "proof": {
+            "profile": "ui",
+            "filter": "build_fn_liveness_root"
+          }
+        },
+        {
+          "n": 10,
+          "text": "The structural printing example (`{g:Debug}` on a struct with no hand-written display) prints the same on O0, O1 and O2 with no report, and Display interpolation, explicit Debug, manual overrides, negative derive controls and redaction keep their distinct contracts. Proof: `jet test Compiler --profile golden --filter Text/StructuralPrinting` and `jet test Compiler --profile cases --filter PrintBranchTiers/`.",
+          "status": "met",
+          "metBy": "Main",
+          "verifiedBy": null,
+          "evidence": "p295 batch compiler (census build of dev 3f4dd54f21), landed IfHole-6-1-6895-c10-structural-printing: golden Text/StructuralPrinting PASS on o0/o1/o2; cases PrintBranchTiers/ PASS",
+          "at": "2026-11-18T14:47:34.173Z"
+        }
+      ],
+      "refs": [],
+      "tags": [
+        "diagnostics",
+        "lints"
+      ],
+      "parentId": null,
+      "needsAcceptance": false,
+      "created": "2026-11-15T03:50:53.787Z",
+      "updated": "2026-11-24T11:48:36.463Z",
+      "updatedBy": "Orchestrator",
+      "completedAt": "2026-11-24T11:48:36.463Z",
+      "questions": [],
+      "retiredAt": "2026-11-27T11:52:29.151Z"
     }
   ]
 }

@@ -3,7 +3,7 @@
     "version": 4,
     "project": "Jet",
     "nextNum": 7042,
-    "rev": 114976,
+    "rev": 114984,
     "ui": {
       "toggled": [
         "dec-group:syntax",
@@ -15527,11 +15527,11 @@
         {
           "n": 16,
           "text": "The guide teaches state holders in the D-STATE-HOLDERS1=A order: a plain value, Shared across tasks, and a Pool with IDs for graphs; Examples/Memory/Expert holds the expert forms (Cell, Atomic, guards, Weak). No API changes. Proof: `jet test Compiler --profile golden --filter Memory/Expert` passes on o0, o1 and o2.",
-          "status": "open",
-          "metBy": null,
+          "status": "met",
+          "metBy": "Orchestrator",
           "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-11-15T02:29:50.073Z"
+          "evidence": "dev a39ef67534d, batch89-s3 (dev a39ef67534d, S2==S3 sha256 0c4316f0): Docs/Spec/Guides/state-holders.md landed in state-holder order; jet test Compiler --profile golden --filter Memory/Expert -> 12/12 PASS (SharedGuards, WeakBackEdge, CellCache, AtomicCounter on o0, o1, o2).",
+          "at": "2026-11-27T11:52:29.052Z"
         },
         {
           "n": 17,
@@ -15545,11 +15545,11 @@
         {
           "n": 18,
           "text": "D-VIEW-TRAP1=A: a negative or out-of-range dynamic view bound is a located run-time trap (exit 70 at the original site), never a compile error, the same on O0, O1 and O2.",
-          "status": "open",
-          "metBy": null,
+          "status": "met",
+          "metBy": "Orchestrator",
           "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-11-16T12:55:16.575Z",
+          "evidence": "dev a39ef67534d, batch89-s3 (dev a39ef67534d, S2==S3 sha256 0c4316f0): jet test Compiler --profile golden --filter DynamicViewNegativeBound -> 3/3 PASS (o0, o1, o2).",
+          "at": "2026-11-27T11:52:30.371Z",
           "proof": {
             "profile": "cases",
             "filter": "Views/d_view_trap1_contract"
@@ -15585,20 +15585,20 @@
         {
           "n": 22,
           "text": "The 22 known-failing rows this card owns (rehomed by #6843 c7) pass and leave Tests/known-failing.tsv: UI/Ownership/multi_trait_receiver_access_follows_first_match_dispatch_order_2, UI/Ownership/whole_place_alias_blocks_overlapping_write_argument, UI/Ownership/named_write_window_calls_keep_alias_and_read_view_checks, UI/vault_key_unlock_outlives_owner, UI/Ownership/open_dynamic_trait_view_dispatch_is_rejected, UI/Ownership/local_owned_view_return_reports_e2305_once, UI/Ownership/aggregate_view_slot_composes_through_parameter_projection, UI/Ownership/mutable_view_extraction_retires_the_source_aggregate, UI/Ownership/mutable_view_extraction_retires_the_source_aggregate_2, UI/Ownership/named_write_window_calls_keep_alias_and_read_view_checks_2, UI/Ownership/builtin_and_composite_receivers_use_the_call_access_frame, UI/Ownership/builtin_mut_receiver_uses_two_phase_reservation_2, UI/Ownership/move_lambda_capture_identity_matches_rust_2021_places_5, UI/Ownership/borrowed_mutable_view_enum_requires_take_before_destructuring, UI/Ownership/borrowed_mutable_view_enum_requires_take_before_destructuring_2, UI/Ownership/edit_disjoint_callback_views_reject_every_retaining_boundary_3, UI/Ownership/edit_disjoint_callback_views_reject_every_retaining_boundary_4, UI/Ownership/enum_pattern_payload_keeps_its_original_owner_live, UI/Ownership/optional_constructor_payload_obeys_field_ownership, UI/Ownership/returned_view_aggregate_cannot_cross_task_boundary, UI/Ownership/trait_object_mut_self_calls_use_receiver_change_rules_inside_callbacks, Pin/a_pin_cannot_escape_its_owner_scope. Proof: each named test passes in its suite on a batch compiler, and no row of Tests/known-failing.tsv names this card for them.",
-          "status": "open",
-          "metBy": null,
+          "status": "met",
+          "metBy": "Orchestrator",
           "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-11-24T02:26:32.194Z"
+          "evidence": "dev a39ef67534d, batch89-s3 (dev a39ef67534d, S2==S3 sha256 0c4316f0): all 22 #4620 known-failing rows (21 UI Ownership/vault snapshots + Pin/a_pin_cannot_escape_its_owner_scope.case) retired from Tests/known-failing.tsv (0 #4620 rows remain) and verified 22/22 PASS.",
+          "at": "2026-11-27T11:52:31.336Z"
         },
         {
           "n": 23,
           "text": "A match that writes into its subject binds its payload writable when the subject is a list element: in fn(packets: &[Packet]), if &packets[0].retries == { .Val(n) -> { n += 1 } .None -> {} } compiles and changes packets[0]. Today (dev 7d4ea640b9, tip23 compiler) it fails with Jet.ImmutableAssignment ('n was made with :'), while the same match through a field (if &holder.packet.retries == …) and through a window bound first (slot: &packets[i]; if &slot.retries == …) both work. Proof: Tests/UI/Ownership/match_place_binds_optional_payload_as_write_window.jet gains a bump_element case through a list index and a window of a window, and its snapshot stays (no errors).",
-          "status": "open",
-          "metBy": null,
+          "status": "met",
+          "metBy": "Orchestrator",
           "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-11-24T14:02:01.325Z",
+          "evidence": "dev a39ef67534d, batch89-s3 (dev a39ef67534d, S2==S3 sha256 0c4316f0): jet test Compiler --profile ui --filter match_place_binds_optional_payload_as_write_window -> 1/1 PASS ((no errors), covering bump_element through list index and bump_window_of_window).",
+          "at": "2026-11-27T11:52:32.299Z",
           "proof": {
             "profile": "cmd",
             "args": [
@@ -15625,7 +15625,7 @@
       "parentId": "c0tgtjtu",
       "needsAcceptance": false,
       "created": "2026-10-05T19:57:15.407Z",
-      "updated": "2026-11-27T11:37:36.265Z",
+      "updated": "2026-11-27T11:52:32.299Z",
       "updatedBy": "Orchestrator",
       "criteriaLastN": 23
     },
@@ -26513,11 +26513,11 @@
         {
           "n": 7,
           "text": "The known-failing row this card owns (rehomed by #6843 c7) passes and leaves Tests/known-failing.tsv: UI/E0514_never_written_is_an_error. Proof: each named test passes in its suite on a batch compiler, and no row of Tests/known-failing.tsv names this card for them.",
-          "status": "open",
-          "metBy": null,
+          "status": "met",
+          "metBy": "Orchestrator",
           "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-11-24T02:27:53.744Z"
+          "evidence": "dev a39ef67534d, batch89-s3 (dev a39ef67534d, S2==S3 sha256 0c4316f0): Tests/UI/E0514_never_written_is_an_error retired from Tests/known-failing.tsv (0 #6324 rows remain) and verified PASS + 3/3 companion o0/o1/o2.",
+          "at": "2026-11-27T11:52:33.296Z"
         }
       ],
       "refs": [],
@@ -26525,7 +26525,7 @@
       "parentId": null,
       "needsAcceptance": false,
       "created": "2026-10-30T15:50:54.660Z",
-      "updated": "2026-11-26T01:59:06.258Z",
+      "updated": "2026-11-27T11:52:33.296Z",
       "updatedBy": "Orchestrator",
       "criteriaLastN": 7
     },
@@ -40844,166 +40844,6 @@
       "criteriaLastN": 12
     },
     {
-      "id": "c0n7zpy3",
-      "num": 6848,
-      "title": "One fact registry: typed rows, one query, uniform flow joins and one gate ledger",
-      "body": "Destination: every compiler fact a user can see (marker rules, knowledge planes, rights, build facts, gates, send-safety, failure attribution) lives in one registry of typed rows, read through one public query, so tools and libraries see the same facts the compiler uses. Why: today facts live in several tables with several readers, so tools drift from the compiler.\n\nGoverning decisions: D-META-REG1=A (one registry substrate, told apart by attachment), D-META-REG2=A (one public `compiler.query`, ratified 2026-11-11), D-LEDGER1=D (three lifetime-separated stores behind one typed query), D-FACT-FLOW1=A, D-FACT-GATE1=A, D-FACT-HOME1=A, D-FACT-OWN1=A. How a fact is declared is D-DECL-TYPES1=A (field-less structs implementing Fact), built on the declarations card. Spec: Docs/spec/reference/metaprogramming.md.\n\nCarried from #4276 (closed 2026-11-14).",
-      "kind": "feature",
-      "track": "epoch",
-      "epoch": "G1",
-      "milestoneId": null,
-      "phase": "done",
-      "priority": "P2",
-      "plan": null,
-      "checkSteps": null,
-      "probe": null,
-      "visualMedia": [],
-      "blockedBy": [],
-      "assignee": null,
-      "log": [
-        {
-          "at": "2026-11-24",
-          "by": "Orchestrator",
-          "text": "All criteria met with recorded batch-compiler evidence; closed in the near-done sweep. Batch 23's full suite rechecks every named row."
-        },
-        {
-          "at": "2026-11-24",
-          "by": "Orchestrator",
-          "text": "Owner ratified D-BUILD-TARGETFACTS1=A, D-DERIV-READ1=A and D-DEBUG-PREP1=A (2026-11-24). Assigned: #5007 c7-c9 and #6848 c8 to G1Facts; #5007 c10-c11 and #6772 c15 to G1Generation-2 after the #6846 c12 family-Self fix."
-        },
-        {
-          "at": "2026-11-23",
-          "by": "Orchestrator",
-          "text": "c3 scope decision: c3a adds JetSema Flow.jet with the one path rule set (meet, loop with exits, arm table with exhaustiveness) and a plane-supplied join; typestate and taint move onto it, which fixes taint's divergent join (fact_flow_join_* cases); ownership's fork join calls the same rule and stays a prover (c6, D-FACT-OWN1); effects keep no per-binding flow facts, so they get no plane. c3b makes the planes on Flow.jet share one store keyed by binding and plane, with a guard against new private per-binding maps."
-        },
-        {
-          "at": "2026-11-23",
-          "by": "Orchestrator",
-          "text": "Landed 299a1d731c: Examples/Metaprogramming/Reflection/FactQuery golden (jet inspect facts and compiler.query give equal marker rows on O0/O1/O2; missing store MetadataError stderr). PASS. c1 not met yet: FactSource has Schema/Program/Run, no plugin store, and no proof that no second registry reader remains."
-        }
-      ],
-      "criteria": [
-        {
-          "n": 1,
-          "text": "`core.compiler` has one public typed query, `compiler.query(store, kind: FactKind) -> [FactRow] MetadataError!`, over the schema, package and plugin fact stores (D-META-REG2=A); `jet inspect facts --store=… --kind=… [--json]` renders the same call with the same rows, identities and errors, and no second registry reader remains; a golden counts marker rows both ways and gets equal counts on O0, O1 and O2, and a missing store reports its MetadataError with a UI snapshot.",
-          "status": "met",
-          "metBy": "Orchestrator",
-          "verifiedBy": null,
-          "evidence": "golden Metaprogramming/Reflection/FactQuery: PASS on the batch 12 compiler (landed on dev, 40 commits ending 00815005b8; dev 4529a137b8).",
-          "at": "2026-11-24T00:21:05.589Z",
-          "proof": {
-            "profile": "golden",
-            "filter": "Metaprogramming/Reflection/FactQuery"
-          }
-        },
-        {
-          "n": 2,
-          "text": "Marker rules, knowledge planes, rights and build facts register in one registry substrate, told apart by attachment (D-META-REG1=A); no second registration table remains in Compiler/.",
-          "status": "met",
-          "metBy": "Orchestrator",
-          "verifiedBy": null,
-          "evidence": "jet test Compiler --profile cases --filter fact_registry_one_table: PASS on the batch 12 compiler (landed on dev, 40 commits ending 00815005b8; dev 4529a137b8) (6848-c2, c2b).",
-          "at": "2026-11-24T00:21:06.588Z",
-          "proof": {
-            "profile": "cases",
-            "filter": "fact_registry_one_table"
-          }
-        },
-        {
-          "n": 3,
-          "text": "One flow-fact store on the checker holds every per-binding fact; each plane supplies only its join rule, and the walker applies joins the same way at every if, loop and arm table for ownership, effects, state and taint (D-FACT-FLOW1=A).",
-          "status": "met",
-          "metBy": "Orchestrator",
-          "verifiedBy": null,
-          "evidence": "jet test Compiler --profile cases --filter fact_flow_join_: 3 PASS on the batch 12 compiler (landed on dev, 40 commits ending 00815005b8; dev 4529a137b8) (state_break_exit, taint_break_exit, taint_return_path; one flow store in 6848-c3a/c3b).",
-          "at": "2026-11-24T00:21:07.634Z",
-          "proof": {
-            "profile": "cases",
-            "filter": "fact_flow_join_"
-          }
-        },
-        {
-          "n": 4,
-          "text": "Every gate lands in one ledger: unsafe regions, impure marks, grants, trust and .Force, taint scrubs, duty drops and precision demotions; `jet inspect gates` prints counts per kind with security kinds first and a filter selects one kind (D-FACT-GATE1=A).",
-          "status": "met",
-          "metBy": "Orchestrator",
-          "verifiedBy": null,
-          "evidence": "jet test Compiler --profile cases --filter inspect_gates: PASS on the batch 12 compiler (landed on dev, 40 commits ending 00815005b8; dev 4529a137b8) (inspect_gates_counts_each_kind_security_first).",
-          "at": "2026-11-24T00:21:08.684Z",
-          "proof": {
-            "profile": "cases",
-            "filter": "inspect_gates"
-          }
-        },
-        {
-          "n": 5,
-          "text": "Facts with user-visible meaning are typed registry rows readable through the fact query: send-safety, failure attribution, #Track, view and unit-scale provenance, and maturity; prover internals such as uninitialized tracking and exhaustiveness stay inside the engine (D-FACT-HOME1=A).",
-          "status": "met",
-          "metBy": "Orchestrator",
-          "verifiedBy": null,
-          "evidence": "jet test Compiler --profile cases --filter fact_registry_user_rows: PASS on the batch 12 compiler (landed on dev, 40 commits ending 00815005b8; dev 4529a137b8).",
-          "at": "2026-11-24T00:21:09.843Z",
-          "proof": {
-            "profile": "cases",
-            "filter": "fact_registry_user_rows"
-          }
-        },
-        {
-          "n": 6,
-          "text": "The borrow checker stays a prover, never a fact plane: the registry has no ownership plane row, and the ownership sigil surface stays as ratified (D-FACT-OWN1=A).",
-          "status": "met",
-          "metBy": "Orchestrator",
-          "verifiedBy": null,
-          "evidence": "jet test Compiler --profile cases --filter fact_registry_no_ownership_plane: PASS on the batch 12 compiler (landed on dev, 40 commits ending 00815005b8; dev 4529a137b8).",
-          "at": "2026-11-24T00:21:11.460Z",
-          "proof": {
-            "profile": "cases",
-            "filter": "fact_registry_no_ownership_plane"
-          }
-        },
-        {
-          "n": 7,
-          "text": "One current version and fact-shape reference links its history, and `compiler-proof checking` reads the version from emitted output, not from a hard-coded number. Proof: `jet test Tests/Guards --filter fact_shape_version_from_output`. (was #3186 c11)",
-          "status": "met",
-          "metBy": "Orchestrator",
-          "verifiedBy": null,
-          "evidence": "dev 4529a137b8: jet test Tests/Guards on the batch 12 compiler, fact_shape_version_from_output PASS (fact_registry_one_table and fact_flow_one_store also PASS).",
-          "at": "2026-11-24T00:28:28.958Z"
-        },
-        {
-          "n": 8,
-          "text": "One interned, checked derivation relation records how each fact was produced across facts, execution and optimization; producers are authoritative, persistence is lossless, and the CLI and LSP read it. Proof: `jet test Compiler --profile cases --filter Explain/derivation_relation_`. (was #3186 c15)",
-          "status": "met",
-          "metBy": "Orchestrator",
-          "verifiedBy": null,
-          "evidence": "jet test Compiler --profile cases --filter Explain/derivation_relation_ (7 pass) on the batch compiler built from dev 568729492f (tip18-chain s1, 1c961ed64b39e1f9): PASS",
-          "at": "2026-11-24T06:34:20.831Z"
-        },
-        {
-          "n": 9,
-          "text": "The 4 known-failing rows this card owns (rehomed by #6843 c7) pass and leave Tests/known-failing.tsv: FactReads/nominal_layout_intrinsic_in_comptime_helper_agrees_on_tiers, CoreLib/tracked_origin_is_a_folded_optional_fact, FactReads/typed_fact_fixture_matches_aot_default_and_o0, GateLedger/source_gate_kinds_keep_their_written_reasons. Proof: each named test passes in its suite on a batch compiler, and no row of Tests/known-failing.tsv names this card for them.",
-          "status": "met",
-          "metBy": "Orchestrator",
-          "verifiedBy": null,
-          "evidence": "On a compiler built from landed dev 6ab0b5a5c8 (tip20), run in an export of that commit: cases, each of the 4 rows one at a time; PASS 4/4; no row in known-failing.tsv",
-          "at": "2026-11-24T08:32:56.521Z"
-        }
-      ],
-      "refs": [],
-      "tags": [
-        "meta",
-        "facts",
-        "metaprogramming"
-      ],
-      "parentId": null,
-      "needsAcceptance": false,
-      "created": "2026-11-15T02:10:43.897Z",
-      "updated": "2026-11-24T11:48:34.213Z",
-      "updatedBy": "Orchestrator",
-      "criteriaLastN": 9,
-      "completedAt": "2026-11-24T11:48:34.213Z"
-    },
-    {
       "id": "c0gokkbf",
       "num": 6850,
       "title": "jet fmt --simplify: guard clauses, single-use temporaries and one corpus migration",
@@ -41457,11 +41297,11 @@
         {
           "n": 4,
           "text": "The Services.jet checkers in Sema/Calls move to Core declarations and the file is deleted, its typed-dispatch parts riding c30 and D-RULE-TYPEARGS1. TaskGroups.jet checks the language's own task-group syntax (`task`, group/all/race/any/timeout, captures and borrows: E1101-E1112), which sema owns (I3): it moves to Sema/Ownership, and every task form is classified through one language-owned TaskForm enum in JetFoundation's AST (task_form_of), so sema_taskgroup_core_key, the byte-built keys and the internal_*_method functions are deleted and no Core name keys task semantics. Every code keeps its UI snapshot. Proof: `git ls-files Compiler/JetSema/Source/Sema/Calls/Services.jet Compiler/JetSema/Source/Sema/Calls/TaskGroups.jet` prints nothing, `git grep -n -e sema_taskgroup_core_key -e sema_taskgroup_internal_ -- Compiler` prints nothing, and `jet test Tests/Guards --filter diagnostics_coverage` passes.",
-          "status": "open",
-          "metBy": null,
+          "status": "met",
+          "metBy": "Orchestrator",
           "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-11-24T07:54:49.658Z"
+          "evidence": "dev a39ef67534d, batch89-s3 (dev a39ef67534d, S2==S3 sha256 0c4316f0): git ls-files Compiler/JetSema/Source/Sema/Calls/{Services,TaskGroups}.jet prints nothing; git grep -n -e sema_taskgroup_core_key -e sema_taskgroup_internal_ -- Compiler prints 0 hits; jet test Tests/Guards/diagnostics_coverage.jet -> 8/8 PASS.",
+          "at": "2026-11-27T11:52:34.310Z"
         },
         {
           "n": 5,
@@ -41872,7 +41712,7 @@
       "parentId": null,
       "needsAcceptance": false,
       "created": "2026-11-15T02:25:07.534Z",
-      "updated": "2026-11-27T11:37:42.483Z",
+      "updated": "2026-11-27T11:52:34.310Z",
       "updatedBy": "Orchestrator",
       "criteriaLastN": 43
     },
@@ -47581,159 +47421,6 @@
       "updated": "2026-11-22T02:10:23.723Z",
       "updatedBy": "owner",
       "criteriaLastN": 5
-    },
-    {
-      "id": "c0jt78qz",
-      "num": 6895,
-      "title": "Likely bugs are tidy errors: dead constant ranges, unconditional recursion, discarded pure results, N+1 queries and misleading loop and type shapes",
-      "body": "Destination: each likely-bug pattern below is a registered tidy error (D-NO-WARNINGS1=A, #6858): `jet check` and `jet build` list it with what/why/fix text and exit non-zero; `jet run` and `jet dev` never stop on it or print it. Each has a UI snapshot for the firing program and for the accepted fix.\n\nWhy it matters: these shapes compile today and do the wrong thing quietly.\n\nDecisions: D-NO-WARNINGS1=A, D-RANGE-BACKWARD1=A, D-DISCARD1=A, D-TUPLE-ORDER1=A, D-SQL-CLASS1=A (Query class). The two-binding pairs loop is on Main's ballot list (2026-11-15).\n\nSource: Map card #6006 (Lints), batch D05 of the 2026-10-28 consolidation.",
-      "kind": "feature",
-      "track": "epoch",
-      "epoch": "G2",
-      "milestoneId": null,
-      "phase": "done",
-      "priority": "P1",
-      "plan": null,
-      "checkSteps": null,
-      "probe": null,
-      "visualMedia": [],
-      "blockedBy": [],
-      "assignee": null,
-      "log": [
-        {
-          "at": "2026-11-24",
-          "by": "Orchestrator",
-          "text": "All criteria met with recorded batch-compiler evidence; closed in the near-done sweep. Batch 23's full suite rechecks every named row."
-        },
-        {
-          "at": "2026-11-15",
-          "by": "TowerKeeper-2",
-          "text": "Owner-wait sweep 2026-11-15 (TowerKeeper-2, for Main): c7, body reworded; the owner-only choices are on Main's ballot list (2026-11-15) ($JET_SCRATCH_ROOT/lanes/TowerKeeper-2/ballots-needed.tsv); no question for the owner stays on this card."
-        }
-      ],
-      "criteria": [
-        {
-          "n": 1,
-          "text": "A loop over a constant range that can never run (`10..1`, or a step pointing away from the end) is check error E0170 RangeDirectionMismatch offering the minus step, as D-RANGE-BACKWARD1=A states; a computed backward range (`0..n - 1`) stays empty and raises nothing; the stride rule is in the spec.",
-          "status": "met",
-          "metBy": "Orchestrator",
-          "verifiedBy": null,
-          "evidence": "Sweep of open criteria against the full suite of the batch-7 -O1 compiler (dev 3019343199 + landed stack): jet test Compiler --profile ui --filter range_backward_constant -> 5/5 PASS (range_backward_constant.jet, range_backward_constant.jet@o0, range_backward_constant.jet@o1, range_backward_constant.jet@o2, range_backward_constant_quiet.jet). Stride rule in Docs/Spec/spec.md lines 588-592 (E0170).",
-          "at": "2026-11-23T20:53:39.237Z",
-          "proof": {
-            "profile": "ui",
-            "filter": "range_backward_constant"
-          }
-        },
-        {
-          "n": 2,
-          "text": "A function whose every path calls itself again with no exit is a tidy error at the call, found over call-graph cycles.",
-          "status": "met",
-          "metBy": "Orchestrator",
-          "verifiedBy": null,
-          "evidence": "Sweep of open criteria against the full suite of the batch-7 -O1 compiler (dev 3019343199 + landed stack): jet test Compiler --profile ui --filter unconditional_recursion -> 2/2 PASS (unconditional_recursion.jet, unconditional_recursion_quiet.jet).",
-          "at": "2026-11-23T20:53:40.153Z",
-          "proof": {
-            "profile": "ui",
-            "filter": "unconditional_recursion"
-          }
-        },
-        {
-          "n": 3,
-          "text": "A Float binding seeded with infinity but only ever assigned Int values is a tidy error naming the Int form.",
-          "status": "met",
-          "metBy": "Orchestrator",
-          "verifiedBy": null,
-          "evidence": "Sweep of open criteria against the full suite of the batch-7 -O1 compiler (dev 3019343199 + landed stack): jet test Compiler --profile ui --filter float_infinity_seed_int_only -> 2/2 PASS (float_infinity_seed_int_only.jet, float_infinity_seed_int_only_quiet.jet).",
-          "at": "2026-11-23T20:53:41.083Z",
-          "proof": {
-            "profile": "ui",
-            "filter": "float_infinity_seed_int_only"
-          }
-        },
-        {
-          "n": 4,
-          "text": "A field-less struct holding only static functions is a tidy error whose fix makes it a module, and a constructor that does not return its owner type is an error. Proof: `jet test Compiler --profile ui --filter static_only_struct` and `jet test Compiler --profile ui --filter constructor_wrong_owner`.",
-          "status": "met",
-          "metBy": "Orchestrator",
-          "verifiedBy": null,
-          "evidence": "On the batch 16 compiler (tree a2a8d238fb; landed on dev ce3b8e7f59): jet test Compiler --profile ui --filter static_only_struct -> 2/2 PASS (static_only_struct.jet, static_only_struct_quiet.jet); --filter constructor_wrong_owner -> 2/2 PASS (constructor_wrong_owner.jet, constructor_wrong_owner_quiet.jet). Landed as ebe277bc92.",
-          "at": "2026-11-24T04:18:06.588Z"
-        },
-        {
-          "n": 5,
-          "text": "Records compare and sort by written member order (D-RECORD-ORDER1=A): S73 in Docs/Spec/syntax-decisions.md says so, the List.sort and sort_desc docs say so, and an example shows written order and the sort_by spelling. Proof: `jet test Compiler --profile golden --filter Collections/NamedTupleOrder` on O0, O1 and O2.",
-          "status": "met",
-          "metBy": "Main",
-          "verifiedBy": null,
-          "evidence": "p325 batch compiler (dev e6ddae4d43): golden Examples/Collections/NamedTupleOrder.jet PASS on O0, O1 and O2. The example sorts {key, index} pairs in written order and shows the sort_by spelling that puts index first. S73 (D-RECORD-ORDER1) is in Docs/Spec/syntax-decisions.md (the comparison list at line 1620 names sort and sort_desc). The List.sort/sort_desc docs are Docs/Spec/Reference/core-library.md lines 868-871: sort, sort_desc, min and max on named tuples compare members in written order, use sort_by to put another member first, and the example is named. The JetFoundation Collections.jet method rows carry no doc text, so that reference is the sort documentation.",
-          "at": "2026-11-19T16:10:58.510Z"
-        },
-        {
-          "n": 6,
-          "text": "A Query-class SQL statement run inside a loop over rows is one tidy error at the query line naming the batched form (an IN list or a join); a query outside any loop reports nothing. Proof: `jet test Compiler --profile ui --filter sql_query_in_row_loop` with its negative fixture.",
-          "status": "met",
-          "metBy": "Main",
-          "verifiedBy": null,
-          "evidence": "p325 batch compiler (dev e6ddae4d43) ui profile: sql_query_in_row_loop PASS and sql_query_in_row_loop_quiet PASS (no errors). The snapshot is one jet.SqlQueryInRowLoop (L0308) error at the query line (scoped.query at 18:23) whose fix names the batched forms: WHERE key IN (...) or a JOIN. The quiet fixture, with the query outside any loop, reports nothing.",
-          "at": "2026-11-19T16:09:53.245Z"
-        },
-        {
-          "n": 7,
-          "text": "A two-binding loop over a list of 2-tuples (`loop (a, b) in pairs`, which binds index and tuple, not the pair) gets the treatment its ballot chooses (on Main's ballot list (2026-11-15)).",
-          "status": "met",
-          "metBy": "Orchestrator",
-          "verifiedBy": null,
-          "evidence": "jet test Compiler --profile ui --filter loop_two_bindings_over_pairs on the batch compiler built from dev 568729492f (tip18-chain s1, 1c961ed64b39e1f9): PASS",
-          "at": "2026-11-24T06:34:22.574Z",
-          "proof": {
-            "profile": "ui",
-            "filter": "loop_two_bindings_over_pairs"
-          }
-        },
-        {
-          "n": 8,
-          "text": "Under D-DISCARD1=A, a non-unit last line in a function with no written return type and an ignored non-unit result of a pure call are errors (L0508 re-registered as a tidy error), while unit-returning arrow-loop bodies report nothing. Proof: `jet test Compiler --profile ui --filter discarded_pure_result` and its no-fire pair.",
-          "status": "met",
-          "metBy": "Main",
-          "verifiedBy": null,
-          "evidence": "p325 batch compiler (dev e6ddae4d43) ui profile: discarded_pure_result PASS and discarded_pure_result_quiet PASS (no errors). The quiet fixture holds a Unit arrow-loop body (loop n in [...] -> sum += double(n)), a used result, a written return type, an impure call and an explicit .drop, and none reports L0508.",
-          "at": "2026-11-19T16:09:54.109Z"
-        },
-        {
-          "n": 9,
-          "text": "A compiler-discovered `build` function is a liveness root, so it and BuildError are never reported unused, and BuildError is excluded from the Display migration error.",
-          "status": "met",
-          "metBy": "Main",
-          "verifiedBy": null,
-          "evidence": "p352 batch compiler (dev f795cbd503): jet test Compiler --profile ui --filter build_fn_liveness_root PASS (Tests/UILint/build_fn_liveness_root.jet).",
-          "at": "2026-11-20T11:50:41.165Z",
-          "proof": {
-            "profile": "ui",
-            "filter": "build_fn_liveness_root"
-          }
-        },
-        {
-          "n": 10,
-          "text": "The structural printing example (`{g:Debug}` on a struct with no hand-written display) prints the same on O0, O1 and O2 with no report, and Display interpolation, explicit Debug, manual overrides, negative derive controls and redaction keep their distinct contracts. Proof: `jet test Compiler --profile golden --filter Text/StructuralPrinting` and `jet test Compiler --profile cases --filter PrintBranchTiers/`.",
-          "status": "met",
-          "metBy": "Main",
-          "verifiedBy": null,
-          "evidence": "p295 batch compiler (census build of dev 3f4dd54f21), landed IfHole-6-1-6895-c10-structural-printing: golden Text/StructuralPrinting PASS on o0/o1/o2; cases PrintBranchTiers/ PASS",
-          "at": "2026-11-18T14:47:34.173Z"
-        }
-      ],
-      "refs": [],
-      "tags": [
-        "diagnostics",
-        "lints"
-      ],
-      "parentId": null,
-      "needsAcceptance": false,
-      "created": "2026-11-15T03:50:53.787Z",
-      "updated": "2026-11-24T11:48:36.463Z",
-      "updatedBy": "Orchestrator",
-      "completedAt": "2026-11-24T11:48:36.463Z"
     },
     {
       "id": "c00gioxt",
@@ -62764,11 +62451,11 @@
         {
           "n": 2,
           "text": "`jet inspect footprint FILE:LINE[-LINE]` prints the names and fields a block or line range reads, writes and takes, with their kinds, from checked facts.",
-          "status": "open",
-          "metBy": null,
+          "status": "met",
+          "metBy": "Orchestrator",
           "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-11-26T16:15:59.135Z"
+          "evidence": "dev a39ef67534d, batch89-s3 (dev a39ef67534d, S2==S3 sha256 0c4316f0): jet test Compiler --profile cases --filter inspect_footprint -> 2/2 PASS (inspect_footprint.case 4/4 unit tests + CLI human/json/error checks, and inspect_footprint_matches_example_golden.case).",
+          "at": "2026-11-27T11:52:35.283Z"
         },
         {
           "n": 3,
@@ -62782,11 +62469,11 @@
         {
           "n": 4,
           "text": "An executable example with golden output proves the ratified design on every applicable tier, and the spec, reference pages and editor grammars describe it.",
-          "status": "open",
-          "metBy": null,
+          "status": "met",
+          "metBy": "Orchestrator",
           "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-11-26T16:16:01.156Z"
+          "evidence": "dev a39ef67534d, batch89-s3 (dev a39ef67534d, S2==S3 sha256 0c4316f0): jet test Compiler --profile golden --filter BlockFootprint -> 3/3 PASS (o0, o1, o2); inspect_footprint_matches_example_golden PASS.",
+          "at": "2026-11-27T11:52:36.145Z"
         }
       ],
       "refs": [],
@@ -62794,7 +62481,7 @@
       "parentId": null,
       "needsAcceptance": false,
       "created": "2026-11-25T17:59:02.257Z",
-      "updated": "2026-11-27T11:08:24.259Z",
+      "updated": "2026-11-27T11:52:36.145Z",
       "updatedBy": "Orchestrator"
     },
     {
@@ -106529,229 +106216,6 @@
       "ratifiedAt": "2026-11-18"
     },
     {
-      "id": "D-LOOP-PAIRS1",
-      "cardId": "c0jt78qz",
-      "group": "language",
-      "title": "What a two-name loop over a list of records binds",
-      "situation": "A loop with two names, `loop (a, b) in xs`, binds the index and the item. A record here is a value written in braces with named members, such as `{package: \"a\", name: \"b\"}`. Over a list of records with members called a and b, a reader may expect each name to get its member. Since 2026-11-11 the compiler does that whenever either name is a member, although the ratified rule said two-name loops stay index and item. You decide the rule. We recommend writing the destructure in braces, as every other record destructure is written.",
-      "gist": "Should `loop {a, b} in pairs` destructure each record, with `loop (a, b)` always meaning index and item?",
-      "lesson": "Destructuring takes a record apart into named bindings. In Jet a record is written in braces, and a binding destructures it with braces too: `{x, y}: pair`. A loop with two names in parentheses binds the index and the item.",
-      "explainer": "Beginner path: `loop (i, row) in rows` gives the index and the row, as today. To take each record apart, write `loop {name, price} in items`, the same braces a binding uses. A paren loop whose first name is a member of the record is an error that shows the brace spelling, because that name would only ever hold the index.\n\nExpert path: renames work as in a binding, `loop {name: n, price: p} in items`. Struct items use the struct pattern a binding writes, `loop Item{name, price} in items`. Maps keep `loop (key, value) in map`. The brace head lowers to an ordinary loop plus a destructure binding, so every tier runs the same code.",
-      "story": "Ana loops `loop (package, name) in deps` over records with package and name members. Under the ratified rule `package` silently held the index, and her printed list showed numbers. Under the recommendation she gets an error at `(package, name)` that shows `loop {package, name} in deps`, and her program is right on the first run.",
-      "inWild": "// JavaScript: braces destructure an object in a loop head\nfor (const {pkg, name} of deps) { console.log(pkg, name) }\n\n// Rust: parens destructure a tuple; the index needs enumerate()\nfor (i, (pkg, name)) in deps.iter().enumerate() {}",
-      "detail": "Today: sema destructures when either name is a member of the item's named-tuple type. The code is at Compiler/JetSema/Source/Sema/Statements.jet:3458-3488 and 10257-10265. It came in commit d3c7589954, for #6281 c185.\n\nStruct items never destructure: the trigger reads only `Type.Tuple` items (Statements.jet:3463). Names that name no member keep the index and item. A wrong member name is E0313, so `loop (i, name)` over records with a `name` member is an error today. A wrong count is E0315. The spec states the current rule (Docs/Spec/spec.md:708-714).\n\nRatified around it: S73 named records only, and D-RECORD-BRACE1=A writes records in braces. S74 destructuring reuses bracket conventions. It says two-binding loops such as `loop (i, item) in xs` are unchanged (Docs/Spec/syntax-decisions.md:1384-1387). D-RANGE-EXCL1=C makes `loop (i, item) in xs` yield index then item (syntax-decisions.md:2150-2151). The shipped rule overrode those two lines without a ballot.\n\nParser: `loop {` opens the infinite loop (Compiler/JetParser/Source/Parser/Statements.jet:1285), and the brace binding patterns live at Statements.jet:1581-1615.\n\nRow: #6895 c7 (TowerKeeper ballot list, 2026-11-15).",
-      "options": [
-        {
-          "key": "A",
-          "name": "Braces destructure, parens bind index and item",
-          "detail": "`loop {a, b} in xs` destructures each record by member name, with renames as in a binding; struct items take the struct pattern, `loop Dep{a, b} in xs`. `loop (a, b) in xs` always binds index and item. A paren head whose first name is a member of the item record is an error that offers the brace spelling. `loop (i, name) in deps` stays index and item, with no error.",
-          "technical": "The parser accepts a binding's brace or struct pattern in a loop head. `loop {` opens an infinite loop today. The parser tells the two apart by an `in` after the matching `}`. A loop body is never followed by `in`, because `in` cannot start a statement. Sema lowers the head to the hidden-row loop plus the existing destructure binding. The name-trigger in Statements.jet becomes the first-name error check.",
-          "code": "loop {package, name} in deps {\n    print(\"{package}/{name}\")\n}\nloop (i, dep) in deps {\n    print(\"{i}: {dep.name}\")\n}"
-        },
-        {
-          "key": "B",
-          "name": "Names decide (the current behavior)",
-          "detail": "`loop (a, b) in xs` destructures named-tuple items when either name is a member; otherwise it binds index and item. Struct items always bind index and item.",
-          "technical": "Shipped in d3c7589954, against the S74 line that keeps two-binding loops unchanged. One spelling, whose meaning depends on the record's member names.",
-          "code": "loop (package, name) in deps {\n    print(\"{package}/{name}\")\n}"
-        },
-        {
-          "key": "C",
-          "name": "Refuse the ambiguous loop",
-          "detail": "A paren loop whose first name is a member of the record is an error. Destructuring takes two lines: `loop dep in deps` then `{package, name}: dep`.",
-          "technical": "No new loop form. The name-trigger becomes an error.",
-          "code": "loop dep in deps {\n    {package, name}: dep\n    print(\"{package}/{name}\")\n}"
-        },
-        {
-          "key": "D",
-          "name": "Always index and item",
-          "detail": "Return to the ratified rule: two names in parentheses always bind index and item, with no diagnostic.",
-          "technical": "Remove the destructure path from Statements.jet. This is the S74 and D-RANGE-EXCL1=C rule as written before d3c7589954.",
-          "code": "loop (package, name) in deps {\n    // package is the index, name is the whole record\n}"
-        }
-      ],
-      "comparisons": [
-        {
-          "lang": "JavaScript",
-          "note": "Braces in the loop head destructure an object by property name, which is A's spelling.",
-          "code": "for (const {pkg, name} of deps) {}"
-        },
-        {
-          "lang": "Python",
-          "note": "Parens destructure a tuple by position; the index needs enumerate(). Records by name need attribute access.",
-          "code": "for i, (pkg, name) in enumerate(deps): ..."
-        },
-        {
-          "lang": "Swift",
-          "note": "Parens destructure a tuple; the index needs enumerated().",
-          "code": "for (i, dep) in deps.enumerated() {}"
-        }
-      ],
-      "rec": "A",
-      "recommendation": {
-        "why": "One mark should mean one thing. Braces already mean a record in Jet, so braces in a loop head destructure one, and parens keep their single meaning, index and item, whatever the member names are.",
-        "gains": [
-          "A loop's meaning never depends on the record's member names.",
-          "Destructuring is spelled the same in a loop and in a binding.",
-          "The old trap becomes an error with the fix in it."
-        ],
-        "losses": [
-          {
-            "loss": "A loop head gains a second pattern, the brace form.",
-            "mitigation": "It is the same brace pattern a binding already writes, so there is nothing new to learn."
-          },
-          {
-            "loss": "`loop {` no longer always opens an infinite loop; the parser and editor grammars must look past the closing brace for `in`.",
-            "mitigation": "A loop body is never followed by `in`, so one lookahead decides it, and the infinite loop keeps its spelling."
-          },
-          {
-            "loss": "The index and a destructure together still take two lines.",
-            "mitigation": "Write `loop (i, row) in rows` and then `{a, b}: row`, the same binding the loop uses."
-          }
-        ],
-        "whyNot": [
-          {
-            "key": "B",
-            "reason": "Renaming a member can silently change what the loop binds, and it overrides the ratified index-and-item rule."
-          },
-          {
-            "key": "C",
-            "reason": "Every destructuring loop needs an extra line and an extra name."
-          },
-          {
-            "key": "D",
-            "reason": "It brings back the trap #6281 found, which stays silent whenever both names still type-check, as in string interpolation."
-          }
-        ],
-        "tradeoff": "A brace loop head, and one parser lookahead after `loop {`, for loops whose meaning is visible in the source."
-      },
-      "hybrid": null,
-      "ballotMode": "full",
-      "shortAuthorizedBy": null,
-      "ballotProcessVersion": 5,
-      "reviewPasses": {
-        "adversarial": "Author model family: Claude Opus. Adversarial model family: Claude Opus. Fresh agent: Speed-3-3-2. The recommendation holds after repair: the ballot now says the shipped rule overrode the ratified index-and-item line, and names the `loop {` parse clash and its lookahead. A's error now fires on the first name only, so `loop (i, name)` stays legal."
-      },
-      "checkInstructions": "Under A, four checks pass at O0, O1 and O2. `jet test Compiler --profile ui --filter loop_two_bindings_over_pairs` shows the first-name error with the brace fix. `--profile cases --filter Loops/brace_destructure_head` runs a brace loop with and without renames, and a struct-pattern loop. An infinite `loop {` and an index loop `loop (i, name)` over records stay quiet. Under B, the shipped destructure gains a fixture. Under C, only the error fixture. Under D, an index-and-item fixture over records.\n\nEvidence labels: B is shipped; A, C and D are not built.",
-      "surface": {
-        "gist": "Should braces destructure records in a loop head, with parens always meaning index and item?",
-        "lesson": "Destructuring takes a record apart into named bindings. Jet writes records and their destructures in braces. Two names in parentheses in a loop are the index and the item.",
-        "options": [
-          {
-            "key": "A",
-            "name": "Braces destructure",
-            "gist": "`loop {a, b} in xs` destructures; `(a, b)` is always index and item.",
-            "gains": [
-              "Meaning never depends on member names.",
-              "Same spelling as a binding."
-            ],
-            "losses": [
-              "A second loop-head pattern.",
-              "The parser looks past `}` for `in`."
-            ],
-            "proposed": {
-              "code": "loop {package, name} in deps {}"
-            }
-          },
-          {
-            "key": "B",
-            "name": "Names decide",
-            "gist": "Parens destructure when a name is a member (today).",
-            "gains": [
-              "No new spelling."
-            ],
-            "losses": [
-              "A rename can change the loop silently.",
-              "Overrides the ratified index-and-item rule."
-            ],
-            "proposed": {
-              "code": "loop (package, name) in deps {}"
-            }
-          },
-          {
-            "key": "C",
-            "name": "Refuse it",
-            "gist": "Error; destructure on its own line.",
-            "gains": [
-              "No new spelling."
-            ],
-            "losses": [
-              "An extra line in every such loop."
-            ],
-            "proposed": {
-              "code": "loop dep in deps {\n    {package, name}: dep\n}"
-            }
-          },
-          {
-            "key": "D",
-            "name": "Index and item",
-            "gist": "Parens always bind index and item, silently, as first ratified.",
-            "gains": [
-              "Simplest rule."
-            ],
-            "losses": [
-              "The silent trap returns."
-            ],
-            "proposed": {
-              "code": "loop (i, dep) in deps {}"
-            }
-          }
-        ],
-        "recommendation": {
-          "rec": "A",
-          "why": "Braces already mean a record in Jet, so the loop head uses them too.",
-          "gains": [
-            "One meaning per mark.",
-            "The trap becomes a fixable error."
-          ],
-          "losses": [
-            {
-              "loss": "A second loop-head pattern.",
-              "mitigation": "The same braces a binding writes."
-            },
-            {
-              "loss": "A lookahead after `loop {`.",
-              "mitigation": "A body is never followed by `in`, so one look decides."
-            }
-          ],
-          "whyNot": [
-            {
-              "key": "B",
-              "reason": "Meaning depends on member names."
-            },
-            {
-              "key": "C",
-              "reason": "Extra line per loop."
-            },
-            {
-              "key": "D",
-              "reason": "Silent trap."
-            }
-          ],
-          "tradeoff": "A brace head, for a loop meaning you can see."
-        },
-        "trio": {
-          "current": {
-            "note": "Today the member names decide whether the loop destructures.",
-            "code": "loop (package, name) in deps {}  // destructures\nloop (i, dep) in deps {}         // index and item"
-          },
-          "wild": {
-            "lang": "JavaScript",
-            "note": "Braces destructure an object in a for-of head.",
-            "code": "for (const {pkg, name} of deps) {}"
-          }
-        }
-      },
-      "designAway": [],
-      "draftedBy": "Main",
-      "reviewedBy": "Speed-3-3-2",
-      "draft": false,
-      "status": "ratified",
-      "created": "2026-11-18T13:48:33.042Z",
-      "outcome": "A",
-      "ratifiedAt": "2026-11-18"
-    },
-    {
       "id": "D-DBG-DEADLOCK1",
       "cardId": "c0nwrfck",
       "group": "tooling",
@@ -113980,257 +113444,6 @@
       "created": "2026-11-23T20:48:12.722Z",
       "outcome": "A",
       "ratifiedAt": "2026-11-23"
-    },
-    {
-      "id": "D-DERIV-READ1",
-      "cardId": "c0n7zpy3",
-      "group": "developer-experience",
-      "title": "How a developer asks how the compiler knows a fact: one explain reader over the derivation records",
-      "situation": "The compiler keeps a derivation record for many facts it concludes. A record names the fact, who produced it, how, by which rule and from which premises. Checked definitions, frame schedules, proof rows, test outcomes and source imports make records today. The semantic index keeps the definition records, and evidence reports keep the rest. The frame schedule record is made and then dropped.\n\n`jet inspect compiler check` prints the index records inside one large document. `jet explain \"#build.settings.loud\"` prints a build fact's writer chain, but that chain is not a record. No command answers 'how is this known?' for any other subject, and the editor never shows a record.\n\nCard #6848 c8 joins all records into one checked relation that the CLI and the LSP read. This ballot decides only how a developer reads it.",
-      "gist": "Which command and which editor view answer 'how does the compiler know this?' from the one derivation relation?",
-      "lesson": "A derivation record is the compiler's receipt for a fact. It says what was concluded, by whom, by which rule, and from which other facts. Following the premises backwards gives the chain that led to the fact. Today most premises are hashes, so that chain stops after one step.",
-      "explainer": "Think of a lab notebook. Each result sits next to the method that produced it and the earlier results it used. Today the pages sit in two binders, and one kind of page is thrown away after it is written. Build settings keep a separate logbook with its own front desk. The question is whether every page, and that logbook, gets one front desk.",
-      "story": "Ana sees a frame schedule that puts two writes in order and wonders why. The compiler made a record of that schedule and then dropped it, so no command shows it. Asking `jet explain main.on_frame@412` today reaches the package explainer, which finds no package by that name. For `#build.settings.loud`, by contrast, `jet explain` already shows the writer chain. Her editor shows the type of a declaration, never how the compiler knows it.",
-      "inWild": "// Lean: `#print axioms thm` lists the axioms a theorem rests on.\n// Coq: `Print Assumptions thm` lists what a term depends on.\n// Soufflé (Datalog): `-t explain` prints the proof tree of one derived tuple.\n// Bazel: `bazel aquery` prints the action, inputs and mnemonic that made one output.",
-      "detail": "Producers today: SemanticIndex.jet and SemIndex Build.jet (checked-definition), Frames.jet (checked-frame-accesses), ProveReport.jet (checked-proof-row) and ImportPlan.jet (foreign-source-import). EvidenceReport.jet's evidence-record rule covers test outcomes and comparison history. Records are defined in Compiler/JetFoundation/Source/Derivations.jet. Readers today: SemIndexJSON, EvidenceJSON, Review.jet and the Canvas reasoning view. The LSP's check already builds the index records, but no hover shows one.\n\nBuildFactExplain.jet folds the writer chain while loading and prints it as an explanation, not as a record. A definition record's subject is a hash such as `def:…`. Its claim is a path such as `method:app.Point.area`. Premises today are hashes, operation names or evidence ids, never another record's subject.\n\n`jet debug` answers a different question. Its `why <place>` command, run in a replay, finds the write that gave one runtime value its contents. A derivation record says why the compiler, or a recorded run, holds a claim. A reader uses `jet debug` for 'why does this variable hold 7' and explain for 'why does Jet believe this'.",
-      "options": [
-        {
-          "key": "A",
-          "name": "One reader: `jet explain <subject> [file]` for record subjects, the build-fact chain included",
-          "detail": "`jet explain` keeps every subject it answers today and gains record subjects. A record subject is a declaration path such as `main.Shape.area`, a frame callback such as `main.on_frame@412`, or a build fact. It prints the record and its premises, and nests a premise that names another record.\n\nBuild-fact writer chains become records of a build-fact producer. The record keeps the ordered chain as its payload, so `jet explain \"#build.settings.loud\"` prints exactly today's text. `--json` keeps today's fields and adds one `derivation` field.\n\nIn the editor, hover adds a 'Known by' line only when a record says more than 'checked definition'. That means a frame schedule, a proof, test evidence, or a record that is no longer current.",
-          "technical": "Today's order stays and runs first (Front.jet `jet_cli_explain`). It covers flags such as `--cost`, codes and `Jet.` names, and the words `log`, `effects`, `strictness` and `marker`. Then come build facts, module values, policy keys, syntax words, registered facts, and `module.UpperCamel` Diagnostic types.\n\nOne new step comes before the package fallback. A dotted or `@` subject whose first segment names a module of the project is looked up by claim path. Anything else still reaches Jetpack's package explain, so `jet explain nixpkgs.ripgrep` and `jet explain ripgrep@14` keep working. `jetpack explain` stays the explicit package spelling.\n\nEach subject is answered by the stage that makes it. Build facts and Diagnostic types need only the loaded program, as today, so they still answer after a failed check. Declarations and frame schedules need a Doc-mode check of the entry, about what `jet check` of that entry costs. Proof, test and import records are read from stored evidence reports, never re-run, and their disposition says when they are stale.\n\nWithout a file, the current directory's project entry is used, as build-fact explain does now. A miss inside a known module is a registered error that lists that module's closest subjects. `main.on_frame` alone answers when the module has one frame callback.\n\nBuildFactExplain.jet and the Diagnostic-type explain become producers in one cutover, with no second print path. The ordered chain is a new DerivationPayload case beside FrameSchedule, because record premises are sorted and would lose the writer order.",
-          "code": "$ jet explain main.on_frame@412 app.jet\nmain.on_frame@412  checked frame resource schedule\n  producer jet-sema · rule checked-frame-accesses · static_derivation · current\n  premises\n    draw@3\n    update@1\n\n$ jet explain \"#build.settings.tls\" run.jet --profile=release --set tls=true\nBuild.Settings.tls\n\nWhat this means:\n  Build.Settings.tls = true\n  [shadowed] declaration / package true at package.jet:settings.tls (default):0..0\n  [shadowed] optimization bundle / package false at package.jet:build.release.settings.tls:0..0\n  [effective] command line / package true at command line:--set tls=true:0..0"
-        },
-        {
-          "key": "B",
-          "name": "A new word: `jet explain derivation <file> [<subject>]`, plus a hover line",
-          "detail": "`jet explain derivation app.jet` lists every record of the checked file, one line each. A line shows the subject, claim, producer, rule and disposition. Naming a subject prints its record and its premises. `--json` prints the same records.\n\nThe hover line is the same as in A. The build-fact explain keeps its own path, so 'how is this known' has two readers.",
-          "technical": "`explain` gains the leading word `derivation`, beside `effects`, `marker`, `log` and `strictness`. The CLI and the hover both use one query on the relation: by subject, then premises by id. BuildFactExplain.jet stays as it is.",
-          "code": "$ jet explain derivation app.jet main.on_frame@412\nmain.on_frame@412  checked frame resource schedule\n  producer jet-sema · rule checked-frame-accesses · static_derivation · current\n  premises\n    draw@3\n    update@1"
-        },
-        {
-          "key": "C",
-          "name": "A new subcommand: `jet inspect derivations <file> [<subject>]`, same hover",
-          "detail": "The views are the same as in B, but under `inspect`. `inspect` already holds machine views such as `inspect compiler` and `inspect facts`. `explain` is where a user asks 'why', and the build-fact chain stays under `explain`. So the two readers end up under two commands.",
-          "technical": "A new `inspect` subcommand beside `inspect facts`. The hover is the same as in A.",
-          "code": "$ jet inspect derivations app.jet main.on_frame@412"
-        },
-        {
-          "key": "D",
-          "name": "No new command; LSP hover only",
-          "detail": "The CLI keeps `jet inspect compiler check` as its reader, and a user filters the document with jq. Only the hover is new. The build-fact explain stays the only CLI chain view. Frame schedule records are not in that document until c8 keeps them.",
-          "technical": "SemIndexJSON and the compiler value print the index records, and no CLI words change.",
-          "code": "$ jet inspect compiler check app.jet | jq '.. | objects | select(.subject? == \"main.on_frame@412\")'"
-        }
-      ],
-      "comparisons": [
-        {
-          "lang": "Lean",
-          "note": "`#print axioms` walks one constant back to the axioms it rests on, and `trace.Meta` logs elaboration steps. One command answers for any constant, by its stable name.",
-          "code": "#print axioms my_theorem"
-        },
-        {
-          "lang": "Coq",
-          "note": "`Print Assumptions` lists the axioms and section variables one term depends on, through every lemma it uses. It is a single command for any term.",
-          "code": "Print Assumptions my_theorem."
-        },
-        {
-          "lang": "Soufflé",
-          "note": "Provenance mode rebuilds the proof tree of one derived tuple from its rule and premise tuples, to a depth the user sets. `explainnegation` explains why a tuple was not derived.",
-          "code": "souffle -t explain prog.dl\n> explain path(\"a\", \"c\")"
-        },
-        {
-          "lang": "Bazel",
-          "note": "`aquery` prints the actions, inputs and mnemonics behind outputs, filtered by a query language. `cquery --output=graph` prints the configured dependency graph. Both are commands separate from build.",
-          "code": "bazel aquery 'outputs(\".*app\", //app)'"
-        },
-        {
-          "lang": "Rust",
-          "note": "`rustc --explain E0502` explains an error code only. Nothing explains why the compiler concluded a fact about your code.",
-          "code": "rustc --explain E0502"
-        }
-      ],
-      "rec": "A",
-      "recommendation": {
-        "why": "A gives one CLI reader for every derivation record, as Lean, Coq and Soufflé give one command. Build-fact chains become records that print today's text. Every subject `jet explain` answers today keeps its answer, including package refs.",
-        "gains": [
-          "One command for 'how is this known', in the terminal and, through hover, in the editor.",
-          "The build-fact chain and the new records share one store and one printer, with today's text.",
-          "No new top-level command, no new leading word and no new LSP request."
-        ],
-        "losses": [
-          {
-            "loss": "Declaration and frame subjects need a check of the whole entry, which costs what `jet check` costs.",
-            "mitigation": "Build facts and Diagnostic types stay load-only, evidence records come from stored reports, and the LSP reuses the check it already runs."
-          },
-          {
-            "loss": "A dotted subject has the same shape as a package ref such as `nixpkgs.ripgrep` or `ripgrep@14`.",
-            "mitigation": "Only a first segment that names a project module reaches the records, and `jetpack explain` stays the explicit package spelling."
-          },
-          {
-            "loss": "Premises are hashes today, so the printed chain stops after one step, unlike Lean, Coq and Soufflé.",
-            "mitigation": "c8 makes producers name premise records, and explain nests a premise as soon as one exists."
-          },
-          {
-            "loss": "An `@offset` subject is a byte offset that moves on every edit.",
-            "mitigation": "Hover shows the exact subject to copy, and `main.on_frame` alone answers when the module has one callback."
-          },
-          {
-            "loss": "Moving build-fact explain onto records is a cutover of working code.",
-            "mitigation": "Its text stays byte-identical, proven by explain_build_setting.txt and BuildContribution.explain.out, and `--json` only gains a field."
-          },
-          {
-            "loss": "No listing of a file's subjects and no query language, unlike Bazel's aquery.",
-            "mitigation": "A miss lists the module's closest subjects, and compile-time code reads the index records through the compiler value's `derivations`."
-          }
-        ],
-        "whyNot": [
-          {
-            "key": "B",
-            "reason": "It leaves two readers of 'how is this known': the build-fact chain and `explain derivation`."
-          },
-          {
-            "key": "C",
-            "reason": "Splitting the views between `inspect` and `explain` makes the two-reader split worse."
-          },
-          {
-            "key": "D",
-            "reason": "jq over a large document is not an answer a developer can ask for, and frame records are not in it."
-          }
-        ],
-        "tradeoff": "A longer lookup order and a check for declaration subjects, in exchange for one reader of every derivation record."
-      },
-      "hybrid": null,
-      "ballotMode": "full",
-      "shortAuthorizedBy": null,
-      "ballotProcessVersion": 5,
-      "reviewPasses": {
-        "adversarial": "Author model family: Claude. Adversarial model family: Claude. Fresh agent: DerivReadReview. The review refuted three draft claims: unchanged build-fact output, since sorted premises lose writer order; one overlap, since package refs share the dotted and `@` shapes; and a free lookup. This draft keeps today's dispatch, adds record subjects before the package fallback, keeps build facts load-only with an ordered payload, and states the check cost and one-step chains."
-      },
-      "checkInstructions": "Check the dispatch order in Compiler/JetCLI/Source/CLI/Front.jet `jet_cli_explain`. Check the package-ref shape in SyntaxDictionary.jet `jet_cli_syntax_query` and the package fallback in Jetpack/CLI/Source/Commands/ExplainCommand.jet. Check BuildFactExplain.jet against Tests/Cases/CLIPartsSurface/explain_build_setting.txt and Examples/Metaprogramming/BuildTime/BuildContribution.explain.out.\n\nCheck the records in Compiler/JetFoundation/Source/Derivations.jet (sorted premises, the FrameSchedule payload). Check SemanticIndex.jet `sema_compiler_index_derivation_push`, Frames.jet `sema_frame_schedule_produce`, EvidenceReport.jet `evidence_record_checked_derivation`, and the LSP check in Compiler/JetCLI/Source/CLI/LSP.jet.",
-      "surface": {
-        "gist": "Which command answers 'how does the compiler know this?' from the one relation of derivation records?",
-        "lesson": "A derivation record is the compiler's receipt for a fact: what it concluded, by which rule, and from which premises. Build settings already have a similar receipt, their writer chain, which `jet explain` prints. This ballot picks the command and the editor view that print any receipt.",
-        "trio": {
-          "current": {
-            "note": "Today only build settings have an explain view. Other records sit in one large JSON document, or are dropped.",
-            "code": "$ jet explain \"#build.settings.tls\" run.jet\nBuild.Settings.tls\n\nWhat this means:\n  Build.Settings.tls = true\n  ...\n\n$ jet explain main.on_frame@412 app.jet\nno package record or build attempt for `main.on_frame@412`"
-          },
-          "wild": {
-            "lang": "Lean",
-            "note": "Lean has one command that says what any theorem rests on.",
-            "code": "#print axioms my_theorem\n-- 'my_theorem' depends on axioms: [propext, Classical.choice, Quot.sound]"
-          }
-        },
-        "options": [
-          {
-            "key": "A",
-            "name": "One reader: `jet explain <subject> [file]`",
-            "gist": "Explain also answers record subjects, and build-fact chains become records with today's text.",
-            "gains": [
-              "One command for any record, build facts included.",
-              "Every subject explain answers today keeps its answer.",
-              "No new command, word or editor request."
-            ],
-            "losses": [
-              "A declaration subject costs a `jet check` of the entry.",
-              "Chains stop after one step until producers link premises."
-            ],
-            "proposed": {
-              "code": "$ jet explain main.on_frame@412 app.jet\nmain.on_frame@412  checked frame resource schedule\n  producer jet-sema · rule checked-frame-accesses · current\n  premises\n    draw@3\n    update@1"
-            }
-          },
-          {
-            "key": "B",
-            "name": "New word: `jet explain derivation <file>`",
-            "gist": "A listing and a lookup under a new word, while build facts keep their own path.",
-            "gains": [
-              "Lists every subject of a file.",
-              "The word names the kind of question."
-            ],
-            "losses": [
-              "Two readers of 'how is this known'."
-            ],
-            "proposed": {
-              "code": "$ jet explain derivation app.jet main.on_frame@412"
-            }
-          },
-          {
-            "key": "C",
-            "name": "New subcommand: `jet inspect derivations <file>`",
-            "gist": "The same views as B, under `inspect` beside `inspect facts`.",
-            "gains": [
-              "Sits with the other machine views."
-            ],
-            "losses": [
-              "Build facts under `explain`, other records under `inspect`."
-            ],
-            "proposed": {
-              "code": "$ jet inspect derivations app.jet main.on_frame@412"
-            }
-          },
-          {
-            "key": "D",
-            "name": "Editor hover only",
-            "gist": "No new command; the terminal keeps one large JSON document filtered with jq.",
-            "gains": [
-              "No change to the command line."
-            ],
-            "losses": [
-              "jq is not a question a developer can ask.",
-              "Frame records are not in the document."
-            ],
-            "proposed": {
-              "code": "$ jet inspect compiler check app.jet | jq '.. | objects | select(.subject? == \"main.on_frame@412\")'"
-            }
-          }
-        ],
-        "recommendation": {
-          "rec": "A",
-          "why": "A gives one command for every record, as Lean, Coq and Soufflé do. Build-fact chains become records that print today's text, and every subject explain answers today keeps its answer.",
-          "gains": [
-            "One command for 'how is this known'.",
-            "Build-fact chains keep their exact text.",
-            "No new command, word or editor request."
-          ],
-          "losses": [
-            {
-              "loss": "A declaration subject costs a `jet check` of the entry.",
-              "mitigation": "Build facts stay load-only, and stored test and proof records are read, not re-run."
-            },
-            {
-              "loss": "A dotted subject looks like a package name.",
-              "mitigation": "Only a project module's name reaches the records; `jetpack explain` stays for packages."
-            },
-            {
-              "loss": "Chains stop after one step for now.",
-              "mitigation": "Card #6848 c8 makes producers link premises, and explain nests them once linked."
-            }
-          ],
-          "whyNot": [
-            {
-              "key": "B",
-              "reason": "Two readers of 'how is this known'."
-            },
-            {
-              "key": "C",
-              "reason": "Splits the views across two commands."
-            },
-            {
-              "key": "D",
-              "reason": "jq is not a question, and frame records are missing."
-            }
-          ],
-          "tradeoff": "A longer lookup order and a check for declarations, for one reader of every record."
-        }
-      },
-      "draftedBy": "Orchestrator",
-      "reviewedBy": "DerivReadReview",
-      "draft": false,
-      "status": "ratified",
-      "created": "2026-11-23T22:53:27.017Z",
-      "outcome": "A",
-      "ratifiedAt": "2026-11-24"
     },
     {
       "id": "D-RULE-TYPEARGS1",
@@ -123296,6 +122509,62 @@
     }
   ],
   "events": [
+    {
+      "at": "2026-11-27T11:52:36.145Z",
+      "by": "Orchestrator",
+      "action": "card.criteria-meet",
+      "ref": "c0pi4dar",
+      "note": "#4"
+    },
+    {
+      "at": "2026-11-27T11:52:35.283Z",
+      "by": "Orchestrator",
+      "action": "card.criteria-meet",
+      "ref": "c0pi4dar",
+      "note": "#2"
+    },
+    {
+      "at": "2026-11-27T11:52:34.310Z",
+      "by": "Orchestrator",
+      "action": "card.criteria-meet",
+      "ref": "c0e6znz4",
+      "note": "#4"
+    },
+    {
+      "at": "2026-11-27T11:52:33.296Z",
+      "by": "Orchestrator",
+      "action": "card.criteria-meet",
+      "ref": "c01vsb2c",
+      "note": "#7"
+    },
+    {
+      "at": "2026-11-27T11:52:32.299Z",
+      "by": "Orchestrator",
+      "action": "card.criteria-meet",
+      "ref": "c00rqc09",
+      "note": "#23"
+    },
+    {
+      "at": "2026-11-27T11:52:31.336Z",
+      "by": "Orchestrator",
+      "action": "card.criteria-meet",
+      "ref": "c00rqc09",
+      "note": "#22"
+    },
+    {
+      "at": "2026-11-27T11:52:30.371Z",
+      "by": "Orchestrator",
+      "action": "card.criteria-meet",
+      "ref": "c00rqc09",
+      "note": "#18"
+    },
+    {
+      "at": "2026-11-27T11:52:29.052Z",
+      "by": "Orchestrator",
+      "action": "card.criteria-meet",
+      "ref": "c00rqc09",
+      "note": "#16"
+    },
     {
       "at": "2026-11-27T11:37:42.483Z",
       "by": "Orchestrator",
