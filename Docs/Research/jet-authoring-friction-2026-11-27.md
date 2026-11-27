@@ -15,8 +15,9 @@
 > - **#7050 [P0]:** `B11` (`\u{H}` lexer fix + multi/triple-backtick raw strings), `B13` (`U8{'\n'}` ASCII byte folding), `B16` (`..=` hint + range `.rev()` / descending stride)
 > - **#7051 [P0]:** `C18-A` (`Type{expr}` ascription), `C19` (named enum patterns `.Click{x, y}`), `C22` (canonical `Float`/`Int` `From` ranking), `C24` (generic receiver closure inference like `sort_by`), `C25` (`Name<T>: struct` & `*` call-site label hints)
 > - **#7052 [P0]:** `D28` (two-phase borrows for sequential nested calls — adversarial safety audit first), `D30` (`.in_place()` & `^guard: cell.guard_edit()` diagnostic hints)
+> - **#7053 [P0]:** `D27 Part A` (structural `Copy` for small plain all-scalar structs), `D29` (zero-refcount `Shared<T>` borrow in scoped tasks — adversarial safety audit first)
 >
-> **Remaining in this TODO list for owner discussion & decision:** **18 items** (`D27`, `D29`, `E31`, `E33`, `E51–E53`, `F34`, `F36`, `F38`, `G39–G40`, `G42–G43`, `H45`, `I46–I47`, `J48–J50`). Item numbers are kept stable as items are removed.
+> **Remaining in this TODO list for owner discussion & decision:** **17 items** (`D27 Part B`, `E31`, `E33`, `E51–E53`, `F34`, `F36`, `F38`, `G39–G40`, `G42–G43`, `H45`, `I46–I47`, `J48–J50`). Item numbers are kept stable as items are removed.
 
 ---
 
@@ -24,8 +25,8 @@
 
 1. [The Bottom Line: Would Fixing These Make Jet Near-Perfect?](#1-the-bottom-line-would-fixing-these-make-jet-near-perfect)
 2. [Productive Friction Worth Keeping (What Forces *Good* Code)](#2-productive-friction-worth-keeping-what-forces-good-code)
-3. [Remaining TODO Items to Discuss & Decide (18 Items)](#3-remaining-todo-items-to-discuss--decide-18-items)
-   - [D. Ownership, Borrowing & Copying (`D27`, `D29`)](#d-ownership-borrowing--copying)
+3. [Remaining TODO Items to Discuss & Decide (17 Items)](#3-remaining-todo-items-to-discuss--decide-17-items)
+   - [D. Ownership, Borrowing & Copying (`D27 Part B`)](#d-ownership-borrowing--copying)
    - [E. Error Handling & Jet-vs-Go Remaining Items (`E31`, `E33`, `E51–E53`)](#e-error-handling--jet-vs-go-remaining-items)
    - [F. Collections, Strings, Bytes & Stdlib Ergonomics (`F34`, `F36`, `F38`)](#f-collections-strings-bytes--stdlib-ergonomics)
    - [G. Concurrency, Effects & Imports (`G39–G40`, `G42–G43`)](#g-concurrency-effects--imports)
@@ -76,7 +77,7 @@ All three agents **explicitly asked Jet to KEEP** these guardrails — annoying 
 
 ---
 
-## 3. Remaining TODO Items to Discuss & Decide (18 Items)
+## 3. Remaining TODO Items to Discuss & Decide (17 Items)
 
 Legend:
 - `COUNTERPRODUCTIVE` = actively pushes authors to write *worse* code.
@@ -88,19 +89,12 @@ Legend:
 
 ### D. Ownership, Borrowing & Copying
 
-#### D27. Returning a borrowed `String` / small struct + `.copy()` ratchet pushes authors into disguised copies — `COUNTERPRODUCTIVE`
-- **What happens:**
-  - Returning a read `String` parameter (`if !color -> return line`) fails with `ReadOnlyValueNotOwned` (and `View<str>` currently rejects plain `String` parameters without `.trim()`/`.after()`/`.before()`). Under strict compiler `.copy()` ceilings, authors end up writing `return "{line}"` — still allocating a full copy, just disguised as interpolation!
-  - Returning a tiny all-scalar struct like `Complex` (two `Float`s, 16 bytes in registers) fails without `.copy()` unless hand-listed in the compiler's internal `Copy.jet` allowlist.
+#### D27 Part B. Functional `View<str>` / `View<T>` pass-through returns & last-use auto-move — `COUNTERPRODUCTIVE`
+- **What happens:** Returning a plain borrowed `String` parameter as `View<str> from line` currently fails (`E2307` in `StringViews.jet:302` refuses plain `String` without `.trim()`/`.before()`/`.after()`), pushing authors into disguised allocations (`return "{line}"`). Also last-use local moves into `^^` params still sometimes require `.move()` noise.
+- **Interaction with `#7031` (`D-HANDLE-NAV1`):** `#7031` replaces stored `@T` live links with `Pool<T>`/`ID<T>` handles while **explicitly keeping `View<T>`/`View<str>`** for temporary zero-copy borrows — zero conflict!
 - **Proposed fixes / ideas:**
-  - Infer `Copy` structurally ONLY for small plain all-scalar structs (e.g. `<= 24`–`32` bytes, all fields `Copy`, zero heap pointers, no `#Close`/`#MoveOnly`), keeping all heap/large structs strictly move-only.
-  - Make `View<str>` / `View<T>` accept plain borrowed `String` / `T` parameters directly (zero-copy pass-through).
+  - Allow `View<str>` / `View<T>` to accept plain borrowed `String` / `T` parameters directly (zero-copy pass-through).
   - Auto-move last-use locals into `^^` parameters without `.move()` noise.
-
-#### D29. Capturing `Shared<T>` into multiple tasks/closures requires manual `.copy()` shadow variables — `ACCIDENTAL FRICTION`
-- **What happens:** Even though `Shared<T>` exists specifically to be shared across tasks, spawning two tasks requires manual shadow bindings (`h1: hits.copy(); h2: hits.copy(); task { ... h1 ... }; task { ... h2 ... }`).
-- **Proposed fixes / ideas:**
-  - **Best-of-both-worlds:** Borrow `Shared<T>` directly with **zero refcount overhead** inside scoped concurrency (`task.group` / `task.all` / `task.race` / `task.any`), and handle detached tasks cleanly via either auto-clone of `Shared<T>`'s refcounted handle or explicit `hits.share()`.
 
 ---
 
