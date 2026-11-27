@@ -7,8 +7,10 @@
 > - **#7042 [P0]:** `A1` (`#CatchAll`), `B12` (interpolation ICE), `B14` (contextual `U8`/`I64`/`U64` literal coercion), `B15` (`I64.MIN` literal + constants), `C20` (`.Variant` shorthand propagation), `C21` (struct update syntax)
 > - **#7043 [P0]:** `E32` / `Go-2` (`#Error` + `Describe` auto-lift to `Err`), `E32` / `Go-3` (`Result` vs. `Option` & `error {}` diagnostics), `F35` (`Map.contains_key` + `Set<T>`), `F37` (`loop ^item in list`), `G41` (copy-pasteable `authority:` fix-it)
 > - **#7044 [P0]:** `C23` (`Neg` operator trait), `D26` (`_: expr` read discard), `H44` (`#Layout(c)` typed struct pointers in `#Unsafe`)
+> - **#7045 [P0]:** `B10` Part 1 (Option 1A: bare `Float` default, exact contextual `Decimal`/`Float`, `Type{value}` scalars, `#UnitFamily(Time)` `hour`/`day` replacing `h`/`d`, delete magic `f` suffix)
+> - **#7046 [P0]:** `B10` Part 2 (Unified unquoted `Type{...}` / `Type{{{...}}}` `DSL` trait: type-owned `parse`, hole spans, LSP Semantic Tokens `highlight`, `jet fmt`, cutover of `SQL`/`HTML`/`Sh`/`Regex`/`Path`/`URL`/`DateTime`/`Grammar`/`Complex`/`Quaternion` + FFI foundation, delete magic `i`/`j`/`k` suffixes)
 >
-> **Remaining in this TODO list for owner discussion & decision:** **38 items** (`A2–A8`, `B9–B11`, `B13`, `B16–B17`, `C18–C19`, `C22`, `C24–C25`, `D27–D30`, `E31`, `E33`, `E51–E53`, `F34`, `F36`, `F38`, `G39–G40`, `G42–G43`, `H45`, `I46–I47`, `J48–J50`). Item numbers are kept stable as items are removed.
+> **Remaining in this TODO list for owner discussion & decision:** **37 items** (`A2–A8`, `B9`, `B11`, `B13`, `B16–B17`, `C18–C19`, `C22`, `C24–C25`, `D27–D30`, `E31`, `E33`, `E51–E53`, `F34`, `F36`, `F38`, `G39–G40`, `G42–G43`, `H45`, `I46–I47`, `J48–J50`). Item numbers are kept stable as items are removed.
 
 ---
 
@@ -16,9 +18,9 @@
 
 1. [The Bottom Line: Would Fixing These Make Jet Near-Perfect?](#1-the-bottom-line-would-fixing-these-make-jet-near-perfect)
 2. [Productive Friction Worth Keeping (What Forces *Good* Code)](#2-productive-friction-worth-keeping-what-forces-good-code)
-3. [Remaining TODO Items to Discuss & Decide (38 Items)](#3-remaining-todo-items-to-discuss--decide-38-items)
+3. [Remaining TODO Items to Discuss & Decide (37 Items)](#3-remaining-todo-items-to-discuss--decide-37-items)
    - [A. Control Flow, Patterns & Matching (`A2–A8`)](#a-control-flow-patterns--matching)
-   - [B. Syntax, Braces, Literals & Strings (`B9–B11`, `B13`, `B16–B17`)](#b-syntax-braces-literals--strings)
+   - [B. Syntax, Braces, Literals & Strings (`B9`, `B11`, `B13`, `B16–B17`)](#b-syntax-braces-literals--strings)
    - [C. Types, Structs, Enums, Generics & Signatures (`C18–C19`, `C22`, `C24–C25`)](#c-types-structs-enums-generics--signatures)
    - [D. Ownership, Borrowing & Copying (`D27–D30`)](#d-ownership-borrowing--copying)
    - [E. Error Handling & Jet-vs-Go Remaining Items (`E31`, `E33`, `E51–E53`)](#e-error-handling--jet-vs-go-remaining-items)
@@ -71,7 +73,7 @@ All three agents **explicitly asked Jet to KEEP** these guardrails — annoying 
 
 ---
 
-## 3. Remaining TODO Items to Discuss & Decide (38 Items)
+## 3. Remaining TODO Items to Discuss & Decide (37 Items)
 
 Legend:
 - `COUNTERPRODUCTIVE` = actively pushes authors to write *worse* code.
@@ -148,13 +150,6 @@ Legend:
 - **Proposed fixes / ideas:**
   - **Best fix:** Disambiguate `TypeName{...}` inside `if`/`loop` headers in the parser when `{...}` is followed by an operator (`==`, `<`, `&&`, `||`, `.`), `->`, or `{`.
   - **Minimum fix:** Extend `E0637` to fire on *all* positions in `if`/`loop` headers with a 1-click parenthesizing fix-it.
-
-#### B10. Default decimal literal (`Float` vs. `Decimal`), numeric type suffixes, & `Complex`/`Quaternion` DSL — `ACTIVE DISCUSSION #1`
-- **Owner direction so far:** Bare floating-point literals (`0.0`, `1.0`, `2.5`) should **default to `Float`** (not `Decimal`), consider unified type suffixes like `USD`/`ms` for numeric types (`1.5d` / `1.5dec` / `0u8` / `10i64` / `1.5f32`), and evaluate moving `Complex` / `Quaternion` to a checked DSL literal (`Complex{1 + 2i}` / `Quaternion{1 + 2i + 3j + 4k}` — like `Regex{...}` / `Grammar{...}`) so suffixes stay clean and orthogonal!
-- **Key implications to discuss:**
-  - Switching bare `1.0` default from `Decimal` → `Float`: eliminates `1.0 - t` / `Float{0.0}` friction everywhere, while financial/exact code writes `19.99d` (or `19.99USD` / `Decimal{19.99}`) — keeping strict variable separation between `Float` and `Decimal`!
-  - Numeric suffixes (`10u8`, `10i64`, `1.5f32`, `19.99d`) vs. `#UnitFamily` suffixes (`50ms`, `10USD`): how they share one clean suffix grammar without collisions (e.g. `1i` vs. `1i32`, `1f` vs. `1f32`).
-  - Moving `Complex` / `Quaternion` to checked DSL literals (`Complex{2 + 3i}`, `Quaternion{1 + 2i + 3j + 4k}`) frees `i`/`j`/`k` from the global literal-suffix namespace and removes bespoke `Complex`/`Quaternion` compiler plumbing from `Expressions.jet`.
 
 #### B11. Every `"..."` string interpolates `{...}`, turning JSON, tests & `\u{...}` into `{{{{` soup — `ACCIDENTAL FRICTION`
 - **What happens:** `"if true {"` fails to compile (*unterminated `{`*). `"\\u{7f}"` fails with *"f isn't a unit in scope"* (because `{7f}` parses as `7` with suffix `f`!). JSON becomes `"{{\"textDocument\":{{\"uri\":{uri}}}}}"`. Backtick raw strings `` `...` `` skip `{...}` interpolation, **but** cannot contain `\n`, `\t`, or `\u{...}`, and you cannot nest backticks inside backtick strings.
@@ -427,23 +422,3 @@ load_port: fn(path: String) -> Int ConfigError! {
     Int.parse(cfg.port) ?? 8080
 }
 ```
-
-### Scorecard & Status of the 5 Jet-vs-Go Fixes
-
-| # | Jet-vs-Go Smoothing Fix | Status |
-|---|---|---|
-| **E51 (Go-1)** | Stop making unmarked library `fn() -> T` silently mean `T Err!` (keep `Err!` default on `run` & `#Test`) | **Open in TODO above (`E31 / E51`)** |
-| **Go-2** | Auto-lift `#Error` + `Describe` into `Err` at `Err!` boundaries | **Approved & carded P0 (`#7043 c1`)** |
-| **Go-3** | Dedicated `Result` vs. `Option` & `Name: error {}` diagnostics | **Approved & carded P0 (`#7043 c2`)** |
-| **E52 (Go-4)** | Effortless nested `Result` unwrapping (`(T E!) TaskFailure!`) | **Open in TODO above (`E33 / E52`)** |
-| **E53 (Go-5)** | Rock-solid `?? { log(err); return fallback }` everywhere | **Open in TODO above (`E53`)** |
-
----
-
-## 5. What Already Works Really Well (Do Not Regress)
-
-- **Local `Why:` / `Fix:` diagnostics:** When errors point at the true local cause (`Jet.UnknownArgumentLabel`, `Jet.ClosedSetElse`, `Jet.UseWhileWriteActive`), agents rated Jet's diagnostics **among the best of any compiler**.
-- **Power-asserts:** Showing intermediate subexpression values and local variables inline on test failures.
-- **Field-precise access (`^self.[hits]`) and block footprints (`jet inspect footprint`):** Seeing exactly what a block reads, writes, and takes with zero lifetime annotations.
-- **One meaning across O0, O1, and O2:** No separate interpreter with semantic drift.
-- **Structured `task.group` with `limit:`, cancellation, deadlines, and panic isolation.**
