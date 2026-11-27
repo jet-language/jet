@@ -15,6 +15,7 @@ use {
     ef_process: core.process
     ef_random: core.crypto.random
     ef_sys: core.sys
+    ef_testing: core.testing
     ef_time: core.time
 }
 
@@ -50,12 +51,30 @@ FixedClock: struct {
     }
 }
 
-// Pure manually-advanced clock backed by `Shared<Int>`.
+// Pure manually-advanced clock backed by `Shared<Int>`. Mirrors
+// `testing.fake_clock`'s stepping surface (`now`, `set`, `tick`, `advance`)
+// while implementing `#Effect Clock` for `#Context(Clock: ...)` discharge.
 SteppingClock: struct {
     current_ms: Shared<Int>,
 
     new: fn(start_ms: Int) -> SteppingClock Never! {
         SteppingClock{current_ms: Shared{start_ms}}
+    }
+
+    now: fn(self) -> Int Never! {
+        guard: self.current_ms.guard_read()
+        guard.value
+    }
+
+    set: fn(self, unix_ms: Int) Never! {
+        ^guard: self.current_ms.guard_edit()
+        guard.value = unix_ms
+    }
+
+    tick: fn(self, delta_ms: Int) -> Int Never! {
+        ^guard: self.current_ms.guard_edit()
+        guard.value += delta_ms
+        guard.value
     }
 
     advance: fn(self, delta_ms: Int) Never! {
@@ -73,6 +92,59 @@ SteppingClock: struct {
             guard: self.current_ms.guard_read()
             guard.value * 1000000
         }
+    }
+}
+
+// Deterministic recorded-timestamp clock for replay harnesses (`ProveReplay`
+// and recorded test journals). Each read returns the next recorded Unix
+// millisecond sample, holding on the final sample once exhausted.
+priv ReplayClockState: struct {
+    samples: [Int],
+    cursor: Int,
+}
+
+ReplayClock: struct {
+    state: Shared<ReplayClockState>,
+
+    at: fn(unix_ms: Int) -> ReplayClock Never! {
+        ReplayClock{state: Shared{ReplayClockState{samples: [Int]{unix_ms}, cursor: 0}}}
+    }
+
+    sequence: fn(samples: [Int]) -> ReplayClock Never! {
+        ReplayClock{state: Shared{ReplayClockState{samples: samples, cursor: 0}}}
+    }
+
+    reads: fn(self) -> Int Never! {
+        guard: self.state.guard_read()
+        guard.value.cursor
+    }
+
+    impl Clock {
+        now_ms: fn(self) -> Int {
+            ^guard: self.state.guard_edit()
+            n: guard.value.samples.len()
+            if n == 0 -> return 0
+            idx: if guard.value.cursor < n -> guard.value.cursor else -> n - 1
+            value: guard.value.samples[idx]
+            guard.value.cursor += 1
+            value
+        }
+
+        monotonic_ns: fn(self) -> Int {
+            self.now_ms() * 1000000
+        }
+    }
+}
+
+// Adapter installing a `core.testing.DeterministicWorld` as a
+// `#Context(Clock: WorldClock{world: w})` provider without TLS hooks.
+WorldClock: struct {
+    world: ef_testing.DeterministicWorld,
+
+    impl Clock {
+        now_ms: fn(self) -> Int { self.world.now() }
+
+        monotonic_ns: fn(self) -> Int { self.world.now() * 1000000 }
     }
 }
 

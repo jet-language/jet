@@ -108,6 +108,7 @@ QueuedTask: struct {
 /// The build binds the runtime's queue to that type's `push` and `pop` when
 /// it links the program, so a spawn compiles to the same code under every
 /// scheduler and no call goes through a table.
+#Effect(action: "schedules spawned tasks")
 Scheduler: trait {
     push: fn(^self, task: QueuedTask) Never!,
     pop: fn(^self) -> QueuedTask? Never!,

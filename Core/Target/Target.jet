@@ -57,30 +57,70 @@ MachineFacts: struct {
     // None keeps the runtime's own first-in, first-out queue.
     scheduler: String?{None},
 
+    // Single ordered table mapping each machine service slot to the effect it
+    // supplies (in Prelude effect-root declaration order). Absent providers
+    // yield `!Effect` entries in `row()`.
+    priv effect_slots: fn(self) -> [MachineEffectSlot] {
+        [MachineEffectSlot]{
+            MachineEffectSlot{effect: "Net", provided: self.sockets != None},
+            MachineEffectSlot{effect: "FS", provided: self.files != None},
+            MachineEffectSlot{effect: "IO", provided: self.byte_sink != None},
+            MachineEffectSlot{
+                effect: if self.wall_clock == None && self.monotonic_clock == None -> "Time" else -> "Time.Wait",
+                provided: (self.wall_clock != None || self.monotonic_clock != None) && self.sleep != None,
+            },
+            MachineEffectSlot{effect: "Rand", provided: self.entropy != None},
+            MachineEffectSlot{effect: "Env", provided: self.env != None},
+            MachineEffectSlot{effect: "Exec", provided: self.processes != None},
+            MachineEffectSlot{effect: "GPU", provided: self.gpu != None},
+            // The browser carries the JavaScript bridge, so a page lacks only
+            // the C side of foreign calls.
+            MachineEffectSlot{
+                effect: if self.browser == None -> "FFI" else -> "FFI.C",
+                provided: self.ffi != None,
+            },
+            MachineEffectSlot{effect: "Browser", provided: self.browser != None},
+            MachineEffectSlot{effect: "Panic", provided: self.panic != None},
+            MachineEffectSlot{effect: "Mem.Alloc", provided: self.allocator != None},
+        }
+    }
+
+    // The provider string configured for an effect or target service name, or
+    // None when the machine lacks it.
+    provider: fn(self, effect: String) -> String? {
+        if effect == {
+            "Net" -> self.sockets
+            "FS" -> self.files
+            "IO" -> self.byte_sink
+            "Time" -> if self.wall_clock != None -> self.wall_clock else -> self.monotonic_clock
+            "Time.Wait" -> self.sleep
+            "Rand" -> self.entropy
+            "Env" -> self.env
+            "Exec" -> self.processes
+            "GPU" -> self.gpu
+            "FFI" | "FFI.C" -> self.ffi
+            "Browser" -> self.browser
+            "Panic" -> self.panic
+            "Mem.Alloc" -> self.allocator
+            "Scheduler" -> self.scheduler
+            else -> None
+        }
+    }
+
     // The effects every artifact built for the machine is denied, one for
     // each service it lacks, in the order the effect roots are declared.
     row: fn(self) -> [String] {
         ^denied: [String]{}
-        if self.sockets == None -> denied.push("!Net")
-        if self.files == None -> denied.push("!FS")
-        if self.byte_sink == None -> denied.push("!IO")
-        if self.wall_clock == None && self.monotonic_clock == None -> denied.push("!Time") else if self.sleep == None {
-            denied.push("!Time.Wait")
+        loop slot in self.effect_slots() {
+            if !slot.provided -> denied.push("!{slot.effect}")
         }
-        if self.entropy == None -> denied.push("!Rand")
-        if self.env == None -> denied.push("!Env")
-        if self.processes == None -> denied.push("!Exec")
-        if self.gpu == None -> denied.push("!GPU")
-        if self.ffi == None {
-            // The browser carries the JavaScript bridge, so a page lacks only
-            // the C side of foreign calls.
-            if self.browser == None -> denied.push("!FFI") else -> denied.push("!FFI.C")
-        }
-        if self.browser == None -> denied.push("!Browser")
-        if self.panic == None -> denied.push("!Panic")
-        if self.allocator == None -> denied.push("!Mem.Alloc")
         denied
     }
+}
+
+priv MachineEffectSlot: struct {
+    effect: String,
+    provided: Bool,
 }
 
 // A machine a build can target: a struct with no fields whose `facts` say

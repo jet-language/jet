@@ -19,10 +19,11 @@
 // function, as its arguments are.
 
 Net: struct {
+    action: fn(self) -> String { "uses the network" }
+
     impl Effect {
         irreversible: fn(self) -> Bool { true }
         access: fn(self) -> EffectAccess { .Replaces }
-        action: fn(self) -> String { "uses the network" }
     }
 }
 
@@ -30,44 +31,49 @@ FS: enum {
     Read,
     Write,
 
+    action: fn(self) -> String { if self == .Read -> "reads files" else -> "writes files" }
+    root_action: fn() -> String { "reads and writes files" }
+
     impl Effect {
         irreversible: fn(self) -> Bool { self == .Write }
         access: fn(self) -> EffectAccess { if self == .Read -> .Reads else -> .Replaces }
-        action: fn(self) -> String { if self == .Read -> "reads files" else -> "writes files" }
-        root_action: "reads and writes files",
     }
 }
 
 IO: struct {
+    action: fn(self) -> String { "prints text or reads input" }
+
     impl Effect {
         access: fn(self) -> EffectAccess { .Reads }
-        action: fn(self) -> String { "prints text or reads input" }
     }
 }
 
 Time: enum {
     Wait,
 
+    action: fn(self) -> String { "waits" }
+    root_action: fn() -> String { "reads the clock" }
+
     impl Effect {
         access: fn(self) -> EffectAccess { .Reads }
-        action: fn(self) -> String { "waits" }
-        root_action: "reads the clock",
     }
 }
 
 Rand: enum {
     Draw,
 
+    action: fn(self) -> String { "draws random numbers" }
+
     impl Effect {
         access: fn(self) -> EffectAccess { .Reads }
-        action: fn(self) -> String { "draws random numbers" }
     }
 }
 
 Env: struct {
+    action: fn(self) -> String { "reads environment variables" }
+
     impl Effect {
         access: fn(self) -> EffectAccess { .Replaces }
-        action: fn(self) -> String { "reads environment variables" }
     }
 }
 
@@ -75,18 +81,20 @@ Exec: enum {
     Exit,
     Args,
 
+    action: fn(self) -> String { if self == .Exit -> "ends its own process" else -> "reads its arguments" }
+    root_action: fn() -> String { "starts other programs" }
+
     impl Effect {
         irreversible: fn(self) -> Bool { self == .Exit }
         access: fn(self) -> EffectAccess { if self == .Exit -> .Replaces else -> .Reads }
-        action: fn(self) -> String { if self == .Exit -> "ends its own process" else -> "reads its arguments" }
-        root_action: "starts other programs",
     }
 }
 
 GPU: struct {
+    action: fn(self) -> String { "uses the GPU" }
+
     impl Effect {
         access: fn(self) -> EffectAccess { .Reads }
-        action: fn(self) -> String { "uses the GPU" }
     }
 }
 
@@ -120,24 +128,27 @@ FFI: enum {
     JS,
     Swift,
 
+    action: fn(self) -> String { "calls foreign code" }
+
     impl Effect {
         irreversible: fn(self) -> Bool { true }
         access: fn(self) -> EffectAccess { .Replaces }
-        action: fn(self) -> String { "calls foreign code" }
     }
 }
 
 Browser: struct {
+    action: fn(self) -> String { "uses browser APIs" }
+
     impl Effect {
         access: fn(self) -> EffectAccess { .Replaces }
-        action: fn(self) -> String { "uses browser APIs" }
     }
 }
 
 Panic: struct {
+    action: fn(self) -> String { "can stop with a panic" }
+
     impl Effect {
         access: fn(self) -> EffectAccess { .Reads }
-        action: fn(self) -> String { "can stop with a panic" }
     }
 }
 
@@ -151,9 +162,10 @@ Mem: enum {
     Stack,
     Gc,
 
+    action: fn(self) -> String { "allocates memory" }
+
     impl Effect {
         access: fn(self) -> EffectAccess { .Reads }
-        action: fn(self) -> String { "allocates memory" }
     }
 }
 
@@ -163,8 +175,9 @@ Mem: enum {
 // Core reaches none. `-[!Unsafe]>`, a cap's `!Unsafe` or a policy's
 // `deny: [Unsafe]` refuses every such path.
 Unsafe: struct {
+    action: fn(self) -> String { "reaches `#Unsafe` code" }
+
     impl Effect {
         access: fn(self) -> EffectAccess { .Reads }
-        action: fn(self) -> String { "reaches `#Unsafe` code" }
     }
 }

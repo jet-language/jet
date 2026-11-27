@@ -12,25 +12,28 @@ DB: enum {
     Read,
     Write,
 
+    action: fn(self) -> String { if self == .Read -> "reads a database" else -> "writes a database" }
+    root_action: fn() -> String { "uses a database" }
+
     impl Effect {
         access: fn(self) -> EffectAccess { if self == .Read -> .Reads else -> .Replaces }
-        action: fn(self) -> String { if self == .Read -> "reads a database" else -> "writes a database" }
-        root_action: "uses a database",
     }
 }
 
 #FX(IO, FS, Net)
 Log: struct {
+    action: fn(self) -> String { "writes logs" }
+
     impl Effect {
         access: fn(self) -> EffectAccess { .Reads }
-        action: fn(self) -> String { "writes logs" }
     }
 }
 
 #FX(Env, FS, Net)
 Secret: struct {
+    action: fn(self) -> String { "reads secrets" }
+
     impl Effect {
         access: fn(self) -> EffectAccess { .Reads }
-        action: fn(self) -> String { "reads secrets" }
     }
 }

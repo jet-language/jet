@@ -1,26 +1,32 @@
 // End-to-end test for `core.effects` provider traits, pure deterministic test
 // fakes (`#Context` discharge to `-[]>`), and ambient `default:` host fallback.
-use core.effects.[
-    BufferConsole,
-    BufferLogger,
-    Clock,
-    Console,
-    Database,
-    Environment,
-    FileSystem,
-    FixedClock,
-    Logger,
-    MemoryDatabase,
-    MemoryEnvironment,
-    MemoryFS,
-    Network,
-    ProcessRunner,
-    Random,
-    SeededRandom,
-    SteppingClock,
-    StubNetwork,
-    StubProcessRunner,
-]
+use {
+    testing: core.testing
+    time: core.time
+    core.effects.[
+        BufferConsole,
+        BufferLogger,
+        Clock,
+        Console,
+        Database,
+        Environment,
+        FileSystem,
+        FixedClock,
+        Logger,
+        MemoryDatabase,
+        MemoryEnvironment,
+        MemoryFS,
+        Network,
+        ProcessRunner,
+        Random,
+        ReplayClock,
+        SeededRandom,
+        SteppingClock,
+        StubNetwork,
+        StubProcessRunner,
+        WorldClock,
+    ]
+}
 
 run_service: fn() -[Clock, FileSystem, Random, Environment, Console, Logger, Network, Database, ProcessRunner]> String {
     now: Clock.now_ms()
@@ -82,6 +88,32 @@ integration_all_providers: fn() -> String {
     "{saved} | lines={console.output().len()} | logs={logger.entries().len()} | ran={proc.ran().len()}"
 }
 
+replay_clock_sequence: fn() -> String {
+    replay: ReplayClock.sequence([Int]{100, 250})
+    ^first: 0
+    ^second: 0
+    ^held: 0
+    #Context(Clock: replay) {
+        first = Clock.now_ms()
+        second = Clock.now_ms()
+        held = Clock.now_ms()
+    }
+    "replay={first},{second},{held}:{replay.reads()}"
+}
+
+world_clock_bridge: fn() -> String {
+    ^before: 0
+    ^after: 0
+    testing.world(fn(w: testing.DeterministicWorld) {
+        #Context(Clock: WorldClock{world: w}) {
+            before = Clock.now_ms()
+            ^_: w.advance(time.Duration{ns: 5000000})
+            after = Clock.now_ms()
+        }
+    })
+    "world={before}->{after}"
+}
+
 // Outside `#Context`, `Clock.now_ms()` dispatches to its `#Effect(default: SystemClock)` provider.
 ambient_clock_positive: fn() -[Clock]> Bool {
     Clock.now_ms() > 0
@@ -90,5 +122,7 @@ ambient_clock_positive: fn() -[Clock]> Bool {
 run: fn() -[IO, Clock]> {
     print(pure_immutable_discharge())
     print(integration_all_providers())
+    print(replay_clock_sequence())
+    print(world_clock_bridge())
     print("ambient_ok={ambient_clock_positive()}")
 }

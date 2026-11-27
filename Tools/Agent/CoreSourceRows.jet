@@ -407,14 +407,14 @@ effect_rows: fn(source: String, path: String, machine: [EffectRow]?) -> [EffectR
                 next
             }
             if line.starts_with("access: fn(self) -> EffectAccess {{ ") && line.ends_with(" }}") -> next
-            if line.starts_with("action: fn(self) -> String {{ ") && line.ends_with(" }}") -> next
-            if line.starts_with("root_action: \"") -> next
             if body != None || expert_body != None || !line.starts_with("irreversible: fn(self) -> Bool {{ ") || !line.ends_with(" }}") {
-                return Err(rows_fail("{place}: expected `parent: Root.Case`, `irreversible`, `expert`, `access`, `action`, or `root_action` in `impl Effect`"))
+                return Err(rows_fail("{place}: expected `parent: Root.Case`, `irreversible`, `expert`, or `access` in `impl Effect`"))
             }
             body = Val(byte_slice(line, "irreversible: fn(self) -> Bool {{ ".len(), line.len() - 2).trim())
             next
         }
+        if line.starts_with("action: fn(self) -> String {{ ") && line.ends_with(" }}") -> next
+        if line.starts_with("root_action: fn() -> String {{ ") && line.ends_with(" }}") -> next
         if line == "impl Effect {{}}" || line == "impl Effect {{" {
             if impl_seen {
                 return Err(rows_fail("{place}: `{type_name}` has a second `impl Effect` block"))

@@ -335,7 +335,7 @@ effect_vocabulary_source_scan: fn(source: String, path: String, machine: [Effect
     access_head: "access: fn(self) -> EffectAccess {{ "
     access_open: "access: fn(self) -> EffectAccess {{"
     action_head: "action: fn(self) -> String {{ "
-    root_action_head: "root_action: "
+    root_action_head: "root_action: fn() -> String {{ "
     parent_head: "parent: "
     ^offset: base
     loop index in 0..<lines.len() {
@@ -436,20 +436,20 @@ effect_vocabulary_source_scan: fn(source: String, path: String, machine: [Effect
                 access_body = Val(line.removeprefix(access_head).removesuffix(" }}").trim())
                 next
             }
-            if line.starts_with(action_head) && line.ends_with(" }}") && action_body == None {
-                action_body = Val(line.removeprefix(action_head).removesuffix(" }}").trim())
-                next
-            }
-            if line.starts_with(root_action_head) && root_action_text == None {
-                quoted: line.removeprefix(root_action_head).removesuffix(",").trim()
-                parsed: effect_vocabulary_unquote(quoted) ?? build_time_refused("{place}: `root_action` must be a double-quoted string literal")
-                root_action_text = Val(parsed)
-                next
-            }
             if body != None || !line.starts_with(impl_head) || !line.ends_with(" }}") {
-                build_time_refused("{place}: expected `parent: Root.Case`, `irreversible: fn(self) -> Bool {{ … }}`, `expert: fn(self) -> Bool {{ … }}`, `access: fn(self) -> EffectAccess {{ … }}`, `action: fn(self) -> String {{ … }}`, or `root_action: \"…\"` in `impl Effect`")
+                build_time_refused("{place}: expected `parent: Root.Case`, `irreversible: fn(self) -> Bool {{ … }}`, `expert: fn(self) -> Bool {{ … }}`, or `access: fn(self) -> EffectAccess {{ … }}` in `impl Effect`")
             }
             body = Val(line.removeprefix(impl_head).removesuffix(" }}").trim())
+            next
+        }
+        if line.starts_with(action_head) && line.ends_with(" }}") && action_body == None {
+            action_body = Val(line.removeprefix(action_head).removesuffix(" }}").trim())
+            next
+        }
+        if line.starts_with(root_action_head) && line.ends_with(" }}") && root_action_text == None {
+            quoted: line.removeprefix(root_action_head).removesuffix(" }}").trim()
+            parsed: effect_vocabulary_unquote(quoted) ?? build_time_refused("{place}: `root_action` must return a double-quoted string literal")
+            root_action_text = Val(parsed)
             next
         }
         if line == "impl Effect {{}}" || line == "impl Effect {{" {

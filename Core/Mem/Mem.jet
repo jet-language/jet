@@ -348,27 +348,25 @@ Region: struct {
     }
 }
 
-/// The allocator trait. `allocate` answers a block of at least `size` bytes
-/// at a multiple of `align`, or an AllocError. `release` takes a block back.
-/// `resize` changes a block's size in place and answers whether it could;
-/// on false the block is unchanged. Neither fails: the runtime calls
-/// `release` for a `#Context(allocator:)` block inside a drop.
+/// The allocator provider trait (`#Effect`). `allocate` answers a
+/// block of at least `size` bytes at a multiple of `align`, or an AllocError.
+/// `release` takes a block back. `resize` changes a block's size in place and
+/// answers whether it could; on false the block is unchanged. Neither fails:
+/// the runtime calls `release` for a `#Context(allocator:)` block inside a drop.
+#Effect(access: .Reads, action: "allocates memory")
 Allocator: trait {
     allocate: fn(^self, size: Int, align: Int) -> Block AllocError!,
     release: fn(^self, block: ^^Block) Never!,
     resize: fn(^self, block: ^Block, new_size: Int) -> Bool Never!,
 }
 
-// The runtime's call into `allocator` for a `#Context(allocator:)` block
+// Stage-1 bootstrap bridge for legacy `#Context(allocator: user_alloc)` blocks
 // (JetRuntime Alloc.jet alloc_user_call): op 0 allocates x bytes at align y
 // and answers the address, 0 when refused; op 1 releases the x bytes at
-// address y, a block op 0 answered. The block borrows the allocator, so the
-// call holds its address, not a copy: the block's checks keep the allocator
-// in place and unchanged until the block ends, and the runtime calls this
-// only inside it. The sentry witness is off for that read because the
-// address was taken in this function's frame, which has returned by then.
-// The closure's type has no failure: the runtime takes its result as a bare
-// Int, and `-> Int Never!` here would make it a failure-carrying result.
+// address y, a block op 0 answered. New code may install `#Context(Allocator: ^a)`
+// directly via the `#Effect` trait above; Stage 2 deletes this shim once
+// `Statements/ContextBlocks.jet` and `Core/Builtins/Builtins.jet` retire
+// `AllocatorHandler`.
 #Builtin.Role(.AllocatorHandler) priv __allocator_handler: fn<A: Allocator>(allocator: A) -> fn(Int, Int, Int) -> Int {
     ^address: 0
     #Unsafe("the allocator is a place the `#Context(allocator:)` block keeps in place until it ends") {

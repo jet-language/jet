@@ -1,0 +1,55 @@
+// Table-driven target provider binding (`TargetProviders.jet`): verifies that
+// `jet_driver_profile_providers` extracts every string provider field from a
+// `Machine` profile's `MachineFacts` literal and `jet_driver_bind_target_providers`
+// binds registered target hooks (`scheduler` -> `core.tasks.Scheduler`).
+use {
+    jet_driver.[
+        jet_driver_bind_target_providers,
+        jet_driver_profile_providers,
+        jet_driver_target_provider_binding,
+    ]
+    jet_parser.[parse_source]
+}
+
+#Test("target providers table reads MachineFacts providers and binds scheduler hooks") {
+    assert(jet_driver_target_provider_binding("scheduler") != None)
+    assert(jet_driver_target_provider_binding("unknown_service") == None)
+    src: `use core.target.[Machine, MachineFacts, MachineLayout]
+
+LifoBoard: struct {
+    impl Machine {
+        facts: MachineFacts{
+            triple: "x86_64-unknown-linux-gnu",
+            layout: MachineLayout{pointer_bits: 64, word_bits: 64, cache_line: 64, atomic_bits: 64},
+            allocator: "system",
+            panic: "stderr",
+            scheduler: "Lifo",
+        },
+    }
+}
+`
+    parsed: parse_source(src.bytes())
+    assert_eq(parsed.diagnostics.len(), 0)
+    ^program: parsed.program.move()
+    providers: jet_driver_profile_providers(program.items, "LifoBoard")
+    ^found_scheduler: ""
+    ^found_allocator: ""
+    loop selection in providers {
+        if selection.field == "scheduler" -> found_scheduler = selection.provider
+        if selection.field == "allocator" -> found_allocator = selection.provider
+    }
+    assert_eq(found_scheduler, "Lifo")
+    assert_eq(found_allocator, "system")
+
+    bound: jet_driver_bind_target_providers(program, "LifoBoard")
+    assert_eq(bound, [String]{"scheduler"})
+    ^has_push: false
+    ^has_pop: false
+    loop item in program.items {
+        if item == .Func(func) {
+            if func.name == "jet_rt_scheduler_queue_push" -> has_push = true
+            if func.name == "jet_rt_scheduler_queue_pop" -> has_pop = true
+        }
+    }
+    assert(has_push && has_pop, "expected table-driven target provider binding to emit scheduler hooks")
+}

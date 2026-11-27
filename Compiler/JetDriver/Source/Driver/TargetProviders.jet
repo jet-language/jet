@@ -1,0 +1,175 @@
+// Table-driven target provider binding. A package's machine target profile
+// (`targets: { machine: { profile: "Board" } }`) names a struct implementing
+// `core.target.Machine`; its `facts: MachineFacts{ ... }` lists string
+// provider type names for target services (`scheduler`, etc.). Each field
+// registered in `JET_DRIVER_TARGET_PROVIDER_BINDINGS` binds the target's
+// runtime hooks directly to the selected provider at link time with zero
+// per-call table dispatch.
+use {
+    jet_foundation.[Expr, ExprField, Item, Program, StructDef]
+    jet_parser.[parse_generated_source]
+    jet_pkg_model.[PackageParseError, pkg_parse_target_profiles, pkg_record_body, pkg_retired_record_head_spans]
+}
+
+// The target whose profile is the build's machine.
+JET_DRIVER_MACHINE_TARGET: "machine"
+
+// One selected `MachineFacts.<field>: "<ProviderType>"` entry on a target profile.
+JetDriverTargetProviderSelection: struct {
+    field: String,
+    provider: String,
+}
+
+// One table row describing a target service bound at link time from a
+// `MachineFacts` field (for example, `scheduler` -> `core.tasks.Scheduler`).
+JetDriverTargetProviderBinding: struct {
+    field: String,
+    trait_name: String,
+    spellings: [String],
+}
+
+JET_DRIVER_TARGET_PROVIDER_BINDINGS: #run { [JetDriverTargetProviderBinding]{
+    JetDriverTargetProviderBinding{
+        field: "scheduler",
+        trait_name: "core.tasks.Scheduler",
+        spellings: [String]{"queued_task", "queued_handle"},
+    },
+} }
+
+jet_driver_target_provider_binding: fn(field: String) -> JetDriverTargetProviderBinding? Never! {
+    loop row in JET_DRIVER_TARGET_PROVIDER_BINDINGS {
+        if row.field == field -> return Val(row)
+    }
+    None
+}
+
+// The `targets:` field's value, read by the canonical Package reader: the
+// profile identity its `machine` target selects, or "" when it has none.
+jet_driver_read_machine_profile: fn(value: String) -> String PackageParseError! {
+    if pkg_retired_record_head_spans(value).len() > 0 {
+        return Err(PackageParseError.RetiredRecordHead)
+    }
+    targets: pkg_parse_target_profiles(pkg_record_body(value, "targets"))
+    profile: targets.profile(JET_DRIVER_MACHINE_TARGET) ?? return Ok("")
+    Ok(profile.as_str())
+}
+
+// The machine profile of the package whose root is `root_index`.
+jet_driver_machine_profile: fn(packages: [JetDriverPackageInfo], root_index: Int) -> String Never! {
+    loop package in packages {
+        if package.root_index == root_index -> return package.machine_profile
+    }
+    ""
+}
+
+// Every valid provider-type string field declared on `profile`'s
+// `impl Machine { facts: MachineFacts{ ... } }`.
+jet_driver_profile_providers: fn(items: [Item], profile: String) -> [JetDriverTargetProviderSelection] Never! {
+    if profile == "" -> return [JetDriverTargetProviderSelection]{}
+    loop item in items {
+        if item == .Struct(definition) {
+            if definition.name == profile -> return jet_driver_struct_machine_providers(definition)
+        }
+    }
+    [JetDriverTargetProviderSelection]{}
+}
+
+jet_driver_struct_machine_providers: fn(definition: StructDef) -> [JetDriverTargetProviderSelection] Never! {
+    ^selections: [JetDriverTargetProviderSelection]{}
+    loop block in definition.trait_impls {
+        if block.trait_name != "Machine" && !block.trait_name.ends_with(".Machine") -> next
+        loop constant in block.constants {
+            if constant.name != "facts" -> next
+            loop field in jet_driver_record_fields(constant.value) {
+                if field.value == .Str(parts, _, _) {
+                    if parts.len() == 1 && parts[0] == .Lit(text) && jet_driver_provider_type_name(text) {
+                        selections.push(JetDriverTargetProviderSelection{field: field.name, provider: text})
+                    }
+                }
+            }
+            return selections
+        }
+    }
+    selections
+}
+
+// The fields a record literal writes: `MachineFacts{…}` parses as a typed
+// literal with a field body; a struct literal carries its fields itself.
+jet_driver_record_fields: fn(value: Expr) -> [ExprField] Never! {
+    if value == .StructLit(_, _, _, _, fields, _, _, _) -> return fields
+    if value == .TypedLit(_, body, _, _) {
+        if body == .Fields(fields) -> return fields
+    }
+    [ExprField]{}
+}
+
+// A type as the entry spells it: dotted identifier components.
+jet_driver_provider_type_name: fn(text: String) -> Bool Never! {
+    if text == "" || text.starts_with(".") || text.ends_with(".") || text.contains("..") {
+        return false
+    }
+    loop byte in text.bytes() {
+        code: Int{byte}
+        if !((code >= 48 && code <= 57) || (code >= 65 && code <= 90) || (code >= 97 && code <= 122) || code == 95 || code == 46) {
+            return false
+        }
+    }
+    true
+}
+
+jet_driver_target_provider_hooks_source: fn(field: String, provider: String) -> String Never! {
+    if field == "scheduler" {
+        lines: [String]{
+            "use {{",
+            "    __jet_scheduler_tasks: core.tasks",
+            "}}",
+            "__JET_SCHEDULER: Shared{{{provider}{{}}}}",
+            "#Export(c) jet_rt_scheduler_queue_push: fn(task: I64) {{",
+            "    ^__guard: __JET_SCHEDULER.guard_edit()",
+            "    #Unsafe(\"the runtime hands its scheduler each task it submits, once\") {{",
+            "        __guard.value.push(__jet_scheduler_tasks.queued_task(Int{{task}}))",
+            "    }}",
+            "}}",
+            "#Export(c) jet_rt_scheduler_queue_pop: fn() -> I64 {{",
+            "    ^__guard: __JET_SCHEDULER.guard_edit()",
+            "    if __guard.value.pop() == .Val(__task) -> I64{{__jet_scheduler_tasks.queued_handle(__task)}} else -> I64{{0}}",
+            "}}",
+        }
+        return lines.join("\n")
+    }
+    ""
+}
+
+// Parse-time step for the entry file: binds every registered target provider
+// selected by its package's machine profile. Returns the bound field names.
+jet_driver_bind_target_providers: fn(program: ^Program, profile: String) -> [String] {
+    ^bound: [String]{}
+    selections: jet_driver_profile_providers(program.items, profile)
+    loop selection in selections {
+        if jet_driver_target_provider_binding(selection.field) == None -> next
+        source: jet_driver_target_provider_hooks_source(selection.field, selection.provider)
+        if source == "" -> next
+        parsed: parse_generated_source(source.bytes())
+        if parsed.diagnostics.len() > 0 -> next
+        loop declaration in parsed.program.imports -> program.imports.push(declaration)
+        loop item in parsed.program.items -> program.items.push(item)
+        loop name in parsed.program.used_import_names -> program.used_import_names.push(name)
+        bound.push(selection.field)
+    }
+    bound
+}
+
+// The entry's spellings gain the Core functions the bound target hooks call,
+// after a `.`, so the load keeps them.
+jet_driver_target_provider_spell: fn(words: ^JetDriverUnitWords, bound_fields: [String]) {
+    if bound_fields.len() == 0 -> return
+    if words.spells.len() == 0 -> words.spells.push([Int]{})
+    last: words.spells.len() - 1
+    loop field in bound_fields {
+        binding: jet_driver_target_provider_binding(field) ?? next
+        loop word in binding.spellings {
+            words.spells[last].push(words.words.len() * 4 + 1)
+            words.words.push(word)
+        }
+    }
+}

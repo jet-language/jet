@@ -7067,9 +7067,10 @@ jet_driver_load_walk: fn(
         if !embedded && source_unit_index == (entry_index ?? -1) {
             sema_script_entry(program)
             if request.eval_entry -> sema_eval_entry_show(program)
-            if jet_driver_bind_scheduler_provider(program, jet_driver_machine_profile(packages, unit.root_index)) && words != None {
+            bound_providers: jet_driver_bind_target_providers(program, jet_driver_machine_profile(packages, unit.root_index))
+            if bound_providers.len() > 0 && words != None {
                 ^spelled: words.move() ?? jet_driver_unit_no_words()
-                jet_driver_scheduler_spell(spelled)
+                jet_driver_target_provider_spell(spelled, bound_providers)
                 words = Val(spelled.move())
             }
         }

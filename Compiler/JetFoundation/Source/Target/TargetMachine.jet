@@ -743,25 +743,45 @@ jet_target_machine_use_default: fn() -> TargetMachineUse Never! {
     }
 }
 
-jet_target_capability_name: fn(capability: TargetCapability) -> String Never! {
+jet_target_capability_index: fn(capability: TargetCapability) -> Int Never! {
     if capability == {
-        .Allocator -> "Target.Allocator"
-        .Memory -> "Target.Memory"
-        .Atomic64 -> "Target.Atomic64"
-        .MMIO -> "Target.MMIO"
-        .Hardware -> "Target.Hardware"
-        .TimeWall -> "Time.Wall"
-        .TimeMonotonic -> "Time.Monotonic"
-        .TimeZoneData -> "Time.ZoneData"
-        .TimeSleep -> "Time.Sleep"
-        .Entropy -> "Rand.Entropy"
-        .Scheduler -> "Target.Scheduler"
-        .IORead -> "IO.Read"
-        .IOWrite -> "IO.Write"
-        .Panic -> "Target.Panic"
-        .PanicReport -> "Panic.Report"
-        .Startup -> "Target.Startup"
+        .Allocator -> 0
+        .Memory -> 1
+        .Atomic64 -> 2
+        .MMIO -> 3
+        .Hardware -> 4
+        .TimeWall -> 5
+        .TimeMonotonic -> 6
+        .TimeZoneData -> 7
+        .TimeSleep -> 8
+        .Entropy -> 9
+        .Scheduler -> 10
+        .IORead -> 11
+        .IOWrite -> 12
+        .Panic -> 13
+        .PanicReport -> 14
+        .Startup -> 15
     }
+}
+
+// Single source of truth: target capability names are derived from the Build
+// provider fact planes in Compiler/Prelude/Facts.jet (FACT_SOURCE), in
+// TARGET_CAPABILITY_ALL declaration order.
+jet_target_capability_fact_names_read: fn() -> [String] Never! {
+    ^names: [String]{}
+    loop row in registration_fact_rows() {
+        if row.target != RegistrationFactTarget.Build -> next
+        if row.gates.contains("provider") {
+            names.push(row.name)
+        }
+    }
+    names
+}
+
+TARGET_CAPABILITY_FACT_NAMES: #run { jet_target_capability_fact_names_read() }
+
+jet_target_capability_name: fn(capability: TargetCapability) -> String Never! {
+    TARGET_CAPABILITY_FACT_NAMES[jet_target_capability_index(capability)]
 }
 
 jet_target_capabilities_for_core_usage: fn(api: String) -> [TargetCapability] Never! {

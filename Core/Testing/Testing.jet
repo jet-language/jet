@@ -279,9 +279,12 @@ testing_corpus_walk: fn(directory: String, prefix: String, suffix: String, entri
 }
 
 /// The test-facing spelling of the deterministic Prelude `Clock` built by `Clock.new`.
+/// Use `core.effects.SteppingClock` / `core.effects.FixedClock` / `core.effects.WorldClock`
+/// to install a deterministic `#Effect` provider in `#Context(Clock: ...)`.
 fake_clock: fn(unix_ms: Int) -> Clock Never! { Clock.new(unix_ms) }
 
 /// A caller-owned deterministic RNG seeded by the ordinary source constructor.
+/// Pair with `core.effects.SeededRandom.new(seed)` in `#Context(Random: ...)`.
 fake_rng: fn(seed: Int) -> random.RNG Never! { random.rng(seed) }
 
 /// Deterministic fake data uses the same source SplitMix64 stream as RNG.

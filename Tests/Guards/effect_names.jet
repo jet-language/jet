@@ -349,3 +349,18 @@ effect_list_homes: fn(path: String, out: ^[String]) -[FS.Read]> {
     assert(!authority.contains("\"reads and writes files\""), "Authority.jet must not duplicate effect action prose from Prelude/Effects.jet")
     assert(!authority.contains("\"reads the clock\""), "Authority.jet must not duplicate effect action prose from Prelude/Effects.jet")
 }
+
+#Test("target provider binding and machine facts stay consolidated with zero drift switches") {
+    guards_enter_root()
+    assert(!effect_name_files.exists("Compiler/JetDriver/Source/Driver/SchedulerProvider.jet"), "SchedulerProvider.jet must remain deleted in favor of table-driven TargetProviders.jet")
+    target_providers: effect_name_files.read("Compiler/JetDriver/Source/Driver/TargetProviders.jet") ?? panic("read TargetProviders.jet: {err}")
+    assert(target_providers.contains("JET_DRIVER_TARGET_PROVIDER_BINDINGS"), "TargetProviders.jet must drive target provider binding from a single table")
+
+    target_machine: effect_name_files.read("Compiler/JetFoundation/Source/Target/TargetMachine.jet") ?? panic("read TargetMachine.jet: {err}")
+    assert(target_machine.contains("TARGET_CAPABILITY_FACT_NAMES"), "TargetMachine.jet must derive capability names from Prelude/Facts.jet via registration_fact_rows()")
+    assert(!target_machine.contains(".Allocator -> \"Target.Allocator\""), "TargetMachine.jet must not duplicate capability name strings from Prelude/Facts.jet")
+
+    core_target: effect_name_files.read("Core/Target/Target.jet") ?? panic("read Core/Target/Target.jet: {err}")
+    assert(core_target.contains("effect_slots"), "Core/Target/Target.jet must derive MachineFacts.row() from its effect_slots table")
+    assert(!core_target.contains("denied.push(\"!Net\")"), "Core/Target/Target.jet must not hand-code a 15-branch denied.push switch")
+}
