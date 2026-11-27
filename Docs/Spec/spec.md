@@ -2386,7 +2386,7 @@ archive: fn(name: ^^String) -> String { name }
 
 run: fn() {
     ^score: 41
-    bump(score)
+    bump(^score)
     saved: archive("vault")
     print(saved)
 }
@@ -2415,32 +2415,39 @@ run: fn() {
 Writing through a read receiver is E0205 and points to `^self`. Calling a
 `^self` method needs a changeable receiver: a `:` binding is E0111 and a read
 parameter is E0205, each quoting the method's signature line.
-Calls carry no marks (D-CALLSITE-MARK2=A): the signature says what a call does
-to each input, so `bump(score)`, `items.push(3)` and `buf.seal()` are written
-plain. Using the same name twice while a write access is live is E0204: pass
-`x` once, or materialize `x.copy()` first. A write argument writes only once
-the call runs, so a later argument may read `x` when that read ends with its
-own evaluation (`grow(xs, xs.len())`, like `xs.push(xs.len())`, or a copied
-scalar in `add(n, n)`); a later argument the call keeps holding, moves, or
-writes is still E0204, and so is `x` passed on to a nested call
-(`grow(xs, f(xs))`), whose parameter may keep or take it. A part of a list
+Every call writes `^` before each named argument it changes (`bump(^score)`,
+`grow(^st.items)`, `sort_part(^values[0..2])`, including forwarded `^`
+parameters and `^<>` on a named pipe head in the first pipe step), with E0228
+when a mark is missing or disagrees with the signature; `jet fmt` inserts every
+required mark from the checked compile. Method receivers stay plain
+(`items.push(3)`, `buf.seal()`) and operators never carry a call mark; a mark
+on a receiver, read argument, fresh value, copied type, function item, or field
+take is E0225. Using the same name twice while a write access is live is E0204:
+pass `x` once, or materialize `x.copy()` first. A write argument writes only
+once the call runs, so a later argument may read `x` when that read ends with
+its own evaluation (`grow(^xs, xs.len())`, like `xs.push(xs.len())`, or a
+copied scalar in `add(^n, n)`); a later argument the call keeps holding, moves,
+or writes is still E0204, and so is `x` passed on to a nested call
+(`grow(^xs, f(xs))`), whose parameter may keep or take it. A part of a list
 passed to a writing parameter is a write window by itself
-(`sort_part(values[0..2])`). A write window bound to a name is made by
+(`sort_part(^values[0..2])`). A write window bound to a name is made by
 `in_place`: `edit: values[2..3].in_place()`.
 
 ### Copies, moves, and owned destinations
 
-A named binding passed to a take parameter moves into the call
-(D-COPY-DEFAULT1=A, D-CALLSITE-MARK2=A); any later use on any path, or a later
-iteration of a loop the name outlives, is E0209, which names the call and
-teaches `x.copy()` or a reorder. Jet never hides a clone to make that call
-work. A name in two argument slots of one call has no last use in that call,
-so a take slot is E0209 there. A field passed to a take parameter is written
-`owner.field.move()`, so a partial move is always visible. One call that reads
-a name through one argument and takes it through another is E0204. A captured
-name passed to a take parameter inside a lambda body moves `x` into the
-lambda: `x` is gone after the lambda is made, and a second call of the lambda
-binding on any path is E0121.
+A named binding passed to a take parameter moves into the call; it needs no
+call mark, while an optional written `^^name` on a whole non-copy name is
+accepted and checked (`jet fmt` leaves optional `^^` as written), and a whole
+`name.move()` written straight into a `^^` parameter is E0225 rewriting to
+`^^name`. Any later use on any path, or a later iteration of a loop the name
+outlives, is E0209, which names the call and teaches `x.copy()` or a reorder.
+Jet never hides a clone to make that call work. A name in two argument slots of
+one call has no last use in that call, so a take slot is E0209 there. A field
+passed to a take parameter is written `owner.field.move()`, so a partial move
+is always visible. One call that reads a name through one argument and takes it
+through another is E0204. A captured name passed to a take parameter inside a
+lambda body moves `x` into the lambda: `x` is gone after the lambda is made,
+and a second call of the lambda binding on any path is E0121.
 A literal, `x.copy()`, or call result is a temporary and
 may enter a take parameter without another marker. A temporary with cleanup
 lent to a read parameter (`show(open_log("x"))`) closes exactly once, when its

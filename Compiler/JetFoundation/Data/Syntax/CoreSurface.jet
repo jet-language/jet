@@ -358,14 +358,14 @@ SIZED_NUMERIC_TYPES: [String]{
     TYPE_F64,
 }
 
-/// (ratified, supersedes): memory model v5 sigils. Two
-/// sigils plus unmarked: unmarked = read (enforced in S2), `^T` = exclusive
-/// write, `^^T` = take (consume). A deliberate copy is the
-/// built-in method `x.copy()`, an early move `x.move()` and a write window
-/// `place.in_place()`. Marks live in signatures: calls are plain
-/// (`buf.append(x)`, `buf.seal()`, `edit(buf)`). Outside a signature `^`
-/// marks a changeable name (`^count: 0`) and `^^` stays only in
-/// `task ^^name`.
+/// Memory model v5 sigils: unmarked = read (enforced in S2), `^T` = exclusive
+/// write, `^^T` = take (consume). A deliberate copy is the built-in method
+/// `x.copy()`, an early move `x.move()` and a write window `place.in_place()`.
+/// Every call writes `^` before each named argument it changes (`edit(^buf)`,
+/// `grow(^st.items)`), including forwarded `^` parameters and `^<>` on a named
+/// pipe head; method receivers stay unmarked (`buf.append(x)`, `buf.seal()`).
+/// Outside a signature `^` marks a changeable name (`^count: 0`), and `^^`
+/// marks `task ^^name` and optional checked whole-name call takes (`seal(^^buf)`).
 SIGIL_MOVE: "^^"
 
 SIGIL_WRITE: "^"

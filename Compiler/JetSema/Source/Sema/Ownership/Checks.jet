@@ -4232,7 +4232,7 @@ sema_ownership_check_call_arguments_with_accesses: fn(state: ^SemaOwnershipState
                 places.push(place)
             }
         }
-        if (scopes.writes_explicit || arg.mark != None) && !binder_rooted {
+        if !binder_rooted {
             sema_call_marks_check_argument(scopes, callee, receiver, params, param, arg, diagnostics)
         }
         if !binder_rooted && single_use && !callee.starts_with("core.") && !sema_single_use_check_argument(state, callee, param.convention, arg.expr, scopes, diagnostics) {
@@ -4815,7 +4815,7 @@ sema_ownership_check_method_receiver: fn(check: ^SemaBodyCheck, receiver: Expr, 
 // changeability error quotes.
 sema_ownership_check_call_receiver_as: fn(check: ^SemaBodyCheck, receiver: Expr, convention: AccessConvention, capability: Bool, method: String, consumer: String, params: [SemaCallParam], span: Span, change_span: Span) -> Bool {
     sema_ownership_note_call_receiver(check.state, receiver, convention)
-    if (check.scopes.writes_explicit && convention != AccessConvention.Read) || sema_receiver_mark_needs_signature(check.state, receiver) {
+    if sema_receiver_mark_needs_signature(check.state, receiver) {
         sema_receiver_mark_sign(check.state, receiver, sema_ownership_signature_line(method, Val(convention), params))
     }
     places: sema_ownership_places_from_expr_in_state(receiver, check.scopes, check.state)
@@ -5101,7 +5101,7 @@ sema_ownership_check_call_receiver_with_footprint: fn(check: ^SemaBodyCheck, rec
         return sema_ownership_check_call_receiver_as(check, receiver, convention, capability, method, consumer, params, span, change_span)
     }
     sema_ownership_note_call_receiver(check.state, receiver, convention)
-    if (check.scopes.writes_explicit && convention != AccessConvention.Read) || sema_receiver_mark_needs_signature(check.state, receiver) {
+    if sema_receiver_mark_needs_signature(check.state, receiver) {
         sema_receiver_mark_sign(check.state, receiver, sema_ownership_signature_line(method, Val(convention), params))
     }
     base_places: sema_ownership_places_from_expr_in_state(receiver, check.scopes, check.state)

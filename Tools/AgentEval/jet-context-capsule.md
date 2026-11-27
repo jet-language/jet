@@ -94,9 +94,12 @@ line.trim().to_lower())`. Then call `lines.sort()` and loop over the list.
 - A bare parameter type `T` is read. `^T` gives exclusive write access, and
   `^^T` takes ownership. The sigil is on the type: `edit: fn(x: ^T)` and
   `consume: fn(x: ^^T)`.
-- Calls carry no marks; the signature decides: `edit(value)` writes `value`,
-  and `consume(value)` moves `value` into the callee. A later use, a loop
-  reuse, or two arguments naming the same binding need a deliberate
+- Calls write `^` before every named argument they change (`edit(^value)`,
+  including forwarded `^` parameters and `^<>` on a named pipe head), while
+  method receivers stay unmarked (`items.push(x)`). `jet fmt` inserts every
+  required mark. A whole-name take moves on its last use with no required mark
+  (`consume(value)` or optional checked `consume(^^value)`); a later use, a
+  loop reuse, or two arguments naming the same binding need a deliberate
   `value.copy()`. A field passed to a take parameter is written
   `owner.field.move()`.
 - `value.copy()` makes an independent copy. It is not a move marker and is useful

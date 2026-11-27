@@ -1,10 +1,9 @@
-# `#Policy(writes: .Explicit)`: each plain call that changes or takes a named
-# value is E0228 with a Safe edit; `jet fix` writes the marks and the result
-# checks and runs.
+# Every call that changes a named argument requires `^` (E0228) with a Safe
+# edit; `jet fix` inserts the marks and the result checks and runs.
 fixture: WritesPolicyFixInsertsCallMarks.fixture
 step: jet check run.jet
 exit: 1
-stderr: ~ "Jet.CallMarkRequired" # every missing mark is the policy's code
+stderr: ~ "Jet.CallMarkRequired" # missing write call mark
 step: jet fix run.jet
 file: run.jet = WritesPolicyFixInsertsCallMarks.fixture/run.fixed.out
 step: jet run run.jet

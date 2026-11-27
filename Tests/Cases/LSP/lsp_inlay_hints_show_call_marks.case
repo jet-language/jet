@@ -1,5 +1,5 @@
-# Calls carry no marks, so the editor shows the `^` the signature decides: at
-# the argument `bump` writes and at the receiver `add` writes through `^self`.
+# Written arguments already carry `^`, so the editor omits a duplicate `^`
+# hint on `bump(^score)` and keeps the `^` hint on the receiver `tally.add(2)`.
 session lsp content-length: jet self lsp
 send lsp: Messages/LSPInlayHintsShowCallMarks/0.json
 recv lsp until $.id = 1
@@ -8,8 +8,8 @@ recv lsp
 json: stdout doc $.params.diagnostics #= 0
 send lsp: Messages/LSPInlayHintsShowCallMarks/2.json
 recv lsp until $.id = 2
-json: stdout doc $.result[?label="count: ^"] #= 1
-json: stdout doc $.result[?label="count: ^"][0].position = {"line":11,"character":9}
+json: stdout doc $.result[?label="count: "] #= 1
+json: stdout doc $.result[?label="count: "][0].position = {"line":11,"character":9}
 json: stdout doc $.result[?label="^"] #= 1
 json: stdout doc $.result[?label="^"][0].position = {"line":13,"character":4}
 json: stdout doc $.result[?label="by: "][0].position = {"line":13,"character":14}

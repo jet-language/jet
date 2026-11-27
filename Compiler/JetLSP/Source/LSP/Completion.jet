@@ -8,9 +8,9 @@
 // of its marker's package come first.
 use {
     core.encoding.[Dyn]
-    jet_foundation.[Binding, Expr, Func, Item, Span, Stmt, TOOL_STAGE_LSP_COMPLETION, Type, foundation_byte_text, foundation_json_quote, jet_error_json_encode_value, type_name]
-    jet_lexer.[Lexed, Token, TOKEN_DOT, TOKEN_IDENT, TOKEN_LBRACE, TOKEN_RBRACE, token_text]
-    jet_semindex.[SemDef, SemKind, SemSymbol, SemSymbolKind, semindex_symbol_imported_module]
+    jet_foundation.[AccessConvention, Binding, Expr, Func, Item, ParamZone, Span, Stmt, TOOL_STAGE_LSP_COMPLETION, Type, foundation_byte_text, foundation_json_quote, jet_error_json_encode_value, type_name]
+    jet_lexer.[Lexed, Token, TOKEN_CARET, TOKEN_COLON, TOKEN_COMMA, TOKEN_DOT, TOKEN_IDENT, TOKEN_LBRACE, TOKEN_LPAREN, TOKEN_RBRACE, TOKEN_RPAREN, token_text]
+    jet_semindex.[SemDef, SemIndex, SemKind, SemSymbol, SemSymbolKind, semindex_symbol_imported_module]
     jet_sema.[SEMA_METHOD_IDIOMS, SemaMethodIdiom]
 }
 
@@ -398,6 +398,68 @@ lsp_completion_foreign_item: fn(view: LSPView, owner: String, idiom: SemaMethodI
     None
 }
 
+// Whether `start` begins an unmarked argument in a call slot whose parameter
+// takes write access (`^T`), so completing a local or parameter inserts `^name`.
+lsp_completion_in_write_arg_slot: fn(view: LSPView, index: SemIndex, start: Int) -> Bool Never! {
+    tokens: view.lexed.tokens
+    ^before: -1
+    loop i in 0..<tokens.len() {
+        if tokens[i].span.end <= start -> before = i else -> break
+    }
+    if before < 0 -> return false
+    if tokens[before].kind == TOKEN_CARET -> return false
+    ^label: String?{None}
+    ^scan: before
+    if tokens[scan].kind == TOKEN_COLON && scan > 0 && tokens[scan - 1].kind == TOKEN_IDENT {
+        label = Val(token_text(view.lexed.tables, tokens[scan - 1]))
+        scan -= 2
+    }
+    if scan < 0 -> return false
+    if tokens[scan].kind != TOKEN_LPAREN && tokens[scan].kind != TOKEN_COMMA -> return false
+    ^depth: 0
+    ^arg_index: 0
+    ^open_paren: -1
+    ^cursor: scan
+    loop cursor >= 0 {
+        kind: tokens[cursor].kind
+        if kind == TOKEN_RPAREN {
+            depth += 1
+        } else if kind == TOKEN_LPAREN {
+            if depth == 0 {
+                open_paren = cursor
+                break
+            }
+            depth -= 1
+        } else if kind == TOKEN_COMMA && depth == 0 {
+            arg_index += 1
+        }
+        cursor -= 1
+    }
+    if open_paren <= 0 || tokens[open_paren - 1].kind != TOKEN_IDENT -> return false
+    callable: lsp_call_callable(view, index, open_paren - 1) ?? return false
+    if label == .Val(wanted) {
+        loop param in callable.params {
+            if param.label == wanted -> return param.access == AccessConvention.Write
+        }
+        return false
+    }
+    ^bound: arg_index
+    if bound >= callable.params.len() {
+        if callable.params.len() == 0 || !callable.params[callable.params.len() - 1].variadic -> return false
+        bound = callable.params.len() - 1
+    }
+    param: callable.params[bound]
+    if param.zone == ParamZone.LabelOnly -> return false
+    param.access == AccessConvention.Write
+}
+
+lsp_completion_write_item_json: fn(symbol: SemSymbol, uri: String) -> String Never! {
+    data: if symbol.summary == "" -> "" else -> ",\"data\":{{\"uri\":{foundation_json_quote(uri)},\"identity\":{foundation_json_quote(symbol.identity)}}}"
+    doc: if symbol.provenance == .Builtin(_) && symbol.summary != "" -> ",\"documentation\":{{\"kind\":\"markdown\",\"value\":{foundation_json_quote(lsp_completion_symbol_doc(symbol))}}}" else -> ""
+    marked: "^{symbol.name}"
+    "{{\"label\":{foundation_json_quote(marked)},\"filterText\":{foundation_json_quote(symbol.name)},\"insertText\":{foundation_json_quote(marked)},\"kind\":{lsp_completion_item_kind(symbol.kind)},\"detail\":{foundation_json_quote(symbol.signature)}{doc}{data}}}"
+}
+
 lsp_completion_response: fn(server: LSPServer, params: Dyn?, id: Dyn) -> String {
     view: lsp_view(server, params) ?? return lsp_response(id, "null")
     position: lsp_params_position(params) ?? return lsp_response(id, "null")
@@ -439,6 +501,7 @@ lsp_completion_response: fn(server: LSPServer, params: Dyn?, id: Dyn) -> String 
             items.push("{{\"label\":{foundation_json_quote(snippet[0])},\"kind\":15,\"detail\":{foundation_json_quote(snippet[1])},\"insertText\":{foundation_json_quote(snippet[2])},\"insertTextFormat\":2}}")
         }
     }
+    write_slot: if member == None && view.checked.index == .Val(index) -> lsp_completion_in_write_arg_slot(view, index, start) else -> false
     loop symbol in view.checked.symbols {
         if !symbol.name.starts_with(prefix) -> next
         candidate: if member == .Val(scope) -> lsp_member_candidate(symbol, scope) else -> lsp_scope_candidate(symbol, view.module_path, offset)
@@ -450,7 +513,11 @@ lsp_completion_response: fn(server: LSPServer, params: Dyn?, id: Dyn) -> String 
             incomplete = true
             break
         }
-        items.push(lsp_completion_item_json(symbol, view.uri))
+        if write_slot && (symbol.kind == SemSymbolKind.Local || symbol.kind == SemSymbolKind.Parameter) {
+            items.push(lsp_completion_write_item_json(symbol, view.uri))
+        } else {
+            items.push(lsp_completion_item_json(symbol, view.uri))
+        }
     }
     // A foreign word completes only once a word is written, and only to a
     // method no item already offers.

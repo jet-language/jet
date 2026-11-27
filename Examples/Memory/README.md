@@ -6,6 +6,7 @@ Run a lesson from the repository root, for example `jet run Examples/Memory/<Les
 
 ## Lessons
 
+- [CallMarks](CallMarks.jet) — Every call writes `^` before each named argument it changes (`append_step(^ledger, …)`, `^<>`), method receivers stay plain (`ledger.append(…)`), and whole-name takes accept a plain last use or checked `^^name`.
 - [ComputedField](ComputedField.jet) — A marked computed field keeps its answer until a stored sibling in its dependency graph changes.
 - [CopyVerb](CopyVerb.jet) — `x.copy()` — the one copy sigil.
 - [DeferConsume](DeferConsume.jet) — `defer close(resource)` consumes its resource when the scope exits.

@@ -1,53 +1,26 @@
-Error: Jet.CallMarkRequired: `.push()` changes `items`, so the call writes `^items`
-  --> Tests/UI/writes_policy_call_marks.jet:3:27
-    |
-  3 | grow: fn(items: ^[Int]) { items.push(4) }
-    |                           ^^^^^
- Why: `push: fn(^self, ^^Int)` changes this input, and `#Policy(writes: .Explicit)` writes every change and take at the call
- Fix: Write `^items`
-More: jet-lang.dev/e/Jet.CallMarkRequired
-
 Error: Jet.CallMarkRequired: `grow` changes `xs`, so the call writes `^xs`
-  --> Tests/UI/writes_policy_call_marks.jet:11:10
+  --> Tests/UI/writes_policy_call_marks.jet:9:10
     |
- 11 |     grow(xs)
+  9 |     grow(xs)
     |          ^^
- Why: `grow: fn(items: ^[Int])` changes this input, and `#Policy(writes: .Explicit)` writes every change and take at the call
- Fix: Write `^xs`
-More: jet-lang.dev/e/Jet.CallMarkRequired
-
-Error: Jet.CallMarkRequired: `.push()` changes `xs`, so the call writes `^xs`
-  --> Tests/UI/writes_policy_call_marks.jet:12:5
-    |
- 12 |     xs.push(5)
-    |     ^^
- Why: `push: fn(^self, ^^Int)` changes this input, and `#Policy(writes: .Explicit)` writes every change and take at the call
- Fix: Write `^xs`
+ Why: `grow: fn(items: ^[Int])` changes this input, and every call writes `^` before a named argument it changes
+ Fix: Write `^xs`, or run `jet fmt` / `jet fix`
 More: jet-lang.dev/e/Jet.CallMarkRequired
 
 Error: Jet.CallMarkRequired: `grow` changes `xs`, so its mark is `^`, not `^^`
-  --> Tests/UI/writes_policy_call_marks.jet:13:10
+  --> Tests/UI/writes_policy_call_marks.jet:11:10
     |
- 13 |     grow(^^xs)
+ 11 |     grow(^^xs)
     |          ^^
- Why: `grow: fn(items: ^[Int])` changes this input, and `#Policy(writes: .Explicit)` writes every change and take at the call
+ Why: `grow: fn(items: ^[Int])` changes this input, so the call writes `^`
  Fix: Write `^xs`
 More: jet-lang.dev/e/Jet.CallMarkRequired
 
-Error: Jet.CallMarkRequired: `archive` takes `title`, so the call writes `^^title`
-  --> Tests/UI/writes_policy_call_marks.jet:15:16
+Error: Jet.UnusedPlaceMark: `count` neither changes nor takes `xs`, so it takes no `^`
+  --> Tests/UI/writes_policy_call_marks.jet:14:19
     |
- 15 |     n: archive(title)
-    |                ^^^^^
- Why: `archive: fn(title: ^^String)` takes this input, and `#Policy(writes: .Explicit)` writes every change and take at the call
- Fix: Write `^^title`
-More: jet-lang.dev/e/Jet.CallMarkRequired
-
-Error: Jet.CallMarkRequired: `count` neither changes nor takes `xs`, so it takes no `^`
-  --> Tests/UI/writes_policy_call_marks.jet:16:19
-    |
- 16 |     print("{count(^xs)} {n}")
+ 14 |     print("{count(^xs)} {n}")
     |                   ^
- Why: `count: fn(items: [Int])` reads this input; a mark says the call changes or takes the value, so it would tell the reader something false
+ Why: `count: fn(items: [Int])` reads this input; a call mark applies only to a named argument the call changes (`^`) or takes (`^^`)
  Fix: Remove the `^`
-More: jet-lang.dev/e/Jet.CallMarkRequired
+More: jet-lang.dev/e/Jet.UnusedPlaceMark

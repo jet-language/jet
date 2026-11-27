@@ -1,0 +1,26 @@
+Error: Jet.CallMarkRequired: `grow` changes `items`, so the call writes `^items`
+  --> Tests/UI/e0228_call_mark_required.jet:7:33
+    |
+  7 | relay: fn(items: ^[Int]) { grow(items) }
+    |                                 ^^^^^
+ Why: `grow: fn(items: ^[Int])` changes this input, and every call writes `^` before a named argument it changes
+ Fix: Write `^items`, or run `jet fmt` / `jet fix`
+More: jet-lang.dev/e/Jet.CallMarkRequired
+
+Error: Jet.CallMarkRequired: `grow` changes `st.items`, so the call writes `^st.items`
+  --> Tests/UI/e0228_call_mark_required.jet:13:10
+    |
+ 13 |     grow(st.items)
+    |          ^^^^^^^^
+ Why: `grow: fn(items: ^[Int])` changes this input, and every call writes `^` before a named argument it changes
+ Fix: Write `^st.items`, or run `jet fmt` / `jet fix`
+More: jet-lang.dev/e/Jet.CallMarkRequired
+
+Error: Jet.CallMarkRequired: `archive` takes `title`, so its mark is `^^`, not `^`
+  --> Tests/UI/e0228_call_mark_required.jet:16:21
+    |
+ 16 |     print("{archive(^title)} {st.items.len()}")
+    |                     ^
+ Why: `archive: fn(title: ^^String)` takes this input rather than changing it in place; omit the mark or write `^^`
+ Fix: Write `^^title` or remove `^`
+More: jet-lang.dev/e/Jet.CallMarkRequired

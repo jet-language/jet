@@ -3,7 +3,6 @@
 // `--explicit-failures` (`?` / `(` / `?)`) through one checked compile per
 // package root rather than multiple compiles per file.
 use {
-    cli_files: core.files
     jet_driver.[
         JetDriverCompileMode,
         JetDriverSourceDocument,
@@ -50,20 +49,6 @@ jet_cli_fmt_package_key: fn(origin: String) -[FS, Env]> String Never! {
         return jet_cli_overlay_path(root)
     }
     canonical
-}
-
-// Whether explicit writes policy is active for `origin` (module header or
-// enclosing `package.jet`), so check failures refuse and keep the file as
-// written while missing `^` marks stay gated during staged cutover.
-jet_cli_fmt_writes_policy_active: fn(origin: String, source: String) -[FS, Env]> Bool Never! {
-    if source.contains("#Policy(writes: .Explicit)") -> return true
-    canonical: jet_cli_overlay_path(origin)
-    parent: jet_cli_parent(canonical) ?? "."
-    if jet_cli_manifest_root(parent) == .Val(root) {
-        manifest: cli_files.read(jet_cli_authority_path(root, "package.jet")) ?? return false
-        if manifest.contains("writes:") && manifest.contains(".Explicit") -> return true
-    }
-    false
 }
 
 // Compile the package of `origin` at most once per `(mode_key, package_key)`
@@ -240,12 +225,11 @@ jet_cli_fmt_checked_marks: fn(
     jet_cli_fmt_formatted("{marked}{foundation_byte_text(bytes, cursor, length)}")
 }
 
-// Call-mark insertion pass (`#7037 n3`): plain checked compile (one compile per
-// package, no prepended policy), inserting only Safe `^` marks from E0228
-// without touching receivers or valid `^^`.
+// Call-mark insertion pass: plain checked compile (one compile per package,
+// no prepended policy), inserting only Safe `^` marks from E0228 without
+// touching receivers or valid `^^`.
 jet_cli_fmt_call_marks: fn(source: String, origin: String, color: Bool, memo: ^JetCLIFmtCheckMemo) -> JetCLIFmtSource {
-    strict: jet_cli_fmt_writes_policy_active(origin, source)
-    jet_cli_fmt_checked_marks(source, origin, color, "", "", "call_marks", "E0228", [String]{"^"}, skip_receivers: true, strict: strict, memo: memo)
+    jet_cli_fmt_checked_marks(source, origin, color, "", "", "call_marks", "E0228", [String]{"^"}, skip_receivers: true, strict: true, memo: memo)
 }
 
 // Shared per-package `--explicit-copies` pass (one compile per package).

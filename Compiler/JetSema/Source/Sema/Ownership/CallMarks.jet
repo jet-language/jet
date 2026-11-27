@@ -1,26 +1,20 @@
-// Call marks: a call writes `^` before a named argument it changes (`grow(^xs)`),
-// receivers stay unmarked (`xs.push(4)`), and a written `^^` on a whole-name take
-// (`archive(^^title)`) is accepted and checked. The parser keeps a written
-// argument mark as `CallArg.mark` and a written receiver mark as an `Expr.Place`
-// that starts at the mark. During the staged cutover, missing `^` marks stay
-// gated by `#Policy(writes: .Explicit)` while every written mark outside the
-// policy follows the ratified rules directly (E0228 for a wrong mark, E0225 for
-// receiver, read, fresh-value, field-take, copied-take, or function-item marks).
+// Call marks: every call writes `^` before each named argument it changes
+// (`grow(^xs)`), including forwarded `^` parameters and `^<>` on a named pipe
+// head; method receivers stay unmarked (`xs.push(4)`); a whole-name take needs
+// no mark, while a written `^^name` is accepted and checked. The parser keeps
+// a written argument mark as `CallArg.mark` and a written receiver mark as an
+// `Expr.Place` that starts at the mark.
 use jet_foundation.[
     AccessConvention,
     AST_NODE_GENERATED,
     CallArg,
-    CallMark,
     Diagnostic,
     DiagnosticFixApplicability,
     DiagnosticFixSafety,
     Expr,
-    MARKER_POLICY,
-    Marker,
     PlaceAccess,
-    PolicyDeclaration,
-    PolicyKey,
     Span,
+    SymbolKind,
     TextEdit,
     Type,
     diagnostic_with_edit_grade,
@@ -28,58 +22,7 @@ use jet_foundation.[
     expr_source_span,
     expr_source_start,
     pipe_value_is_name,
-    ModuleID,
 ]
-
-sema_call_marks_writes_declaration: fn(declaration: PolicyDeclaration) -> Bool Never! {
-    if declaration.key != PolicyKey.Writes -> return false
-    if declaration.value == {
-        .Explicit -> true
-        .Enabled | .Limit(_) | .Forbid | .Default | .GateOnly | .Obligations | .Relaxed | .PerSite | .Track | .Skip | .Allow | .On | .Off | .Arithmetic(_) | .NoEager | .Only -> false
-    }
-}
-
-sema_call_marks_writes_marker: fn(marker: Marker) -> Bool Never! {
-    if marker.name != MARKER_POLICY -> return false
-    loop (index, label) in marker.arg_labels {
-        written: label ?? next
-        if written.name != "writes" || index >= marker.args.len() -> next
-        if marker.args[index] == {
-            .Expr(value) -> {
-                if value == {
-                    .EnumLit(type_name, variant, _, args, _, _, _) -> {
-                        if type_name == "" && variant == "Explicit" && args.len() == 0 {
-                            return true
-                        }
-                    }
-                    .Str(_, _, _) | .StrMatchLit(_, _, _) | .BinMatchLit(_, _, _) | .Int(_, _, _, _, _) | .Float(_, _, _, _, _) | .Bool(_, _, _) | .Unit(_, _) | .Char(_, _, _) | .ListLit(_, _, _) | .MemberSpread(_, _, _, _) | .Spread(_, _, _) | .MapLit(_, _, _) | .Index(_, _, _, _, _) | .Slice(_, _, _, _, _, _) | .Range(_, _, _, _, _) | .Ident(_, _, _) | .Call(_, _) | .Unary(_, _, _, _) | .Binary(_, _, _, _, _) | .CompareChain(_, _, _, _, _) | .UnitLit(_, _, _, _, _, _, _) | .Deref(_, _, _) | .RawOf(_, _, _) | .Copy(_, _, _) | .Place(_, _, _, _) | .Field(_, _, _, _) | .OptField(_, _, _, _, _, _) | .MethodCall(_, _, _, _, _, _, _) | .OptMethodCall(_, _, _, _, _, _, _) | .StructLit(_, _, _, _, _, _, _, _) | .TypedLit(_, _, _, _) | .Tainted(_, _, _, _) | .Present(_, _, _) | .Absent(_, _) | .Todo(_, _, _) | .NoElse(_, _) | .PatternTest(_, _, _, _) | .Ok(_, _, _) | .Err(_, _, _) | .Try(_, _, _, _, _) | .OrFallback(_, _, _, _, _) | .If(_, _, _, _, _, _, _) | .TupleLit(_, _, _, _) | .Lambda(_, _) | .CallValue(_, _, _, _) | .PtrFromAddr(_, _, _, _, _, _) | .ComptimeName(_, _, _, _) | .TypeValue(_, _, _) | .Paren(_, _, _) | .Pipe(_, _, _, _) -> {}
-                }
-            }
-            .EffectRow(_, _) -> {}
-        }
-    }
-    false
-}
-
-// A package or module `writes: .Explicit` declaration, or the function's own
-// `#Policy(writes: .Explicit)` marker.
-sema_call_marks_apply_policy: fn(table: ^SemaScopeTable, graph: SemaRegistrationGraph, module_identity: ModuleID, markers: [Marker]) Never! {
-    position: sema_scope_module_policy(table, graph, module_identity)
-    table.writes_explicit = table.policy_rows[position].writes_explicit
-    loop marker in markers {
-        if sema_call_marks_writes_marker(marker) -> table.writes_explicit = true
-    }
-}
-
-// A block `#Policy(writes: .Explicit) { … }` turns the policy on for its body.
-// Returns the enclosing setting for the matching pop.
-sema_call_marks_push_policy: fn(table: ^SemaScopeTable, declarations: [PolicyDeclaration]) -> Bool Never! {
-    previous: table.writes_explicit
-    loop declaration in declarations {
-        if sema_call_marks_writes_declaration(declaration) -> table.writes_explicit = true
-    }
-    previous
-}
 
 // The mark a receiver written `^xs.push(4)` / `^^buf.seal()` carries: the
 // parser's Place starts at the mark, before its value. A Place sema builds
@@ -101,14 +44,41 @@ SemaCallMarkExtraKind: enum {
     MoveFunctionItem,
 }
 
-sema_call_marks_shown_root: fn(scopes: SemaScopeTable, root: ^^String) -> String Never! {
+sema_call_marks_shown_root: fn(scopes: SemaScopeTable, root: String) -> String Never! {
     if pipe_value_is_name(root) -> return "<>"
     if scopes.pipe_in_place_symbol == .Val(sym_id) {
         if sema_scope_resolve(scopes, root) == .Val(symbol) && symbol.id == sym_id {
             return "<>"
         }
     }
-    root
+    "{root}"
+}
+
+sema_call_marks_simple_expr: fn(scopes: SemaScopeTable, expr: Expr) -> String Never! {
+    if expr == {
+        .Ident(name, _, _) -> sema_call_marks_shown_root(scopes, name)
+        .Int(value, _, _, _, _) -> "{value}"
+        .Range(lo, hi, exclusive, _, _) -> "{sema_call_marks_simple_expr(scopes, lo)}{if exclusive -> "..<" else -> ".."}{sema_call_marks_simple_expr(scopes, hi)}"
+        .Str(_, _, _) | .StrMatchLit(_, _, _) | .BinMatchLit(_, _, _) | .Float(_, _, _, _, _) | .Bool(_, _, _) | .Unit(_, _) | .Char(_, _, _) | .ListLit(_, _, _) | .MemberSpread(_, _, _, _) | .Spread(_, _, _) | .MapLit(_, _, _) | .Index(_, _, _, _, _) | .Slice(_, _, _, _, _, _) | .Call(_, _) | .Unary(_, _, _, _) | .Binary(_, _, _, _, _) | .CompareChain(_, _, _, _, _) | .UnitLit(_, _, _, _, _, _, _) | .Deref(_, _, _) | .RawOf(_, _, _) | .Copy(_, _, _) | .Place(_, _, _, _) | .Field(_, _, _, _) | .OptField(_, _, _, _, _, _) | .MethodCall(_, _, _, _, _, _, _) | .OptMethodCall(_, _, _, _, _, _, _) | .StructLit(_, _, _, _, _, _, _, _) | .TypedLit(_, _, _, _) | .EnumLit(_, _, _, _, _, _, _) | .Tainted(_, _, _, _) | .Present(_, _, _) | .Absent(_, _) | .Todo(_, _, _) | .NoElse(_, _) | .PatternTest(_, _, _, _) | .Ok(_, _, _) | .Err(_, _, _) | .Try(_, _, _, _, _) | .OrFallback(_, _, _, _, _) | .If(_, _, _, _, _, _, _) | .TupleLit(_, _, _, _) | .Lambda(_, _) | .CallValue(_, _, _, _) | .PtrFromAddr(_, _, _, _, _, _) | .ComptimeName(_, _, _, _) | .TypeValue(_, _, _) | .Paren(_, _, _) | .Pipe(_, _, _, _) -> "…"
+    }
+}
+
+sema_call_marks_place_text: fn(scopes: SemaScopeTable, expr: Expr) -> String Never! {
+    if expr == {
+        .Ident(name, _, _) -> sema_call_marks_shown_root(scopes, name)
+        .Field(base, field, _, _) -> "{sema_call_marks_place_text(scopes, base)}.{field}"
+        .Index(base, index, _, _, _) -> "{sema_call_marks_place_text(scopes, base)}[{sema_call_marks_simple_expr(scopes, index)}]"
+        .Slice(base, start, end, range, _, _) -> {
+            if range == .Val(range_expr) -> return "{sema_call_marks_place_text(scopes, base)}[{sema_call_marks_simple_expr(scopes, range_expr)}]"
+            "{sema_call_marks_place_text(scopes, base)}[{sema_call_marks_simple_expr(scopes, start)}..{sema_call_marks_simple_expr(scopes, end)}]"
+        }
+        .Str(_, _, _) | .StrMatchLit(_, _, _) | .BinMatchLit(_, _, _) | .Int(_, _, _, _, _) | .Float(_, _, _, _, _) | .Bool(_, _, _) | .Unit(_, _) | .Char(_, _, _) | .ListLit(_, _, _) | .MemberSpread(_, _, _, _) | .Spread(_, _, _) | .MapLit(_, _, _) | .Range(_, _, _, _, _) | .Call(_, _) | .Unary(_, _, _, _) | .Binary(_, _, _, _, _) | .CompareChain(_, _, _, _, _) | .UnitLit(_, _, _, _, _, _, _) | .Deref(_, _, _) | .RawOf(_, _, _) | .Copy(_, _, _) | .Place(_, _, _, _) | .OptField(_, _, _, _, _, _) | .MethodCall(_, _, _, _, _, _, _) | .OptMethodCall(_, _, _, _, _, _, _) | .StructLit(_, _, _, _, _, _, _, _) | .TypedLit(_, _, _, _) | .EnumLit(_, _, _, _, _, _, _) | .Tainted(_, _, _, _) | .Present(_, _, _) | .Absent(_, _) | .Todo(_, _, _) | .NoElse(_, _) | .PatternTest(_, _, _, _) | .Ok(_, _, _) | .Err(_, _, _) | .Try(_, _, _, _, _) | .OrFallback(_, _, _, _, _) | .If(_, _, _, _, _, _, _) | .TupleLit(_, _, _, _) | .Lambda(_, _) | .CallValue(_, _, _, _) | .PtrFromAddr(_, _, _, _, _, _) | .ComptimeName(_, _, _, _) | .TypeValue(_, _, _) | .Paren(_, _, _) | .Pipe(_, _, _, _) -> ""
+    }
+}
+
+sema_call_marks_ident_is_function_item: fn(name: String, span: Span, scopes: SemaScopeTable) -> Bool Never! {
+    index: sema_scope_resolve_index_at(scopes, name, span) ?? return false
+    scopes.bindings[index].symbol.kind == SymbolKind.Function
 }
 
 // A pure field chain over a local/parameter name (`owner.field`, `a.b.c`):
@@ -129,65 +99,54 @@ sema_call_marks_is_movable_field: fn(expr: Expr) -> Bool Never! {
 // One argument of a checked call. `param` is the slot it binds; `signature`
 // is built only when a report needs it.
 sema_call_marks_check_argument: fn(scopes: SemaScopeTable, callee: String, receiver: AccessConvention?, params: [SemaCallParam], param: SemaCallParam, arg: CallArg, diagnostics: ^[Diagnostic]) {
-    if !scopes.writes_explicit {
-        if arg.mark == .Val(mark) {
-            sema_call_marks_check_written_argument(scopes, callee, receiver, params, param, arg, mark, diagnostics)
-        }
-        return
-    }
-    if expr_node_id(arg.expr) == AST_NODE_GENERATED {
-        return
-    }
-    root: sema_receiver_mark_place_root(arg.expr) ?? {
-        if arg.mark == .Val(mark) {
-            diagnostics.push(sema_call_marks_extra("`{sema_window_plain_name(callee)}`", "", mark.access, mark.span, sema_ownership_signature_line(callee, receiver, params), SemaCallMarkExtraKind.NotNamedPlace, param.convention))
-        }
-        return
-    }
-    ^want: PlaceAccess?{None}
-    ^extra_kind: SemaCallMarkExtraKind.ReadInput
-    if param.convention == AccessConvention.Write -> want = Val(PlaceAccess.Write)
-    if param.convention == AccessConvention.Move {
-        if arg.expr == .Ident(_, _, _) {
-            if sema_ownership_type_is_copy(param.ty ?? Type.Named{name: "_"}) {
-                extra_kind = SemaCallMarkExtraKind.MoveCopyType
-            } else if sema_ownership_argument_is_function_item(arg, scopes) {
-                extra_kind = SemaCallMarkExtraKind.MoveFunctionItem
-            } else {
-                want = Val(PlaceAccess.Take)
-            }
-        } else {
-            extra_kind = SemaCallMarkExtraKind.MovePart
-        }
-    }
-    have: if arg.mark == .Val(mark) -> Val(mark.access) else -> PlaceAccess?{None}
-    if have == want {
-        return
-    }
-    at: expr_source_start(arg.expr)
-    mark_span: if arg.mark == .Val(mark) -> mark.span else -> Span{start: at, end: at}
-    diagnostics.push(sema_call_marks_mismatch("`{sema_window_plain_name(callee)}`", sema_call_marks_shown_root(scopes, root), want, have, expr_source_span(arg.expr), mark_span, sema_ownership_signature_line(callee, receiver, params), extra_kind, param.convention))
-}
-
-// Default (ratified) checking of a written call mark on an argument.
-sema_call_marks_check_written_argument: fn(scopes: SemaScopeTable, callee: String, receiver: AccessConvention?, params: [SemaCallParam], param: SemaCallParam, arg: CallArg, mark: CallMark, diagnostics: ^[Diagnostic]) {
     if expr_node_id(arg.expr) == AST_NODE_GENERATED {
         return
     }
     call_name: "`{sema_window_plain_name(callee)}`"
+    // A whole-name `name.move()` written straight into a `^^` parameter has
+    // one call-site spelling: `^^name` (or plain `name`). Field moves
+    // (`owner.field.move()`) and non-call value positions keep `.move()`.
+    if param.convention == AccessConvention.Move && arg.mark == None {
+        if arg.expr == .MethodCall(base, method, _, owner_type_args, type_args, margs, _) {
+            if method == "move" && owner_type_args.len() == 0 && type_args.len() == 0 && margs.len() == 0 {
+                if base == .Ident(name, span, _) {
+                    if !pipe_value_is_name(name) && !sema_ownership_type_is_copy(param.ty ?? Type.Named{name: "_"}) && !sema_call_marks_ident_is_function_item(name, span, scopes) {
+                        shown: sema_call_marks_shown_root(scopes, name)
+                        place_span: expr_source_span(arg.expr)
+                        signature: sema_ownership_signature_line(callee, receiver, params)
+                        reported: sema_error("E0225", place_span, "write `^^{shown}` instead of `{shown}.move()` for a `^^` parameter", "{signature} takes this input, and a call into a `^^` parameter spells a whole-name move as `^^{shown}` (or plain `{shown}`), not `{shown}.move()`", "write `^^{shown}`")
+                        diagnostics.push(diagnostic_with_edit_grade(reported, TextEdit{span: place_span, new_text: "^^{shown}"}, DiagnosticFixApplicability.Safe, DiagnosticFixSafety.BehaviorPreserving))
+                        return
+                    }
+                }
+            }
+        }
+    }
     root: sema_receiver_mark_place_root(arg.expr) ?? {
-        diagnostics.push(sema_call_marks_unused(call_name, "", mark.access, mark.span, sema_ownership_signature_line(callee, receiver, params), SemaCallMarkExtraKind.NotNamedPlace, param.convention))
+        if arg.mark == .Val(mark) {
+            diagnostics.push(sema_call_marks_unused(call_name, "", mark.access, mark.span, sema_ownership_signature_line(callee, receiver, params), SemaCallMarkExtraKind.NotNamedPlace, param.convention))
+        }
         return
     }
     shown: sema_call_marks_shown_root(scopes, root)
     if param.convention == AccessConvention.Write {
-        if mark.access == PlaceAccess.Write -> return
+        place_text: sema_call_marks_place_text(scopes, arg.expr)
+        shown_place: if place_text != "" -> place_text else -> shown
+        if arg.mark == .Val(mark) {
+            if mark.access == PlaceAccess.Write -> return
+            signature: sema_ownership_signature_line(callee, receiver, params)
+            diagnostic: sema_error("E0228", mark.span, "{call_name} changes `{shown_place}`, so its mark is `^`, not `^^`", "{signature} changes this input, so the call writes `^`", "write `^{shown_place}`")
+            diagnostics.push(diagnostic_with_edit_grade(diagnostic, TextEdit{span: mark.span, new_text: "^"}, DiagnosticFixApplicability.Safe, DiagnosticFixSafety.BehaviorPreserving))
+            return
+        }
+        at: expr_source_start(arg.expr)
         signature: sema_ownership_signature_line(callee, receiver, params)
-        diagnostic: sema_error("E0228", mark.span, "{call_name} changes `{shown}`, so its mark is `^`, not `^^`", "{signature} changes this input, so the call writes `^`", "write `^{shown}`")
-        diagnostics.push(diagnostic_with_edit_grade(diagnostic, TextEdit{span: mark.span, new_text: "^"}, DiagnosticFixApplicability.Safe, DiagnosticFixSafety.BehaviorPreserving))
+        diagnostic: sema_error("E0228", expr_source_span(arg.expr), "{call_name} changes `{shown_place}`, so the call writes `^{shown_place}`", "{signature} changes this input, and every call writes `^` before a named argument it changes", "write `^{shown_place}`, or run `jet fmt` / `jet fix`")
+        diagnostics.push(diagnostic_with_edit_grade(diagnostic, TextEdit{span: Span{start: at, end: at}, new_text: "^"}, DiagnosticFixApplicability.Safe, DiagnosticFixSafety.BehaviorPreserving))
         return
     }
     if param.convention == AccessConvention.Move {
+        mark: arg.mark ?? return
         copied: sema_ownership_type_is_copy(param.ty ?? Type.Named{name: "_"})
         if arg.expr == .Ident(_, _, _) {
             if copied {
@@ -216,49 +175,21 @@ sema_call_marks_check_written_argument: fn(scopes: SemaScopeTable, callee: Strin
         diagnostics.push(sema_call_marks_unused(call_name, shown, mark.access, mark.span, signature, SemaCallMarkExtraKind.MovePart, param.convention))
         return
     }
+    mark: arg.mark ?? return
     diagnostics.push(sema_call_marks_unused(call_name, shown, mark.access, mark.span, sema_ownership_signature_line(callee, receiver, params), SemaCallMarkExtraKind.ReadInput, param.convention))
 }
 
-// The receiver of a checked method call. `receiver` is the call's receiver
-// as written, `unmarked` the place sema checked, and `frame` the call's
-// resolved receiver convention.
+// The receiver of a checked method call: receivers are never marked in Jet, so
+// any written `^` or `^^` before a method receiver is refused with E0225.
 sema_call_marks_check_receiver: fn(check: ^SemaBodyCheck, receiver: Expr, unmarked: Expr, frame: SemaReceiverMarkFrame, method: String) {
     have: sema_call_marks_written_receiver(receiver)
-    if !check.scopes.writes_explicit {
-        if have == .Val(access) {
-            shown: if sema_receiver_mark_place_root(unmarked) == .Val(root) -> sema_call_marks_shown_root(check.scopes, root) else -> ""
-            mark_span: sema_call_marks_receiver_mark_span(receiver, access)
-            signature: if frame.signature == "" -> "`.{method}()`" else -> frame.signature
-            convention: frame.convention ?? AccessConvention.Read
-            check.diagnostics.push(sema_call_marks_receiver_unused(shown, access, mark_span, signature, convention))
-        }
-        return
+    if have == .Val(access) {
+        shown: if sema_receiver_mark_place_root(unmarked) == .Val(root) -> sema_call_marks_shown_root(check.scopes, root) else -> ""
+        mark_span: sema_call_marks_receiver_mark_span(receiver, access)
+        signature: if frame.signature == "" -> "`.{method}()`" else -> frame.signature
+        convention: frame.convention ?? AccessConvention.Read
+        check.diagnostics.push(sema_call_marks_receiver_unused(shown, access, mark_span, signature, convention))
     }
-    root: sema_receiver_mark_place_root(unmarked) ?? return
-    if have == None && expr_node_id(unmarked) == AST_NODE_GENERATED {
-        return
-    }
-    ^want: PlaceAccess?{None}
-    ^extra_kind: SemaCallMarkExtraKind.ReadInput
-    ^receiver_convention: AccessConvention.Read
-    if frame.convention == .Val(convention) {
-        receiver_convention = convention
-        if convention == AccessConvention.Write -> want = Val(PlaceAccess.Write)
-        if convention == AccessConvention.Move {
-            if unmarked == .Ident(_, _, _) {
-                want = Val(PlaceAccess.Take)
-            } else {
-                extra_kind = SemaCallMarkExtraKind.MovePart
-            }
-        }
-    }
-    if have == want {
-        return
-    }
-    at: expr_source_start(unmarked)
-    mark_span: if have == .Val(access) -> sema_call_marks_receiver_mark_span(receiver, access) else -> Span{start: at, end: at}
-    signature: if frame.signature == "" -> "`.{method}()`" else -> frame.signature
-    check.diagnostics.push(sema_call_marks_mismatch("`.{method}()`", sema_call_marks_shown_root(check.scopes, root), want, have, expr_source_span(unmarked), mark_span, signature, extra_kind, receiver_convention))
 }
 
 sema_call_marks_receiver_unused: fn(root: String, written: PlaceAccess, mark_span: Span, signature: String, convention: AccessConvention) -> Diagnostic {
@@ -312,52 +243,4 @@ sema_call_marks_receiver_mark_span: fn(receiver: Expr, access: PlaceAccess) -> S
 
 sema_call_marks_text: fn(access: PlaceAccess) -> String Never! {
     if access == PlaceAccess.Take -> "^^" else -> "^"
-}
-
-// E0228 for a missing, wrong or extra mark under `#Policy(writes: .Explicit)`.
-// `place` is the marked value's span and `mark_span` the written mark, or the
-// empty span where the missing one goes; a missing mark is reported at the
-// value, a written one at itself.
-sema_call_marks_mismatch: fn(call: String, root: String, want: PlaceAccess?, have: PlaceAccess?, place: Span, mark_span: Span, signature: String, extra_kind: SemaCallMarkExtraKind, convention: AccessConvention) -> Diagnostic {
-    if want == .Val(needed) {
-        verb: if needed == PlaceAccess.Take -> "takes" else -> "changes"
-        mark: sema_call_marks_text(needed)
-        what: if have == .Val(written) -> "{call} {verb} `{root}`, so its mark is `{mark}`, not `{sema_call_marks_text(written)}`" else -> "{call} {verb} `{root}`, so the call writes `{mark}{root}`"
-        at: if have == None -> place else -> mark_span
-        diagnostic: sema_error("E0228", at, what, "{signature} {verb} this input, and `#Policy(writes: .Explicit)` writes every change and take at the call", "write `{mark}{root}`")
-        return diagnostic_with_edit_grade(diagnostic, TextEdit{span: mark_span, new_text: mark}, DiagnosticFixApplicability.Safe, DiagnosticFixSafety.BehaviorPreserving)
-    }
-    sema_call_marks_extra(call, root, have ?? PlaceAccess.Write, mark_span, signature, extra_kind, convention)
-}
-
-sema_call_marks_extra: fn(call: String, root: String, written: PlaceAccess, mark_span: Span, signature: String, extra_kind: SemaCallMarkExtraKind, convention: AccessConvention) -> Diagnostic {
-    mark: sema_call_marks_text(written)
-    ^what: ""
-    ^why: ""
-    ^fix: "remove the `{mark}`"
-    if extra_kind == {
-        .NotNamedPlace -> {
-            what = "`{mark}` marks a named value, and this argument isn't one"
-            why = if convention == AccessConvention.Read -> "{signature} reads this input; a mark says the call changes or takes a named value" else -> "a call mark applies only to a named place; a computed expression has no binding to mark"
-        }
-        .MovePart -> {
-            what = "`{mark}` cannot mark a part of `{root}`"
-            why = "{signature} takes this input, but a `{mark}` call mark applies only to a whole named value, not a field or indexed part"
-            fix = "remove `{mark}`, or write `.move()` on the part if you intend to move it out"
-        }
-        .MoveCopyType -> {
-            what = "`{root}` is a copied type, so {call} takes no `{mark}`"
-            why = "{signature} takes this input by value, which copies `{root}` instead of moving it, so `{root}` stays usable after the call"
-        }
-        .MoveFunctionItem -> {
-            what = "`{root}` is a function item, so {call} takes no `{mark}`"
-            why = "{signature} takes this input, but passing a function item does not move or consume `{root}`"
-        }
-        .ReadInput -> {
-            what = "{call} neither changes nor takes `{root}`, so it takes no `{mark}`"
-            why = "{signature} reads this input; a mark says the call changes or takes the value, so it would tell the reader something false"
-        }
-    }
-    diagnostic: sema_error("E0228", mark_span, what, why, fix)
-    diagnostic_with_edit_grade(diagnostic, TextEdit{span: mark_span, new_text: ""}, DiagnosticFixApplicability.Safe, DiagnosticFixSafety.BehaviorPreserving)
 }

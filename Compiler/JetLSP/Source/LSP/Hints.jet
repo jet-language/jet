@@ -1,14 +1,14 @@
 // Inlay hints: from the checked index, the type of each local, the parameter
-// each positional argument binds, the `^` or `^^` of each argument or
-// receiver a call writes or takes, and on a type each method an impl declares
-// outside its body; the `?` after each call that passes a failure up by
-// itself; then the `lsp.inlay_hints` hooks of a marked block's package label
-// places in its body. A request's range keeps the hints inside it, and a
-// range past the end of the document stops at its end.
+// each positional argument binds, the `^` or `^^` of each receiver a call
+// writes or takes and each unwritten `^^` take argument, and on a type each
+// method an impl declares outside its body; the `?` after each call that
+// passes a failure up by itself; then the `lsp.inlay_hints` hooks of a marked
+// block's package label places in its body. A request's range keeps the hints
+// inside it, and a range past the end of the document stops at its end.
 use {
     core.encoding.[Dyn]
     jet_foundation.[AccessConvention, ParamZone, Span, TOOL_STAGE_LSP_INLAY_HINTS, Type, access_sigil, failure_contract_signature_return, foundation_json_quote, type_name]
-    jet_lexer.[Lexed, Token, TOKEN_IDENT, TOKEN_SELF, TOKEN_DOT, TOKEN_LPAREN, TOKEN_RPAREN, TOKEN_LBRACKET, TOKEN_RBRACKET, TOKEN_LBRACE, TOKEN_RBRACE, TOKEN_COMMA, TOKEN_COLON, TOKEN_LINE_COMMENT, TOKEN_BLOCK_COMMENT, token_text]
+    jet_lexer.[Lexed, Token, TOKEN_IDENT, TOKEN_SELF, TOKEN_DOT, TOKEN_LPAREN, TOKEN_RPAREN, TOKEN_LBRACKET, TOKEN_RBRACKET, TOKEN_LBRACE, TOKEN_RBRACE, TOKEN_COMMA, TOKEN_COLON, TOKEN_CARET, TOKEN_CARET_CARET, TOKEN_LINE_COMMENT, TOKEN_BLOCK_COMMENT, token_text]
     jet_semindex.[SemCallable, SemDef, SemIndex]
 }
 
@@ -129,25 +129,32 @@ lsp_method_breadcrumb: fn(name: String, callable: SemCallable) -> String Never! 
     "{name}: fn({params.join(", ")}){arrow}{result}"
 }
 
-// What a call shows at one argument or receiver, since calls carry no marks:
-// the parameter a positional argument binds (`name`, "" for none) and the
-// access the callee's signature takes it with. `at` is where its text starts;
-// `place` is its span when it is one name.
+// What a call shows at one argument or receiver: the parameter a positional
+// argument binds (`name`, "" for none), the access the callee's signature
+// takes it with, whether its sigil hint should show (`show_access`: always
+// for changed/taken receivers, never for argument `^`, and for argument `^^`
+// only where no `^^` is written), and `place`, the name's span for semantic
+// token underlining.
 LSPCallMark: struct {
     at: Int,
     name: String,
     access: AccessConvention,
+    show_access: Bool,
     place: Span?,
 }
 
-// Each call's positional arguments named by the parameter they bind, and
-// marked `^` or `^^` when the callee writes or takes them, as is a method's
-// receiver. A labeled argument, a rest argument, and an argument that
-// already spells its parameter's name get no name.
+// Each call's positional arguments named by the parameter they bind, plus `^`
+// or `^^` on receivers and unwritten `^^` take arguments. A labeled argument,
+// a rest argument, and an argument that already spells its parameter's name
+// get no name.
 lsp_parameter_hints: fn(view: LSPView, index: SemIndex, hints: ^[LSPInlayHint]) Never! {
     loop mark in lsp_call_marks(view, index) {
         name: if mark.name == "" -> "" else -> "{mark.name}: "
-        hints.push(LSPInlayHint{at: mark.at, label: "{name}{access_sigil(mark.access)}", kind: Val(LSP_INLAY_HINT_PARAMETER)})
+        sigil: if mark.show_access -> access_sigil(mark.access) else -> ""
+        label: "{name}{sigil}"
+        if label != "" {
+            hints.push(LSPInlayHint{at: mark.at, label: label, kind: Val(LSP_INLAY_HINT_PARAMETER)})
+        }
     }
 }
 
@@ -163,7 +170,7 @@ lsp_call_marks: fn(view: LSPView, index: SemIndex) -> [LSPCallMark] Never! {
             if lsp_receiver_start(view, index, position) == .Val(start) {
                 place: if start == position - 2 -> Span?{Val(tokens[start].span)} else -> Span?{None}
                 if access != AccessConvention.Read {
-                    marks.push(LSPCallMark{at: tokens[start].span.start, name: "", access: access, place: place})
+                    marks.push(LSPCallMark{at: tokens[start].span.start, name: "", access: access, show_access: true, place: place})
                 }
             }
         }
@@ -229,18 +236,22 @@ lsp_argument_marks: fn(lexed: Lexed, callable: SemCallable, first_token: Int, ma
         }
         param: params[bound]
         if param.zone == ParamZone.LabelOnly -> break
-        spelled: tokens[first].kind == TOKEN_IDENT && lsp_lone_token(tokens, first) && token_text(lexed.tables, tokens[first]) == param.name
+        expr_first: if (tokens[first].kind == TOKEN_CARET || tokens[first].kind == TOKEN_CARET_CARET) && first + 1 < tokens.len() -> first + 1 else -> first
+        spelled: tokens[expr_first].kind == TOKEN_IDENT && lsp_lone_token(tokens, expr_first) && token_text(lexed.tables, tokens[expr_first]) == param.name
         name: if param.variadic || spelled -> "" else -> param.name
         lsp_push_call_mark(marks, tokens, first, name, param.access)
     }
 }
 
 lsp_push_call_mark: fn(marks: ^[LSPCallMark], tokens: [Token], first: Int, name: String, access: AccessConvention) Never! {
-    if name == "" && access == AccessConvention.Read {
+    written_take: tokens[first].kind == TOKEN_CARET_CARET
+    expr_first: if (tokens[first].kind == TOKEN_CARET || written_take) && first + 1 < tokens.len() -> first + 1 else -> first
+    show_access: access == AccessConvention.Move && !written_take
+    place: if tokens[expr_first].kind == TOKEN_IDENT && lsp_lone_token(tokens, expr_first) -> Span?{Val(tokens[expr_first].span)} else -> Span?{None}
+    if name == "" && !show_access && !(access == AccessConvention.Write && place != None) {
         return
     }
-    place: if tokens[first].kind == TOKEN_IDENT && lsp_lone_token(tokens, first) -> Span?{Val(tokens[first].span)} else -> Span?{None}
-    marks.push(LSPCallMark{at: tokens[first].span.start, name: name, access: access, place: place})
+    marks.push(LSPCallMark{at: tokens[first].span.start, name: name, access: access, show_access: show_access, place: place})
 }
 
 // Whether the argument starting at `first` is that one token.

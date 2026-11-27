@@ -643,8 +643,7 @@ sema_function_memory_plan_for_program: fn(program: Program, module_identity: Mod
 sema_function_memory_has_unsupported_policies: fn(declarations: [PolicyDeclaration]) -> Bool Never! {
     loop declaration in declarations {
         // `copies: .Explicit` only adds refusals (Ownership/StringViews.jet),
-        // and so do `writes: .Explicit` (Ownership/CallMarks.jet),
-        // `failures: .Explicit` (FailureMarks.jet) and
+        // and so do `failures: .Explicit` (FailureMarks.jet) and
         // `explicit_units` (E0127, Scopes.jet sema_scope_module_policy
         // and sema_scope_push_unit_policy). `sentries` only turns the runtime
         // witness of a sentry build on or off; the lexical #Unsafe gate and its
@@ -652,7 +651,7 @@ sema_function_memory_has_unsupported_policies: fn(declarations: [PolicyDeclarati
         // sentry scope as a plain scope (JetIR BuildExpr ir_stmt). An
         // overflow mode only routes fixed-width operators, and a run-time
         // policy only decides what runs while compiling.
-        if declaration.key == PolicyKey.ScopedGC || declaration.key == PolicyKey.Copies || declaration.key == PolicyKey.Writes || declaration.key == PolicyKey.Failures || declaration.key == PolicyKey.ExplicitUnits || declaration.key == PolicyKey.Sentries || declaration.key == PolicyKey.Arithmetic || declaration.key == PolicyKey.Runtime {
+        if declaration.key == PolicyKey.ScopedGC || declaration.key == PolicyKey.Copies || declaration.key == PolicyKey.Failures || declaration.key == PolicyKey.ExplicitUnits || declaration.key == PolicyKey.Sentries || declaration.key == PolicyKey.Arithmetic || declaration.key == PolicyKey.Runtime {
             next
         }
         // An audited-gate key (`unsafe: .Forbid`, `check_removal: .Forbid`, …)

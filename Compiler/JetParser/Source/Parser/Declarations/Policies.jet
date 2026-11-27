@@ -202,7 +202,7 @@ parser_policy_declarations_from_marker: fn(state: ^JetParserState, marker: Marke
                     parser_add_error_code(state, "E0355", name_span, "`{name}` is not a scoped policy", "authority markers stay attached to the audited operation or declaration; policy scope cannot widen them", "use `#{name}` at its sound site")
                 }
                 else -> {
-                    parser_add_error_code(state, "E0355", name_span, "`{name}` is not a scoped policy", "the compiler owns the closed policy registry and its scope rules", "use `gc`, `explicit_units`, `copies: .Explicit`, `writes: .Explicit`, `failures: .Explicit`, or `sentries: .Off`; write memory floors as `!Mem.*` effect denials")
+                    parser_add_error_code(state, "E0355", name_span, "`{name}` is not a scoped policy", "the compiler owns the closed policy registry and its scope rules", "use `gc`, `explicit_units`, `copies: .Explicit`, `failures: .Explicit`, or `sentries: .Off`; write memory floors as `!Mem.*` effect denials")
                 }
             }
             return None
@@ -210,10 +210,6 @@ parser_policy_declarations_from_marker: fn(state: ^JetParserState, marker: Marke
         value: if key == {
             .Copies -> mode ?? {
                 parser_add_error_code(state, "E0355", name_span, "`copies` needs an explicit mode", "read-only views copy at owning destinations by default; the policy only restores explicit-copy syntax", "write `copies: .Explicit`")
-                return None
-            }
-            .Writes -> mode ?? {
-                parser_add_error_code(state, "E0355", name_span, "`writes` needs an explicit mode", "calls are written plain by default; the policy requires the `^` and `^^` marks a call's signature implies", "write `writes: .Explicit`")
                 return None
             }
             .Failures -> mode ?? {

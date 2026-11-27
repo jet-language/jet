@@ -149,11 +149,13 @@ from the syntax registry
 ([`Highlights.jet`](../../../Compiler/JetFoundation/Data/Syntax/Highlights.jet)
 and the marker structs of [`Markers.jet`](../../../Compiler/Prelude/Markers.jet)).
 Semantic tokens refine live coloring for ownership markers, rules, decorators,
-and effect rows. Calls carry no marks, so inlay hints show the `^` or `^^` a
-callee's signature puts on each argument or receiver it writes or takes, and a
-name a call writes carries the `modification` modifier, which the extension
-underlines. The editor surface is not a substitute for the compiler's
-parser: use feature sources and the language specification for accepted syntax.
+and effect rows. Calls write `^` before every named argument they change
+(inserted by `jet fmt` and the `source.fixAll` code action), while method
+receivers stay unmarked; inlay hints show parameter names, receiver `^`/`^^`
+marks, and unwritten `^^` take arguments, and a name a call writes carries the
+`modification` modifier, which the extension underlines. The editor surface is
+not a substitute for the compiler's parser: use feature sources and the language
+specification for accepted syntax.
 
 To regenerate the checked-in grammar while working on the repository:
 

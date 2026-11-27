@@ -103,6 +103,12 @@ jet fill <file.jet[:line]>           Propose checked code for typed goals
   JetLSP's hover, code lenses, and `Extract function` refactoring. It fails
   closed with diagnostics on non-checking files and exits `2` on malformed or
   out-of-range line specifiers.
+- **Checked formatting (`jet fmt`):** `jet fmt` (and `jet fmt --check`) runs
+  layout plus a shared per-package checked-insertion pass that inserts every
+  required `^` call mark from E0228 Safe edits (leaving method receivers plain
+  and optional `^^` take marks as written), and shares the same per-package
+  pass with `--explicit-copies` and `--explicit-failures`. A file that fails to
+  parse or check keeps its text untouched and reports why.
 - **Exit codes:** `0` success, `1` user/check/test/unhandled-error failure, `2`
   CLI usage error, `70` runtime fault/panic, `101` internal compiler error (ICE).
   See `Docs/Spec/architecture.md`.

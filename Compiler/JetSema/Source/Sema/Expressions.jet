@@ -7774,7 +7774,7 @@ sema_expr_check_method_call_expr: fn(receiver: Expr, method: String, method_span
     written_place: sema_stmt_binding_is_write_place(receiver)
     if written_place {
         if sema_shared_access_call_place(receiver, method_span, check) == .Val(cell) {
-            if !check.scopes.writes_explicit && sema_call_marks_written_receiver(receiver) != None {
+            if sema_call_marks_written_receiver(receiver) != None {
                 if receiver == .Place(value, _, _, _) {
                     sema_call_marks_check_receiver(check, receiver, value, SemaReceiverMarkFrame{receiver_span: expr_span(value), convention: Val(AccessConvention.Write), written_mark: true}, method)
                 }

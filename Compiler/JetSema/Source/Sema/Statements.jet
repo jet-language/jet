@@ -1425,14 +1425,12 @@ sema_stmt_check_scoped_statement: fn(statement: Stmt, return_type: Type?, check:
                 check.diagnostics.push(sema_runtime_only_build_time_diagnostic("Compile-time code runs this block", span))
                 complete = false
             }
-            ^previous_writes_policy: sema_call_marks_push_policy(check.scopes, declarations)
             ^previous_failures_policy: sema_failure_marks_push_policy(check.scopes, declarations)
             nested: sema_stmt_check_block(body, return_type, check, "policy@{span.start}", loop_depth)
             check.context.arithmetic_policy = outer_arithmetic
             check.context.runtime_policy = outer_runtime
             sema_scope_pop_unit_policy(check.scopes, previous_unit_policy)
             check.scopes.copies_explicit = previous_copies_policy
-            check.scopes.writes_explicit = previous_writes_policy
             check.scopes.failures_explicit = previous_failures_policy
             // `#Policy(sentries: …)` turns the sentry's checks on or off over
             // its body at run time (JetIR ir_sentry_policy), so it stays a

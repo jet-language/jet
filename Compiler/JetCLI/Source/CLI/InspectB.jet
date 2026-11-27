@@ -987,9 +987,9 @@ jet_cli_codemod: fn(args: [String], color: Bool, json: Bool) -[FS, Env]> JetCLIP
     }
 }
 
-// `jet inspect audit [copies|writes|foreign|memory|<entry.jet>] [--advisory-db <path>]`
-// (`"audit"`): `copies`, `writes` and `foreign` audit one entry (AuditCopies.jet,
-// AuditWrites.jet, AuditForeign.jet); `memory` runs the memory witnesses (AuditMemory.jet).
+// `jet inspect audit [copies|foreign|memory|<entry.jet>] [--advisory-db <path>]`
+// (`"audit"`): `copies` and `foreign` audit one entry (AuditCopies.jet,
+// AuditForeign.jet); `memory` runs the memory witnesses (AuditMemory.jet).
 // Inside a project, the bare form checks its lockfile against the signed
 // advisory feed (AuditAdvisory.jet).
 jet_cli_audit: fn(args: [String], color: Bool, json: Bool) -[FS, Env, Time]> JetCLIPlan Never! {
@@ -998,9 +998,6 @@ jet_cli_audit: fn(args: [String], color: Bool, json: Bool) -[FS, Env, Time]> Jet
     }
     if args.len() > 0 && args[0] == "copies" {
         return jet_cli_audit_entry_plan(JetCLIAuditSubject.Copies, jet_cli_tail(args, 1), color, json)
-    }
-    if args.len() > 0 && args[0] == "writes" {
-        return jet_cli_audit_entry_plan(JetCLIAuditSubject.Writes, jet_cli_tail(args, 1), color, json)
     }
     if args.len() > 0 && args[0] == "foreign" {
         return jet_cli_audit_entry_plan(JetCLIAuditSubject.Foreign, jet_cli_tail(args, 1), color, json)

@@ -1,0 +1,17 @@
+Holder: struct {
+    items: [Int],
+}
+
+grow: fn(items: ^[Int]) { items.push(1) }
+
+relay: fn(items: ^[Int]) { grow(items) }
+
+archive: fn(title: ^^String) -> Int { title.len() }
+
+run: fn() {
+    ^st: Holder{items: [Int]{2}}
+    grow(st.items)
+    relay(^st.items)
+    title: "draft"
+    print("{archive(^title)} {st.items.len()}")
+}

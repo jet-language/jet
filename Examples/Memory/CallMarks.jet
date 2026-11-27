@@ -1,0 +1,63 @@
+// Call-site edit marks: every call writes `^` before each named argument it
+// changes (including forwarded `^` parameters, field/index places, labeled
+// write arguments, and `^<>` on a named pipe head), method receivers stay
+// unmarked, and whole-name takes accept either a plain last use or `^^name`.
+Ledger: struct {
+    entries: [String],
+
+    append: fn(^self, item: String) { self.entries.push(item.copy()) }
+
+    summary: fn(self) -> String { self.entries.join(",") }
+}
+
+Envelope: struct {
+    payload: String,
+}
+
+append_step: fn(ledger: ^Ledger, label: String) { ledger.append(label) }
+
+append_and_count: fn(ledger: ^Ledger, label: String) -> Int {
+    ledger.append(label)
+    ledger.entries.len()
+}
+
+load_into: fn(ledger: ^Ledger) {
+    // Forwarded `^` parameters are marked at the call too.
+    append_step(^ledger, "forwarded")
+}
+
+bump: fn(slot: ^Int) { slot += 10 }
+
+copy_into: fn(*, to: ^Ledger, from: String) { to.append(from) }
+
+seal: fn(note: ^^String) -> String { "sealed:{note}" }
+
+run: fn() {
+    ^ledger: Ledger{entries: [String]{"init"}}
+    // Method receivers stay plain.
+    ledger.append("receiver")
+    // Named arguments that a call changes carry `^`.
+    append_step(^ledger, "arg")
+    load_into(^ledger)
+    copy_into(to: ^ledger, from: "labeled")
+    // A named pipe head may edit in place through `^<>` in the first step.
+    piped_count: ledger |> append_and_count(^<>, "pipe")
+    print("ledger ({piped_count}): {ledger.summary()}")
+
+    // Place roots: `^` sits before the root of a field or indexed place.
+    ^holder: {ledger: Ledger{entries: [String]{}}}
+    append_step(^holder.ledger, "field")
+    print("field: {holder.ledger.summary()}")
+
+    ^counts: [Int]{1, 2, 3}
+    bump(^counts[1])
+    counts.push(counts[1])
+    print("counts: {counts}")
+
+    // Whole-name takes accept either an unmarked last use or checked `^^name`;
+    // field moves keep `owner.field.move()`.
+    marked: "alpha"
+    plain: "beta"
+    envelope: Envelope{payload: "gamma"}
+    print("takes: {seal(^^marked)} | {seal(plain)} | {seal(envelope.payload.move())}")
+}

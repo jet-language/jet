@@ -42,9 +42,9 @@ fmt_marks_request: fn(paths: [String], explicit_copies: Bool{false}, explicit_fa
     a_path: "{root}/a.jet"
     b_path: "{root}/b.jet"
     cli_files.write(manifest, "name: \"fmt_marks_demo\"\nversion: \"0.0.1\"\nedition: \"2026\"\n") ?? panic("write package.jet")
-    lib_src: "#Policy(writes: .Explicit)\n\nHolder: struct {{\n    items: [Int],\n}}\n\ngrow: fn(items: ^[Int]) {{\n    items.push(1)\n}}\n\nbump: fn(n: ^Int) {{\n    n += 1\n}}\n\narchive: fn(title: ^^String) -> Int {{\n    title.len()\n}}\n\nrelay: fn(ys: ^[Int]) {{\n    grow(ys)\n}}\n"
-    a_src: "#Policy(writes: .Explicit)\n\nuse_all: fn() -> Int {{\n    ^xs: [Int]{{1}}\n    grow(xs)\n    xs.push(4)\n    ^st: Holder{{items: [Int]{{2}}}}\n    grow(st.items)\n    ^nums: [Int]{{3}}\n    bump(nums[0])\n    title: \"kept\"\n    n: archive(^^title)\n    plain: \"moved\"\n    m: archive(plain)\n    xs.len() + st.items.len() + nums[0] + n + m\n}}\n"
-    b_src: "#Policy(writes: .Explicit)\n\nrun: fn() {{\n    ^zs: [Int]{{9}}\n    relay(zs)\n    print(\"{{use_all()}} {{zs.len()}}\")\n}}\n"
+    lib_src: "Holder: struct {{\n    items: [Int],\n}}\n\ngrow: fn(items: ^[Int]) {{\n    items.push(1)\n}}\n\nbump: fn(n: ^Int) {{\n    n += 1\n}}\n\narchive: fn(title: ^^String) -> Int {{\n    title.len()\n}}\n\nrelay: fn(ys: ^[Int]) {{\n    grow(ys)\n}}\n"
+    a_src: "use_all: fn() -> Int {{\n    ^xs: [Int]{{1}}\n    grow(xs)\n    xs.push(4)\n    ^st: Holder{{items: [Int]{{2}}}}\n    grow(st.items)\n    ^nums: [Int]{{3}}\n    bump(nums[0])\n    title: \"kept\"\n    n: archive(^^title)\n    plain: \"moved\"\n    m: archive(plain)\n    xs.len() + st.items.len() + nums[0] + n + m\n}}\n"
+    b_src: "run: fn() {{\n    ^zs: [Int]{{9}}\n    relay(zs)\n    print(\"{{use_all()}} {{zs.len()}}\")\n}}\n"
     cli_files.write(lib_path, lib_src) ?? panic("write lib.jet")
     cli_files.write(a_path, a_src) ?? panic("write a.jet")
     cli_files.write(b_path, b_src) ?? panic("write b.jet")
@@ -88,11 +88,11 @@ fmt_marks_request: fn(paths: [String], explicit_copies: Bool{false}, explicit_fa
     cli_files.remove_all(root).drop("cleanup prior broken dir")
     cli_files.create_dir_all(root) ?? panic("create broken dir")
     broken_path: "{root}/broken.jet"
-    broken_src: "#Policy(writes: .Explicit)\n\ngrow: fn(items: ^[Int]) {{\n    items.push(1)\n}}\n\nbad: fn() -> Int {{\n    \"nope\"\n}}\n\nrun: fn() {{\n    ^xs: [Int]{{1}}\n    grow(xs)\n    print(\"{{bad()}} {{xs.len()}}\")\n}}\n"
+    broken_src: "grow: fn(items: ^[Int]) {{\n    items.push(1)\n}}\n\nbad: fn() -> Int {{\n    \"nope\"\n}}\n\nrun: fn() {{\n    ^xs: [Int]{{1}}\n    grow(xs)\n    print(\"{{bad()}} {{xs.len()}}\")\n}}\n"
     cli_files.write(broken_path, broken_src) ?? panic("write broken.jet")
 
     output: jet_cli_format_run(fmt_marks_request([String]{broken_path}), false)
-    assert(output.exit_code != JET_DRIVER_EXIT_OK, "non-checking file must fail fmt under explicit writes")
+    assert(output.exit_code != JET_DRIVER_EXIT_OK, "non-checking file must fail fmt")
     assert(output.stderr.contains("Jet.ReturnTypeMismatch"), "stderr must report why checking failed: {output.stderr}")
     assert_eq(cli_files.read(broken_path) ?? "", broken_src)
     cli_files.remove_all(root).drop("cleanup broken dir")
@@ -125,16 +125,17 @@ fmt_marks_request: fn(paths: [String], explicit_copies: Bool{false}, explicit_fa
     cli_files.remove_all(root).drop("cleanup failures dir")
 }
 
-#Test("fmt_marks_plain_syntax_only_snippet_stays_green_during_staged_cutover") {
+#Test("fmt_marks_unresolved_snippet_keeps_text_and_reports_why") {
     root: "{cli_sys.temp_dir()}/jet-fmt-snippet-{cli_process.current_pid()}"
     cli_files.remove_all(root).drop("cleanup prior snippet dir")
     cli_files.create_dir_all(root) ?? panic("create snippet dir")
     path: "{root}/snippet.jet"
-    cli_files.write(path, "run:fn(){{x:foo().bar()}}\n") ?? panic("write snippet.jet")
+    raw: "run:fn(){{x:foo().bar()}}\n"
+    cli_files.write(path, raw) ?? panic("write snippet.jet")
 
     output: jet_cli_format_run(fmt_marks_request([String]{path}), false)
-    assert_eq(output.exit_code, JET_DRIVER_EXIT_OK)
-    formatted: cli_files.read(path) ?? ""
-    assert(formatted.contains("run: fn()"), "syntax-only snippet still formats cleanly: {formatted}")
+    assert(output.exit_code != JET_DRIVER_EXIT_OK, "unresolved snippet must fail fmt")
+    assert(output.stderr.contains("Jet.UnknownFunction"), "stderr must report why checking failed: {output.stderr}")
+    assert_eq(cli_files.read(path) ?? "", raw)
     cli_files.remove_all(root).drop("cleanup snippet dir")
 }

@@ -22,13 +22,42 @@ LSPCodeAction: struct {
     workspace: String{""},
 }
 
+lsp_fix_all_call_mark_edits: fn(diagnostics: [Diagnostic]) -> [TextEdit] Never! {
+    ^edits: [TextEdit]{}
+    loop diagnostic in diagnostics {
+        if diagnostic.code != "E0228" -> next
+        if diagnostic.applicability != Val(DiagnosticFixApplicability.Safe) -> next
+        edit: diagnostic.edit ?? next
+        ^duplicate: false
+        loop existing in edits {
+            if existing.span.start == edit.span.start && existing.span.end == edit.span.end && existing.new_text == edit.new_text {
+                duplicate = true
+                break
+            }
+        }
+        if !duplicate -> edits.push(TextEdit{span: edit.span, new_text: "{edit.new_text}"})
+    }
+    if edits.len() <= 1 -> return edits
+    edits.sort_by(fn(left: TextEdit, right: TextEdit) { (left.span.start <=> right.span.start).then(left.span.end <=> right.span.end) })
+    ^filtered: [TextEdit]{}
+    ^last_end: -1
+    loop edit in edits.move() {
+        if edit.span.start < last_end -> next
+        last_end = edit.span.end
+        filtered.push(edit)
+    }
+    filtered
+}
+
 // The actions for the bytes `start` to `end` of the document `view` reads,
 // of the kinds `only` names (`context.only`; every kind when absent).
 // `server` holds the open documents a rename's edits reach.
 lsp_code_actions: fn(server: LSPServer, view: LSPView, start: Int, end: Int, only: Dyn?) -> [LSPCodeAction] Never! {
     document: lsp_retain_document_diagnostics(view.checked.diagnostics, view.doc.path, view.doc.text)
-    // Organize-imports reads every diagnostic of the document, so it runs
-    // before the ones in the range move into their fixes.
+    // Document-wide actions (`source.fixAll` and `source.organizeImports`) read
+    // every diagnostic of the document from the server's last check, before
+    // the ones in the range move into their fixes.
+    fix_all: if lsp_code_action_wanted(only, "source.fixAll") -> lsp_fix_all_call_mark_edits(document) else -> [TextEdit]{}
     organized: if lsp_code_action_wanted(only, "source.organizeImports") -> lsp_organize_imports_edits(view, document) else -> [TextEdit]{}
     ^diagnostics: [Diagnostic]{}
     loop diagnostic in document.move() {
@@ -77,6 +106,9 @@ lsp_code_actions: fn(server: LSPServer, view: LSPView, start: Int, end: Int, onl
         if parser_marker_placement_edit_at(bytes, start, true) == .Val(edit) {
             actions.push(LSPCodeAction{title: "Write the markers inside the declaration's body", kind: "refactor.rewrite", preferred: false, edits: [TextEdit]{edit}})
         }
+    }
+    if fix_all.len() > 0 {
+        actions.push(LSPCodeAction{title: "Insert call marks", kind: "source.fixAll", preferred: true, edits: fix_all})
     }
     if organized.len() > 0 {
         actions.push(LSPCodeAction{title: "Organize imports", kind: "source.organizeImports", preferred: false, edits: organized})

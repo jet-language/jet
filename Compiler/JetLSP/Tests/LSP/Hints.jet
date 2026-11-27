@@ -44,8 +44,10 @@ keep: fn(title: ^^String) -> Int {
 
 run: fn() -> Int {
     ^score: 1
-    bump(score, 2)
-    keep("vault")
+    bump(^score, 2)
+    note: "vault"
+    keep(note)
+    keep(^^note)
 }
 `
 
@@ -89,13 +91,13 @@ lsp_test_hints: fn(server: ^LSPServer, uri: String, end_line: Int) -> [String] {
     assert_eq(lsp_test_hints(server, LSP_TEST_BREADCRUMB_URI, 9), [String]{"0:6 + size: fn() -> Int"})
 }
 
-#Test("calls show the marks their signatures decide and a written name is a modification") {
+#Test("calls show unwritten take hints, omit redundant write hints, and mark written names") {
     ^server: lsp_test_server()
     lsp_test_open(server, LSP_TEST_MARKS_URI, LSP_TEST_MARKS)
-    assert_eq(lsp_test_hints(server, LSP_TEST_MARKS_URI, 13), [String]{"10:9 count: ^", "10:16 by: ", "11:9 title: ^^"})
+    assert_eq(lsp_test_hints(server, LSP_TEST_MARKS_URI, 15), [String]{"10:9 count: ", "10:17 by: ", "12:9 title: ^^", "13:9 title: "})
     data: lsp_test_token_data(lsp_test_result(server, "textDocument/semanticTokens/full", "{{{lsp_test_text_document(LSP_TEST_MARKS_URI)}}}"))
     // Each token on line 10 as `line:character:modifiers`; `modification` is
-    // bit 4.
+    // bit 4, landing on `score` past the written `^`.
     ^tokens: [String]{}
     ^line: 0
     ^character: 0
@@ -107,7 +109,7 @@ lsp_test_hints: fn(server: ^LSPServer, uri: String, end_line: Int) -> [String] {
         if line == 10 -> tokens.push("{line}:{character}:{data[at + 4]}")
         at += 5
     }
-    assert_eq(tokens, [String]{"10:4:0", "10:9:4", "10:16:0"})
+    assert_eq(tokens, [String]{"10:4:0", "10:10:4", "10:17:0"})
 }
 
 #Test("inlay hints show a `?` after each call that passes a failure up") {
@@ -117,3 +119,29 @@ lsp_test_hints: fn(server: ^LSPServer, uri: String, end_line: Int) -> [String] {
     // The range keeps those inside it.
     assert_eq(lsp_test_hints(server, LSP_TEST_FAILURES_URI, 6), [String]{"5:17 ?"})
 }
+
+#Test("completion in a write parameter slot inserts ^name") {
+    ^server: lsp_test_server()
+    uri: "file:///w/write_slot.jet"
+    lsp_test_open(
+        server,
+        uri,
+        `bump: fn(count: ^Int, by: Int) {
+    count += by
+}
+
+run: fn() {
+    ^score: 1
+    bump(sco, sco)
+    bump(^sco, 2)
+}
+`,
+    )
+    first: lsp_test_labels(lsp_test_result(server, "textDocument/completion", lsp_test_at(uri, 6, 12)))
+    assert(first.contains("^score=6"), "write slot offers ^name")
+    second: lsp_test_labels(lsp_test_result(server, "textDocument/completion", lsp_test_at(uri, 6, 17)))
+    assert(second.contains("score=6"), "read slot offers plain name")
+    marked: lsp_test_labels(lsp_test_result(server, "textDocument/completion", lsp_test_at(uri, 7, 13)))
+    assert(marked.contains("score=6"), "already-marked write slot does not double ^")
+}
+
