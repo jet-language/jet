@@ -2,8 +2,8 @@
   "meta": {
     "version": 4,
     "project": "Jet",
-    "nextNum": 7052,
-    "rev": 115101,
+    "nextNum": 7053,
+    "rev": 115105,
     "ui": {
       "toggled": [
         "dec-group:syntax",
@@ -63834,6 +63834,62 @@
       "updated": "2026-11-27T18:07:16.270Z",
       "updatedBy": "Orchestrator",
       "criteriaLastN": 4
+    },
+    {
+      "id": "c0sx4qnw",
+      "num": 7052,
+      "title": "Authoring friction P0: D28 two-phase borrows for sequential nested calls (adversarial audit first) & D30 .in_place()/guard_edit diagnostic hints",
+      "body": "Owner-approved Section D items D28 and D30 from Docs/Research/jet-authoring-friction-2026-11-27.md: D28 (implement Rust-style two-phase borrows for sequential nested calls like jfmt_write(^f, read(f)) ONLY after a thorough adversarial safety/aliasing/panic-unwind audit lands in Docs/Audits/ confirming soundness), and D30 (targeted immutability diagnostics suggesting ^guard: cell.guard_edit() and .in_place() with UI snapshots).",
+      "kind": "task",
+      "track": "epoch",
+      "epoch": "G1",
+      "milestoneId": null,
+      "phase": "ready",
+      "priority": "P0",
+      "plan": null,
+      "checkSteps": null,
+      "probe": null,
+      "visualMedia": [],
+      "blockedBy": [],
+      "assignee": null,
+      "log": [],
+      "criteria": [
+        {
+          "n": 1,
+          "text": "D28 Design & Adversarial Audit: land Docs/Audits/2026-11-27-two-phase-borrows-review.md attacking aliasing, interior mutability, panic/unwind drops, re-entrant callbacks, and codegen/IR lowering safety; confirm soundness before any build commits",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-11-27T18:21:45.430Z"
+        },
+        {
+          "n": 2,
+          "text": "D28 Implementation: support sound two-phase borrows for calls (reserve ^arg write place during arg evaluation, activate exclusivity at call execution) so jfmt_write(^f, read(f)) compiles while genuine aliasing/write-during-read races remain rejected, verified O0/O1/O2 + UI snapshots",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-11-27T18:21:46.213Z"
+        },
+        {
+          "n": 3,
+          "text": "D30: Immutability diagnostics on Option/enum mutation and Shared guard_edit directly suggest .in_place() and ^guard: cell.guard_edit(), pinned by UI snapshots",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-11-27T18:21:46.986Z"
+        }
+      ],
+      "refs": [],
+      "tags": [],
+      "parentId": null,
+      "needsAcceptance": false,
+      "created": "2026-11-27T18:21:44.641Z",
+      "updated": "2026-11-27T18:21:46.986Z",
+      "updatedBy": "Orchestrator",
+      "criteriaLastN": 3
     }
   ],
   "decisions": [
@@ -122903,6 +122959,34 @@
     }
   ],
   "events": [
+    {
+      "at": "2026-11-27T18:21:46.986Z",
+      "by": "Orchestrator",
+      "action": "card.criteria-add",
+      "ref": "c0sx4qnw",
+      "note": "#3 D30: Immutability diagnostics on Option/enum mutation and Sh"
+    },
+    {
+      "at": "2026-11-27T18:21:46.213Z",
+      "by": "Orchestrator",
+      "action": "card.criteria-add",
+      "ref": "c0sx4qnw",
+      "note": "#2 D28 Implementation: support sound two-phase borrows for call"
+    },
+    {
+      "at": "2026-11-27T18:21:45.430Z",
+      "by": "Orchestrator",
+      "action": "card.criteria-add",
+      "ref": "c0sx4qnw",
+      "note": "#1 D28 Design & Adversarial Audit: land Docs/Audits/2026-11-27-"
+    },
+    {
+      "at": "2026-11-27T18:21:44.641Z",
+      "by": "Orchestrator",
+      "action": "card.add",
+      "ref": "c0sx4qnw",
+      "note": "Authoring friction P0: D28 two-phase borrows for sequential nested calls (adversarial audit first) & D30 .in_place()/guard_edit diagnostic hints"
+    },
     {
       "at": "2026-11-27T18:08:49.058Z",
       "by": "Orchestrator",
