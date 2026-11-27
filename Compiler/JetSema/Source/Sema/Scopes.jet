@@ -3053,7 +3053,7 @@ sema_scope_near_visible_names: fn(table: SemaScopeTable, name: String) -> [Strin
             candidate: table.bindings[index].symbol.name
             diff: candidate.count_bytes() - name_len
             if diff > max_dist || diff < -max_dist -> next
-            if candidate == name || candidate.starts_with("__") || candidate.starts_with("@") || found.contains(candidate) {
+            if candidate == name || candidate.starts_with("__") || candidate.starts_with("@") || candidate.starts_with("\u{0}") || found.contains(candidate) {
                 next
             }
             distance: sema_taint_edit_distance(name, candidate)

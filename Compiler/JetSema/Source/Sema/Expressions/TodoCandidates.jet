@@ -41,7 +41,7 @@ sema_todo_candidates: fn(expected: Type?, check: SemaBodyCheck) -> [String] Neve
             binding: check.scopes.bindings[index]
             if binding.frame != visible || binding.compiler_builtin -> next
             name: binding.symbol.name
-            if name == "" || name == "_" || name.starts_with("__") || name.starts_with("@") || sema_todo_candidates_met(check.scopes, met, name) {
+            if name == "" || name == "_" || name.starts_with("__") || name.starts_with("@") || name.starts_with("\u{0}") || sema_todo_candidates_met(check.scopes, met, name) {
                 next
             }
             met.push(index)

@@ -192,7 +192,7 @@ sema_stmt_check_yield: fn(value: Expr, span: Span, return_type: Type?, check: ^S
     elem_type: sema_stmt_stream_element_type(stream_return) ?? {
         // The report sits at the `yield` keyword.
         keyword: Span{start: span.start, end: span.start + "yield".count_bytes()}
-        check.diagnostics.push(sema_error("E0805", keyword, "`yield` outside a generator", "`yield` hands a value to a `Stream<T>` consumer — only a function declared `Stream<T> ->` may use it", "declare `Stream<T> ->` on this function, or remove the `yield`"))
+        check.diagnostics.push(sema_error("E0805", keyword, "`yield` outside a generator", "`yield` hands a value to a `Stream<T>` consumer — only a function declared `-> Stream<T>` may use it", "declare `-> Stream<T>` on this function, or remove the `yield`"))
         ^_: sema_check_expression(value, None, check)
         return None
     }

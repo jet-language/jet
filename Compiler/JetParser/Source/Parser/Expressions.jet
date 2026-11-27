@@ -87,7 +87,6 @@ use {
         TOKEN_KW_FN,
         TOKEN_KW_IF,
         TOKEN_KW_IN,
-        TOKEN_KW_IT,
         TOKEN_KW_LOOP,
         TOKEN_KW_USE,
         TOKEN_LBRACE,
@@ -342,7 +341,7 @@ parser_pipe_step_writes: fn(state: JetParserState, start: Int, name: String) -> 
         if index >= state.tokens.len() -> break
         token: state.tokens[index]
         if {
-            token.kind == TOKEN_IDENT || token.kind == TOKEN_SELF || token.kind == TOKEN_KW_IT -> {
+            token.kind == TOKEN_IDENT || token.kind == TOKEN_SELF -> {
                 if parser_value(state, token) == name -> return true
             }
             token.kind == TOKEN_STRING && parser_text(state, token).contains(name) -> {
@@ -1187,7 +1186,7 @@ parser_parse_prefix: fn(state: ^JetParserState, depth: Int, allow_struct_lit: Bo
         parser_report_unknown_fact_root(state, word, token.span)
         return ParsedExpr{expr: Expr.Ident{name: word, span: token.span, id: parser_node_id(state)}, span: token.span}
     }
-    if kind == TOKEN_IDENT || kind == TOKEN_SELF || kind == TOKEN_KW_IT {
+    if kind == TOKEN_IDENT || kind == TOKEN_SELF {
         parser_bump(state)
         return ParsedExpr{expr: Expr.Ident{name: parser_value(state, token), span: token.span, id: parser_node_id(state)}, span: token.span}
     }

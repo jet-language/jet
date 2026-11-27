@@ -15,6 +15,8 @@ use {
         Expr,
         ExprField,
         ForKind,
+        INTERNAL_LOOP_ITEM,
+        INTERNAL_TABLE_SUBJECT,
         Lambda,
         NamedSpan,
         OrFallback,
@@ -647,11 +649,11 @@ jfmt_fmt_value_alts: fn(f: ^JetFmt, subject: Expr, table_op: BinOp, expr: Expr) 
     jfmt_fmt_value_alts(f, subject, table_op, binary.right)
 }
 
-// True when `candidate` denotes the dispatch subject: the `it` placeholder or
-// the same source text, sliced from `expr_start` to the anchor's end.
+// True when `candidate` denotes the dispatch subject: the internal placeholder
+// or the same source text, sliced from `expr_start` to the anchor's end.
 jfmt_same_dispatch_subject: fn(f: JetFmt, candidate: Expr, subject: Expr) -> Bool Never! {
     if candidate == .Ident(name, _, _) {
-        if name == "it" -> return true
+        if name == INTERNAL_TABLE_SUBJECT -> return true
     }
     candidate_span: expr_span(candidate)
     subject_span: expr_span(subject)
@@ -2188,7 +2190,7 @@ jfmt_fmt_for_header: fn(f: ^JetFmt, var: String, var2: NamedSpan?, kind: ForKind
     destructures: jfmt_fmt_loop_head_pattern(f, var, body)
     if destructures -> jfmt_write(f, " in ")
     // The bindingless form writes its subject bare.
-    if !destructures && !(var2 == None && var == "it") {
+    if !destructures && !(var2 == None && var == INTERNAL_LOOP_ITEM) {
         if var2 != None -> jfmt_write(f, "(")
         jfmt_write(f, var)
         if var2 == .Val(second) {

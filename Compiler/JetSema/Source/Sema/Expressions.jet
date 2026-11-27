@@ -10,6 +10,7 @@ use {
         AccessConvention,
         MARKER_NUMERIC,
         MODULE_CORE_PREFIX,
+        INTERNAL_LOOP_ITEM,
         TASK_FORM_RECEIVER,
         access_sigil,
         ArithmeticOperation,
@@ -8161,15 +8162,15 @@ sema_expr_subject_shorthand: fn(expr: Expr, expected: Type?, check: ^SemaBodyChe
     None
 }
 
-// Inside a bindingless loop a bare member chain reads the implicit `it`; where
-// a one-parameter callable is expected it is subject shorthand; elsewhere it is
-// no value. Unhandled when `expr` is not a bare member chain.
+// Inside a bindingless loop a bare member chain reads the internal loop item;
+// where a one-parameter callable is expected it is subject shorthand; elsewhere
+// it is no value. Unhandled when `expr` is not a bare member chain.
 sema_expr_check_bare_member_chain: fn(expr: Expr, expected: Type?, check: ^SemaBodyCheck) -> SemaMethodSpecialCheck {
     if !sema_expr_is_bare_member_chain(expr) {
         return SemaMethodSpecialCheck{handled: false, value: None}
     }
     if check.context.implicit_loop_subject_depth > 0 {
-        return SemaMethodSpecialCheck{handled: true, value: sema_check_expression(sema_expr_replace_bare_subject(expr, "it"), expected, check)}
+        return SemaMethodSpecialCheck{handled: true, value: sema_check_expression(sema_expr_replace_bare_subject(expr, INTERNAL_LOOP_ITEM), expected, check)}
     }
     required: expected ?? return SemaMethodSpecialCheck{handled: false, value: None}
     span: expr_span(expr)

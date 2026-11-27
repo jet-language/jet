@@ -6,6 +6,7 @@ use jet_foundation.[
     Diagnostic,
     EffectRowEntry,
     Expr,
+    INTERNAL_LOOP_ITEM,
     Lambda,
     MARKER_OFF,
     MARKER_ON,
@@ -529,12 +530,13 @@ sema_check_statements: fn(statements: [Stmt], return_type: Type?, check: ^SemaBo
                             check.diagnostics.push(sema_stmt_for_in_index_named_like_member(var, var_span))
                             valid = false
                         }
-                        // A bindingless `loop xs -> .member` binds the implicit `it`,
-                        // which bare member chains in the body read. Its source must
-                        // be a collection of items: a scalar source (a range, or a
-                        // value that is no loop source) and a nested bindingless loop
-                        // are E0380, and the rejected loop declares no second `it`.
-                        bindingless: var == "it" && var2 == None
+                        // A bindingless `loop xs -> .member` binds the internal
+                        // loop item, which bare member chains in the body read.
+                        // Its source must be a collection of items: a scalar
+                        // source (a range, or a value that is no loop source)
+                        // and a nested bindingless loop are E0380, and the
+                        // rejected loop declares no second internal item.
+                        bindingless: var == INTERNAL_LOOP_ITEM && var2 == None
                         nested_bindingless: bindingless && check.context.implicit_loop_subject_depth > 0
                         scalar_bindingless: bindingless && !nested_bindingless && collection_value != None && (range_source || item_type_option == None)
                         if nested_bindingless || scalar_bindingless {

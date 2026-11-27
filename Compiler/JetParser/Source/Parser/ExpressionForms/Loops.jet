@@ -9,6 +9,7 @@ use {
         CallArg,
         Expr,
         ForKind,
+        INTERNAL_LOOP_ITEM,
         Lambda,
         LambdaBody,
         LambdaParam,
@@ -28,7 +29,6 @@ use {
         TOKEN_IDENT,
         TOKEN_KW_IF,
         TOKEN_KW_IN,
-        TOKEN_KW_IT,
         TOKEN_LBRACE,
         TOKEN_LPAREN,
         TOKEN_RPAREN,
@@ -357,13 +357,13 @@ parser_expression_form_parse_loop: fn(state: ^JetParserState, depth: Int) -> Par
     // before attempting the collecting expression.
     head: parser_current_kind(state)
     following: parser_kind_at(state, 1)
-    binding_head: head == TOKEN_IDENT || head == TOKEN_KW_IT
+    binding_head: head == TOKEN_IDENT
     finite_header: head == TOKEN_LPAREN || (binding_head && (following == TOKEN_SEMI || following == TOKEN_COMMA || following == TOKEN_KW_IF || following == TOKEN_KW_IN || following == TOKEN_UNIFIED_ARROW)) || parser_changeable_name_ahead(state, 0) || parser_loop_pattern_head_ahead(state)
     if !finite_header {
         parser_add_fatal_code(state, "E0072", start.span, "this collecting loop cannot return a List because it has no finite exhaustion edge", "a collecting loop must finish after a statically finite source or C-style condition; bare infinite and condition-only loops do not provide that boundary", "remove `->`, or iterate a finite source; return one final value from an ordinary loop with `break value`")
         return ParsedExpr{expr: Expr.Unit{span: start.span, id: parser_node_id(state)}, span: start.span}
     }
-    bindingless: (parser_current_kind(state) == TOKEN_IDENT || parser_current_kind(state) == TOKEN_KW_IT) && (parser_kind_at(state, 1) == TOKEN_UNIFIED_ARROW || parser_kind_at(state, 1) == TOKEN_KW_IF)
+    bindingless: parser_current_kind(state) == TOKEN_IDENT && (parser_kind_at(state, 1) == TOKEN_UNIFIED_ARROW || parser_kind_at(state, 1) == TOKEN_KW_IF)
     ^counted: ParserExpressionFormCountedLoop?{None}
     ^clauses: [ParserExpressionFormLoopClause]{}
     if {
@@ -372,7 +372,7 @@ parser_expression_form_parse_loop: fn(state: ^JetParserState, depth: Int) -> Par
         }
         bindingless -> {
             collection: parser_parse_expression_no_struct_lit(state, depth + 1)
-            clauses.push(ParserExpressionFormLoopClause{var: "it", var_span: collection.span, var2: None, kind: ForKind.In{collection: collection.expr, step: None}})
+            clauses.push(ParserExpressionFormLoopClause{var: INTERNAL_LOOP_ITEM, var_span: collection.span, var2: None, kind: ForKind.In{collection: collection.expr, step: None}})
         }
         else -> {
             loop {

@@ -791,9 +791,10 @@ takes its own line and the commas go. A fallible result is handled by the same
 table over its `.Ok` and `.Err` cases (`.Val`, `.None` and `.Err` for an
 optional result); there is no result-only handler form (D-RESULT-BRANCH1=C).
 
-When the subject of `if subject == { … }` is not a plain name — a call or a
-field access, for example — the arms refer to it as `it`, as in
-`it == .Ok(n)`.
+When the subject of `if subject == { … }` is computed (a call or a field
+access, for example) and an arm needs to read its value, name it on the line
+above (`decade: age /% 10; if decade == { … }`). `it` is an ordinary identifier
+with no special meaning in tables or loops.
 
 A header that holds one `<>` hole makes a hole table:
 `if n % <> == 0 { 15 -> "FizzBuzz", 3 -> "Fizz", else -> "{n}" }`. Each arm

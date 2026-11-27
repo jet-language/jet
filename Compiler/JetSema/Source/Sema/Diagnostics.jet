@@ -375,16 +375,11 @@ sema_unknown_name: fn(name: String, span: Span) -> Diagnostic {
 }
 
 // A `$` name is a compiler fact, which no declaration can make, so its fix
-// names the fact forms instead of a declaration. `it` is a keyword, the item
-// of a bindingless loop, so no declaration can make it either (`it: ...` is
-// itself E0003): its fix names the loop item instead. A name another
-// language spells for a built-in Jet value or type gets the Jet spelling.
+// names the fact forms instead of a declaration. A name another language
+// spells for a built-in Jet value or type gets the Jet spelling.
 sema_unknown_name_declare_fix: fn(name: String) -> String Never! {
     if name.starts_with("$") {
         return "read a fact root such as `#build.target.os`, or read the fact on its subject, such as `T.reflect().fields`"
-    }
-    if name == "it" {
-        return "`it` is the item only inside a bindingless loop such as `loop items -> it * 2`; elsewhere name the item: `loop item in items {{ ... }}`"
     }
     if sema_unknown_name_jet_spelling(name) == .Val(spelling) {
         return sema_unknown_name_jet_spelling_fix(name, spelling)

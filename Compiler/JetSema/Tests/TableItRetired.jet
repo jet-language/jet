@@ -1,0 +1,71 @@
+// Retiring `it` from tables and loops, closing the bindingless-loop `it` hole,
+// and verifying the `-> Stream<T>` spelling in E0805.
+table_it_errors: fn(source: String) -> [String] {
+    loop diagnostic in core_failure_record_diagnostics(source, "user/fixture") if diagnostic.code.starts_with("E") -> "{diagnostic.code}: {diagnostic.what} | {diagnostic.why} | {diagnostic.fix}"
+}
+
+#Test("table_it_retired_ordinary_identifier") {
+    accepted: `Person: struct {
+    age: Int,
+}
+
+twice: fn(it: Int) -> Int { it * 2 }
+
+double_all: fn(nums: [Int]) -> [Int] { loop it in nums -> it * 2 }
+
+run: fn() {
+    it: 42
+    nums: [Int]{1, 2, 3}
+    doubled: double_all(nums)
+    people: [Person]{Person{age: 34}, Person{age: 7}}
+    ages: loop people -> .age
+    // A computed table must not shadow an outer user binding named it.
+    tag: if twice(it) == {
+        84 -> "ok {it}"
+        else -> "other {it}"
+    }
+    print("{it} {doubled.len()} {ages.len()} {tag}")
+}
+`
+    assert_eq(table_it_errors(accepted).join("; "), "")
+}
+
+#Test("table_it_retired_bindingless_loop_refuses_it") {
+    errors: table_it_errors(
+        `run: fn() {
+    nums: [Int]{1, 2, 3}
+    print(loop nums -> it * 2)
+}
+`,
+    )
+    assert(errors.len() == 1, errors.join("; "))
+    assert(errors[0].starts_with("E0107:"), errors[0])
+    assert(!errors[0].contains("bindingless loop"), errors[0])
+}
+
+#Test("table_it_retired_computed_table_refuses_it") {
+    errors: table_it_errors(
+        `age_band: fn(age: Int) -> String {
+    if age /% 10 == {
+        0 -> "under ten"
+        else -> "in the {it}0s"
+    }
+}
+`,
+    )
+    assert(errors.len() == 1, errors.join("; "))
+    assert(errors[0].starts_with("E0107:"), errors[0])
+}
+
+#Test("table_it_retired_e0805_arrow_order") {
+    errors: table_it_errors(
+        `bad: fn() {
+    yield 5
+}
+`,
+    )
+    assert(errors.len() == 1, errors.join("; "))
+    assert(errors[0].starts_with("E0805:"), errors[0])
+    assert(errors[0].contains("-> Stream<T>"), errors[0])
+    assert(!errors[0].contains("Stream<T> ->"), errors[0])
+}

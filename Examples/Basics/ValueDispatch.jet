@@ -14,13 +14,13 @@ day_type: fn(day: String) -> String {
     }
 }
 
-// When the subject is not a plain name, the arms read its value, computed
-// once, as `it`.
+// When an arm reads a computed subject, name the value on the line above.
 age_band: fn(age: Int) -> String {
-    if age /% 10 == {
+    decade: age /% 10
+    if decade == {
         0 -> "under ten"
         1 -> "a teen"
-        else -> "in the {it}0s"
+        else -> "in the {decade}0s"
     }
 }
 
@@ -40,13 +40,16 @@ run: fn() {
     print(day_type("wed"))
     print(day_type("pizza"))
     print(age_band(34))
-    // In a bindingless loop the item is `it`; a table inside it still gives
-    // its arms its own subject as `it`.
+    // In a bindingless loop bare members read each item, and a computed
+    // table subject is named on the line above.
     people: [Person]{Person{age: 34}, Person{age: 7}}
     print(
-        loop people -> if .age /% 10 == {
-            0 -> "under ten"
-            else -> "in the {it}0s"
+        loop people -> {
+            decade: .age /% 10
+            if decade == {
+                0 -> "under ten"
+                else -> "in the {decade}0s"
+            }
         },
     )
 }

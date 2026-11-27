@@ -8,6 +8,7 @@ use jet_foundation.[
     Diagnostic,
     Expr,
     ExprNode,
+    INTERNAL_TABLE_SUBJECT,
     Lambda,
     NodeKind,
     NamedSpan,
@@ -218,10 +219,10 @@ sema_stmt_switch_has_text_or_bytes: fn(arms: [SwitchArm]) -> Bool Never! {
 // A switch whose subject is not a plain name: its pattern and
 // range heads test `it`. A place subject reads the same value in every arm, so
 // the heads read the place itself, as the value form does; any other subject is
-// checked once and bound to `it`.
+// checked once and bound to INTERNAL_TABLE_SUBJECT.
 sema_stmt_check_subject_switch: fn(subject: Expr, arms: [SwitchArm], else_body: [Stmt]?, span: Span, return_type: Type?, check: ^SemaBodyCheck, loop_depth: Int) -> SemaStatementResult {
     subject_span: expr_span(subject)
-    local: Expr.Ident{name: "it", span: subject_span, id: AST_NODE_GENERATED}
+    local: Expr.Ident{name: INTERNAL_TABLE_SUBJECT, span: subject_span, id: AST_NODE_GENERATED}
     if sema_expression_if_subject_is_place(subject) {
         return sema_stmt_check_switch(local, sema_stmt_rebind_switch_arms(arms, subject_span, subject), else_body, span, return_type, check, loop_depth)
     }
@@ -249,19 +250,19 @@ sema_stmt_check_subject_switch: fn(subject: Expr, arms: [SwitchArm], else_body: 
     }
     owner: sema_scope_local_owner_key(check.scopes)
     local_module: sema_scope_environment_module_text(check.environment.*, check.program.*)
-    key: symbol_key_text(SymbolKind.Local, local_module, owner, "it")
+    key: symbol_key_text(SymbolKind.Local, local_module, owner, INTERNAL_TABLE_SUBJECT)
     id: sema_symbol_id_of(check.program.*, check.context, key)
-    symbol: Symbol{id: id, kind: SymbolKind.Local, name: "it", module_identity: check.environment.module_identity, owner: Val(owner), span: subject_span, ty: Val(init.ty), visibility: 0}
-    // `it` is declared in the switch's own scope, so a nested subject table
-    // shadows the enclosing table's `it` instead of reading it.
+    symbol: Symbol{id: id, kind: SymbolKind.Local, name: INTERNAL_TABLE_SUBJECT, module_identity: check.environment.module_identity, owner: Val(owner), span: subject_span, ty: Val(init.ty), visibility: 0}
+    // The internal subject lives in the switch's own scope, so nested tables
+    // keep their own placeholder without shadowing any user `it` local.
     it_frame: check.scopes.current
     bounds: checked_cost_integer_bounds(init)
     sema_ownership_declare_binding(check.state, symbol, false)
     sema_scope_push_binding(check.scopes, SemaScopeBinding{frame: it_frame, symbol: symbol, key: key, mutable: false, access: AccessConvention.Read, integer_bounds: bounds, string_view: false, compiler_builtin: false})
-    // The arms' payload sources are rooted at `it`; the subject it holds
-    // decides whether a payload moves out of a named place.
-    sema_copy_site_note_subject(check.state, "it", subject_span, subject)
-    ^it_local: checked_symbol_local("it", subject_span, id, init.ty)
+    // The arms' payload sources are rooted at the internal subject; the
+    // subject it holds decides whether a payload moves out of a named place.
+    sema_copy_site_note_subject(check.state, INTERNAL_TABLE_SUBJECT, subject_span, subject)
+    ^it_local: checked_symbol_local(INTERNAL_TABLE_SUBJECT, subject_span, id, init.ty)
     it_local.generated = true
     it_local.integer_bounds = bounds
     checked: sema_stmt_check_switch(local, sema_stmt_rebind_switch_arms(arms, subject_span, local), else_body, span, return_type, check, loop_depth)

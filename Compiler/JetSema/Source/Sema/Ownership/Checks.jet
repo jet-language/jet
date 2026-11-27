@@ -21,6 +21,8 @@ use jet_foundation.[
     DiagnosticFixApplicability,
     DiagnosticFixSafety,
     Expr,
+    INTERNAL_LOOP_ITEM,
+    INTERNAL_TABLE_SUBJECT,
     InternalTag,
     LValue,
     Lambda,
@@ -1304,7 +1306,7 @@ sema_ownership_declare_ambient_binding: fn(state: ^SemaOwnershipState, symbol: S
 }
 
 sema_ownership_intentional_name: fn(name: String) -> Bool Never! {
-    name == "" || name.starts_with("_") || name.starts_with("@_") || name == "self" || name == "result" || name == "it"
+    name == "" || name.starts_with("_") || name.starts_with("@_") || name == "self" || name == "result" || name == INTERNAL_LOOP_ITEM || name == INTERNAL_TABLE_SUBJECT
 }
 
 // The last declaration row of `id`.
@@ -6196,7 +6198,7 @@ priv sema_ownership_collect_evaluated_one_stmt: fn(state: ^SemaOwnershipState, s
         .Switch(subject, arms, else_body, _) -> {
             sema_ownership_collect_evaluated_expr_accesses(state, subject, mode, bound, nested, scopes, events, checks)
             switch_mark: bound.stack.len()
-            sema_ownership_bound_push(bound, "it")
+            sema_ownership_bound_push(bound, INTERNAL_TABLE_SUBJECT)
             loop arm in arms {
                 sema_ownership_collect_evaluated_expr_accesses(state, arm.cond, mode, bound, nested, scopes, events, checks)
                 arm_mark: bound.stack.len()

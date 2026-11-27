@@ -39,8 +39,9 @@ use jet_foundation.[
 ]
 
 sema_casing_check: fn(name: String, span: Span, category: String, case: SemaNameCase, diagnostics: ^[Diagnostic]) {
-    // Compiler-reserved names have their own diagnostic.
-    if name == "" || name.starts_with("__") || sema_casing_has_case(name, case) {
+    // Compiler-reserved names have their own diagnostic; NUL-led internal names
+    // cannot be spelled in source.
+    if name == "" || name.starts_with("__") || name.starts_with("\u{0}") || sema_casing_has_case(name, case) {
         return
     }
     expected: if case == {

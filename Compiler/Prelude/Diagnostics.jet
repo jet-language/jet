@@ -3543,13 +3543,13 @@ YieldOutsideStream: struct {
         expert_path: "none: `yield` belongs to a function declared `Stream<T>`",
         meaning: "`yield` outside a `Stream<T>` function",
 
-        what: fn(self) -> String { "`yield` used outside a function declared `Stream<T>`" }
+        what: fn(self) -> String { "`yield` used outside a function declared `-> Stream<T>`" }
 
         why: fn(self) -> String {
-            "`yield` hands a value to a `Stream<T>` consumer, so only a function declared to return `Stream<T>` can use it"
+            "`yield` hands a value to a `Stream<T>` consumer, so only a function declared `-> Stream<T>` can use it"
         }
 
-        fix: fn(self) -> String { "Declare the function as `Stream<T>` before using `yield`." }
+        fix: fn(self) -> String { "Declare `-> Stream<T>` on this function before using `yield`." }
     }
 }
 
