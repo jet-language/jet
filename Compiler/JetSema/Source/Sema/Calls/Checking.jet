@@ -730,19 +730,21 @@ sema_call_typecheck_bound_arguments: fn(callee: String, params: [SemaCallParam],
         if !self_typed && !borrowed_trait && !unit_parameter && !owned_bound_variadic {
             argument_expected = Val(required)
         }
-        // A C callback is a pure, monomorphic function or a capture-free
-        // lambda whose body is safe on a foreign thread; anything else is
-        // E3203, reported before the argument's own type check. One that
-        // reads the task context is E3218, which names the read.
-        if abi_has_boundary && !default_in_owner && abi == .Val(callable_abi) && callable_abi.callback_transport != Val("managed") {
+        // A C callback runs on a foreign thread where no Jet task runs:
+        // reading `context.*` is E3218 for both raw and managed callbacks.
+        // Raw C callbacks must also be pure, monomorphic, capture-free
+        // functions or lambdas (E3203); managed callbacks allow owned,
+        // sendable captures checked after argument typing below.
+        if abi_has_boundary && !default_in_owner && abi == .Val(callable_abi) {
             if sema_registration_callback_boundary_param(callable_abi, required_declared) {
-                context_read: if callable_abi.is_c_abi -> sema_call_c_callback_context_read(args[index].expr, check) else -> String?{None}
+                managed_callback: callable_abi.callback_transport == Val("managed")
+                context_read: if callable_abi.is_c_abi || managed_callback -> sema_call_c_callback_context_read(args[index].expr, check) else -> String?{None}
                 if context_read == .Val(member) {
                     check.diagnostics.push(sema_call_c_callback_context_error(member, args[index].expr))
-                } else if sema_call_c_callback_unsafe(args[index].expr, check) {
+                } else if !managed_callback && sema_call_c_callback_unsafe(args[index].expr, check) {
                     check.diagnostics.push(sema_checked_foreign_type_error(required_declared, expr_span(args[index].expr), true))
                 }
-                if callable_abi.is_c_abi && c_callback == None && !sema_call_c_callback_built(args[index].expr, required_declared, check) {
+                if !managed_callback && callable_abi.is_c_abi && c_callback == None && !sema_call_c_callback_built(args[index].expr, required_declared, check) {
                     c_callback = Val(expr_span(args[index].expr))
                 }
             }
@@ -772,6 +774,12 @@ sema_call_typecheck_bound_arguments: fn(callee: String, params: [SemaCallParam],
             }
             complete = false
             next
+        }
+        if abi_has_boundary && !default_in_owner && abi == .Val(callable_abi) && callable_abi.callback_transport == Val("managed") && sema_registration_callback_boundary_param(callable_abi, required_declared) {
+            if !sema_ownership_check_managed_foreign_callback(checked_value, check) {
+                complete = false
+                next
+            }
         }
         // A write parameter edits its argument's storage and a marked take
         // gives it away; a computed field has none, so it is never lent.

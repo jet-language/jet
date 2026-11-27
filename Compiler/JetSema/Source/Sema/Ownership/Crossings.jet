@@ -634,3 +634,62 @@ sema_ownership_check_http_handler_callback: fn(value: TExpr, check: ^SemaBodyChe
     }
     true
 }
+
+sema_ownership_foreign_callback_diagnostic: fn(name: String?, ty: Type, problem: SemaSendabilityProblem, span: Span) -> Diagnostic {
+    value_text: if name == .Val(named) -> "`{named}`" else -> "this value"
+    type_name_value: sema_ownership_crossing_type_shown(ty, problem)
+    description: sema_ownership_crossing_describe(problem)
+    local_reactive: if problem.kind == {
+        .LocalReactive(_) -> true
+        .ClosureNeedsTake | .ClosureCaptures | .CallableValue | .TraitValue(_) | .ThreadConfined(_) | .DeclaredLocal(_) | .ViewBorrow | .SharedMutation | .UnknownType(_) -> false
+    }
+    what: if {
+        problem.kind == SemaSendProblemKind.ViewBorrow -> "{value_text} cannot be captured by a foreign C callback — it is a view that does not live long enough"
+        local_reactive -> "{value_text} is pinned `#Local` and can't be captured by a foreign C callback"
+        else -> "{value_text} can't be captured by a foreign C callback because `{type_name_value}` isn't sendable"
+    }
+    why: if local_reactive -> description else -> "foreign C callbacks are retained by C and invoked on a thread C chooses, so their captured state must be owned and thread-safe"
+    local_cell: sema_ownership_crossing_local_cell(problem)
+    fix: if {
+        local_reactive -> "remove `#Local`, or keep the callback on its creating thread"
+        local_cell -> "capture only owned sendable values in the foreign callback, or use `Shared<T>` for synchronized state"
+        else -> "pass a named function, or capture only owned sendable values in the foreign callback"
+    }
+    sema_error("E1102", span, what, why, fix)
+}
+
+// A managed C callback closure is retained by the C library and may be invoked
+// on any foreign thread: every capture must be immutable, owned and sendable.
+sema_ownership_check_managed_foreign_callback: fn(value: TExpr, check: ^SemaBodyCheck) -> Bool {
+    if value.kind == .Lambda(lambda) {
+        ^updated_lambda: lambda
+        ^valid: true
+        loop name in updated_lambda.capture_facts.mutable {
+            check.diagnostics.push(sema_ownership_crossing_concurrent_write_diagnostic(name, "foreign C callback", updated_lambda.source_span))
+            valid = false
+        }
+        loop capture in updated_lambda.captures {
+            ^mutable: false
+            loop name in updated_lambda.capture_facts.mutable {
+                if name == capture.source -> mutable = true
+            }
+            if mutable -> next
+            closure_taken: sema_ownership_crossing_capture_taken(updated_lambda, capture, check.environment.*, check.program.*, check.context.generic_params)
+            ^problem: sema_ownership_crossing_problem_for_name(capture.source, capture.ty, SemaSendCrossing.InterruptCallback, closure_taken, check.environment.*, check.program.*, check.scopes, check.state, check.context)
+            if problem == .Val(found) {
+                check.diagnostics.push(sema_ownership_foreign_callback_diagnostic(Val(capture.source), capture.ty, found, updated_lambda.source_span))
+                valid = false
+                next
+            }
+            sema_generic_crossing_note(capture.ty, SemaSendCrossing.InterruptCallback, sema_taskgroup_contains_name(updated_lambda.capture_facts.moved, capture.source), true, check.environment.*, check.program.*, check.context)
+        }
+        updated_lambda.is_move = true
+        return valid
+    }
+    if value.kind == .FnValue(_) -> return true
+    if sema_ownership_crossing_body_problem(value.ty, SemaSendCrossing.InterruptCallback, true, check.environment.*, check.program.*, check.context) == .Val(found) {
+        check.diagnostics.push(sema_ownership_foreign_callback_diagnostic(None, value.ty, found, value.span))
+        return false
+    }
+    true
+}

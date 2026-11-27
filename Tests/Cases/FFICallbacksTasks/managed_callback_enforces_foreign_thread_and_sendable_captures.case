@@ -1,0 +1,15 @@
+# Proves D-FFI-CONCUR1=A Sema enforcement on managed C callbacks (`callback_transport == "managed"`):
+# 1. Reading task context (`context.thread`) inside a managed C callback emits E3218.
+# 2. Capturing non-sendable state (`Cell<Int>`) inside a managed C callback emits E1102.
+# 3. Mutating a captured local inside a managed C callback emits E1102.
+requires: os:unix
+fixture: ManagedCallbackEnforcesForeignThreadAndSendableCaptures.fixture
+env: NO_COLOR=1
+env: JET_STORE_DIR={work}/cache
+env: JETPACK_ROOT={work}/jetpack
+step: jet inspect bind c/source.h --pkg source
+exit: 0
+step: jet check main.jet --json
+exit: nonzero
+json: stdout doc $.reports[?code="E3218"] #>= 1
+json: stdout doc $.reports[?code="E1102"] #>= 2

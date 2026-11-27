@@ -300,6 +300,9 @@ ir_merge_rows: fn(out: ^IRModule, parts: ^[IRModule], g: IRMerge, roots: [IRMerg
             if row < 0 || reached < 0 || out.alloc_held.get(row) != None -> next
             out.alloc_held[row] = reached
         }
+        loop (symbol, pair) in parts[part].c_abi_returns {
+            if pair -> out.c_abi_returns[symbol] = true
+        }
         // The part's variant lists the merged rows take, by list.
         ^shaped: [Int:Int]{}
         loop (local, list) in parts[part].debug_variants {

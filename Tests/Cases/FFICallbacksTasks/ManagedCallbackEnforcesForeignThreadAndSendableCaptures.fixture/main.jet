@@ -1,0 +1,29 @@
+use source: c.source
+
+bad_context: fn() -> FfiCallbackRegistration {
+    source.on_data(fn(event) {
+        _: context.thread
+        _: event.value
+    })
+}
+
+bad_nonsendable: fn(cell: Cell<Int>) -> FfiCallbackRegistration {
+    source.on_data(fn(event) {
+        _: cell.get()
+        _: event.value
+    })
+}
+
+bad_mutable_capture: fn() -> FfiCallbackRegistration {
+    ^count: 0
+    source.on_data(fn(event) {
+        count += 1
+        _: event.value
+    })
+}
+
+run: fn() {
+    _: bad_context()
+    _: bad_nonsendable(Cell.new(1))
+    _: bad_mutable_capture()
+}

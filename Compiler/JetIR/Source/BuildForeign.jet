@@ -251,6 +251,8 @@ ir_foreign_call: fn(m: ^IRModule, p: IRProgram, b: ^IRBuilder, foreign: SemaChec
     ^result_row: -1
     ^result_element: -1
     ^result_width: 0
+    ^result_c_struct: [IRMember]{}
+    ^result_is_c_struct: false
     if foreign.return_type == .Val(ty) {
         if !ir_unit_type(ty) {
             result_row = ir_value_type(m, p, ty) ?? return ir_type_fail(b, span, ty)
@@ -259,20 +261,24 @@ ir_foreign_call: fn(m: ^IRModule, p: IRProgram, b: ^IRBuilder, foreign: SemaChec
                 return ir_fail_slot(b, span, "foreign C result {ir_type_name(ty)} has no native C ABI marshaling")
             }
             if m.types[result_row].kind == {
-                .Int | .Word | .Bool | .Float | .String -> {}
+                .Int | .Word | .Bool | .Float | .Float32 | .String -> {}
                 .Pointer -> {
                     if !ir_foreign_handle_type(p, ty) {
                         return ir_fail_slot(b, span, "foreign C result {ir_type_name(ty)} has no native C ABI marshaling")
                     }
                 }
                 .Aggregate -> {
-                    if !ir_foreign_list(ty) {
+                    if ir_foreign_list(ty) {
+                        result_element = ir_list_element_of(m, p, result_row) ?? return ir_fail_slot(b, span, "foreign C result {ir_type_name(ty)} has no native C ABI marshaling")
+                        result_width = ir_foreign_c_width(m, p, result_element) ?? return ir_fail_slot(b, span, "foreign C result {ir_type_name(ty)} has no C array layout")
+                    } else if ir_foreign_c_struct_members(m, p, result_row) == .Val(members) {
+                        result_c_struct = members
+                        result_is_c_struct = true
+                    } else {
                         return ir_fail_slot(b, span, "foreign C result {ir_type_name(ty)} has no native C ABI marshaling")
                     }
-                    result_element = ir_list_element_of(m, p, result_row) ?? return ir_fail_slot(b, span, "foreign C result {ir_type_name(ty)} has no native C ABI marshaling")
-                    result_width = ir_foreign_c_width(m, p, result_element) ?? return ir_fail_slot(b, span, "foreign C result {ir_type_name(ty)} has no C array layout")
                 }
-                .Unit | .Float32 | .Char -> return ir_fail_slot(b, span, "foreign C result {ir_type_name(ty)} has no native C ABI marshaling")
+                .Unit | .Char -> return ir_fail_slot(b, span, "foreign C result {ir_type_name(ty)} has no native C ABI marshaling")
             }
         }
     }
@@ -306,7 +312,7 @@ ir_foreign_call: fn(m: ^IRModule, p: IRProgram, b: ^IRBuilder, foreign: SemaChec
         }
         if written {
             if m.types[row].kind == {
-                .Word | .Float -> {}
+                .Word | .Float | .Float32 -> {}
                 .Pointer -> {
                     // A borrowed handle crosses as its pointer; it stays the caller's.
                     if !ir_foreign_handle_type(p, param.ty) {
@@ -335,7 +341,7 @@ ir_foreign_call: fn(m: ^IRModule, p: IRProgram, b: ^IRBuilder, foreign: SemaChec
                         return ir_fail_slot(b, span, "foreign C out-parameter {param.name} has no native C ABI marshaling")
                     }
                 }
-                .Unit | .Bool | .Int | .Float32 | .Char | .String -> return ir_fail_slot(b, span, "foreign C out-parameter {param.name} has no native C ABI marshaling")
+                .Unit | .Bool | .Int | .Char | .String -> return ir_fail_slot(b, span, "foreign C out-parameter {param.name} has no native C ABI marshaling")
             }
             address: ir_place_address(m, p, b, arg.value, backs, span)
             if ir_failed(b) -> return -1
@@ -354,7 +360,7 @@ ir_foreign_call: fn(m: ^IRModule, p: IRProgram, b: ^IRBuilder, foreign: SemaChec
                 values.push(value)
                 lowered.push(ir_runtime(m, b, "jet_int_owned_to_i64", [Int]{value}, word_row))
             }
-            .Word | .Bool | .Float | .Char -> {
+            .Word | .Bool | .Float | .Float32 | .Char -> {
                 values.push(value)
                 lowered.push(value)
             }
@@ -385,31 +391,61 @@ ir_foreign_call: fn(m: ^IRModule, p: IRProgram, b: ^IRBuilder, foreign: SemaChec
                 }
             }
             .Aggregate -> {
-                if !ir_foreign_list(param.ty) {
+                if ir_foreign_list(param.ty) {
+                    element: ir_list_element_of(m, p, row) ?? return ir_fail_slot(b, span, "foreign C parameter {param.name} has no native C ABI marshaling")
+                    width: ir_foreign_c_width(m, p, element) ?? return ir_fail_slot(b, span, "foreign C parameter {param.name} has no C array layout")
+                    values.push(value)
+                    stride: ir_list_stride(m, element)
+                    data: ir_list_data(m, b, value)
+                    if width == stride {
+                        lowered.push(data)
+                        next
+                    }
+                    // Padded Jet elements cross as a packed C array, freed after the call.
+                    count: ir_list_length(m, b, value)
+                    width_slot: ir_word_const(m, b, width)
+                    packed: ir_word_op(m, b, IROp.Mul, count, width_slot)
+                    eight: ir_word_const(m, b, 8)
+                    bytes: ir_word_op(m, b, IROp.Add, packed, eight)
+                    buffer: ir_runtime(m, b, "jet_rt_alloc", [Int]{bytes, eight}, word_row)
+                    ir_foreign_restride(m, b, buffer, width, data, stride, count, width)
+                    staged.push(buffer)
+                    staged_sizes.push(bytes)
+                    lowered.push(buffer)
+                } else if ir_foreign_c_struct_members(m, p, row) == .Val(members) {
+                    values.push(value)
+                    ^has_int: false
+                    loop member in members {
+                        if m.types[member.ty].kind == .Int -> has_int = true
+                    }
+                    ^src_buf: value
+                    if has_int {
+                        alloc_size: if m.types[row].size > 8 -> 16 else -> 8
+                        buf: ir_temp(m, b, pointer_row)
+                        ir_emit(b.f, IROp.StackAddress, buf, alloc_size, 8, -1, b.line)
+                        zero: ir_word_const(m, b, 0)
+                        ir_emit(b.f, IROp.Store, -1, buf, 0, zero, b.line)
+                        if alloc_size > 8 -> ir_emit(b.f, IROp.Store, -1, buf, 8, zero, b.line)
+                        loop member in members {
+                            fv: ir_load_at(m, b, value, member.offset, member.ty)
+                            if m.types[member.ty].kind == .Int {
+                                raw: ir_runtime(m, b, "jet_int_owned_to_i64", [Int]{fv}, word_row)
+                                ir_emit(b.f, IROp.Store, -1, buf, member.offset, raw, b.line)
+                            } else {
+                                ir_emit(b.f, IROp.Store, -1, buf, member.offset, fv, b.line)
+                            }
+                        }
+                        src_buf = buf
+                    }
+                    lowered.push(ir_load_at(m, b, src_buf, 0, word_row))
+                    if m.types[row].size > 8 {
+                        lowered.push(ir_load_at(m, b, src_buf, 8, word_row))
+                    }
+                } else {
                     return ir_fail_slot(b, span, "foreign C parameter {param.name} has no native C ABI marshaling")
                 }
-                element: ir_list_element_of(m, p, row) ?? return ir_fail_slot(b, span, "foreign C parameter {param.name} has no native C ABI marshaling")
-                width: ir_foreign_c_width(m, p, element) ?? return ir_fail_slot(b, span, "foreign C parameter {param.name} has no C array layout")
-                values.push(value)
-                stride: ir_list_stride(m, element)
-                data: ir_list_data(m, b, value)
-                if width == stride {
-                    lowered.push(data)
-                    next
-                }
-                // Padded Jet elements cross as a packed C array, freed after the call.
-                count: ir_list_length(m, b, value)
-                width_slot: ir_word_const(m, b, width)
-                packed: ir_word_op(m, b, IROp.Mul, count, width_slot)
-                eight: ir_word_const(m, b, 8)
-                bytes: ir_word_op(m, b, IROp.Add, packed, eight)
-                buffer: ir_runtime(m, b, "jet_rt_alloc", [Int]{bytes, eight}, word_row)
-                ir_foreign_restride(m, b, buffer, width, data, stride, count, width)
-                staged.push(buffer)
-                staged_sizes.push(bytes)
-                lowered.push(buffer)
             }
-            .Unit | .Float32 -> return ir_fail_slot(b, span, "foreign C parameter {param.name} has no native C ABI marshaling")
+            .Unit -> return ir_fail_slot(b, span, "foreign C parameter {param.name} has no native C ABI marshaling")
         }
     }
     if result_element >= 0 && length_address < 0 {
@@ -438,9 +474,22 @@ ir_foreign_call: fn(m: ^IRModule, p: IRProgram, b: ^IRBuilder, foreign: SemaChec
             dst = ir_runtime(m, b, "jet_rt_c_string_unpack", [Int]{raw}, result_row)
         }
         .Aggregate -> {
-            raw: ir_runtime(m, b, foreign.symbol, lowered, word_row)
-            length: ir_load_at(m, b, length_address, 0, length_row)
-            dst = ir_foreign_list_result(m, p, b, result_row, result_element, result_width, raw, length)
+            if result_is_c_struct {
+                m.c_abi_returns[foreign.symbol] = true
+                dst = ir_runtime(m, b, foreign.symbol, lowered, result_row)
+                loop member in result_c_struct {
+                    if m.types[member.ty].kind == .Int {
+                        raw_i64: ir_load_at(m, b, dst, member.offset, word_row)
+                        jet_int: ir_runtime(m, b, "jet_int_owned_from_i64", [Int]{raw_i64}, member.ty)
+                        b.fresh[jet_int] = false
+                        ir_emit(b.f, IROp.Store, -1, dst, member.offset, jet_int, b.line)
+                    }
+                }
+            } else {
+                raw: ir_runtime(m, b, foreign.symbol, lowered, word_row)
+                length: ir_load_at(m, b, length_address, 0, length_row)
+                dst = ir_foreign_list_result(m, p, b, result_row, result_element, result_width, raw, length)
+            }
         }
         .Word | .Float | .Float32 | .Char | .Pointer -> {
             dst = ir_runtime(m, b, foreign.symbol, lowered, result_row)
@@ -776,6 +825,28 @@ ir_rust_slot_crosses: fn(m: IRModule, p: IRProgram, row: Int) -> Bool Never! {
         .Word -> ir_untag(ir_row_ty(m, p, row)) == .IntN(_, _)
         .Unit | .Pointer | .Aggregate -> false
     }
+}
+
+// Whether type row `row` is a `#Layout(c)` struct of up to 16 bytes whose
+// stored fields are pure integer-class scalars (`Int`, machine integer words,
+// `Bool`, `Char`) with no boxed edges, so it crosses System V AMD64 C ABI by
+// value in 1-2 general registers (and returns in RAX / RAX:RDX).
+ir_foreign_c_struct_members: fn(m: ^IRModule, p: IRProgram, row: Int) -> [IRMember]? Never! {
+    size: m.types[row].size
+    if size <= 0 || size > 16 -> return None
+    ty: ir_untag(ir_row_ty(m, p, row))
+    nominal: ir_nominal_name(ty) ?? return None
+    definition: ir_type_def(p, nominal) ?? return None
+    if p.types[definition].layout == None -> return None
+    members: ir_struct_members(m, p, definition, ir_type_args(ty)) ?? return None
+    loop member in members {
+        if member.boxed -> return None
+        if m.types[member.ty].kind == {
+            .Int | .Word | .Bool | .Char -> {}
+            .Unit | .Float | .Float32 | .String | .Pointer | .Aggregate -> return None
+        }
+    }
+    Val(members)
 }
 
 // Whether type row `row` is a struct whose bytes hold only machine scalars:

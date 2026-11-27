@@ -712,8 +712,8 @@ IRX64Arg: enum {
 // CallIndirect, else -1. An aggregate result is written through a hidden
 // first argument pointing at the call site's storage at rbp + `storage`,
 // and `dst` receives that pointer.
-ir_x64_call: fn(e: ^IRX64Emitter, m: IRModule, f: IRFunction, al: IRX64Allocation, target: X64Reloc, indirect: Int, args: [Int], start: Int, count: Int, dst: Int, storage: Int) Never! {
-    sret: dst >= 0 && ir_x64_type(m, f, dst).kind == .Aggregate
+ir_x64_call: fn(e: ^IRX64Emitter, m: IRModule, f: IRFunction, al: IRX64Allocation, target: X64Reloc, indirect: Int, args: [Int], start: Int, count: Int, dst: Int, storage: Int, c_abi_pair: Bool{false}) Never! {
+    sret: !c_abi_pair && dst >= 0 && ir_x64_type(m, f, dst).kind == .Aggregate
     ^general: if sret -> 1 else -> 0
     ^floats: 0
     // Per argument: its general register, xmm register (as 16 + n), -1 on
@@ -769,6 +769,12 @@ ir_x64_call: fn(e: ^IRX64Emitter, m: IRModule, f: IRFunction, al: IRX64Allocatio
     if stacked.len() + pad > 0 -> x64_alu_ri(e.code, X64Alu.Add, X64_RSP, 8 * (stacked.len() + pad))
     if dst < 0 {
         return
+    }
+    if c_abi_pair {
+        x64_store(e.code, X64_RBP, storage, X64_RAX)
+        if ir_x64_type(m, f, dst).size > 8 -> x64_store(e.code, X64_RBP, storage + 8, X64_RDX)
+        x64_lea(e.code, X64_RAX, X64_RBP, storage)
+        return ir_x64_store(e, m, f, al, dst, X64_RAX)
     }
     if sret {
         x64_lea(e.code, X64_RAX, X64_RBP, storage)
@@ -4340,7 +4346,8 @@ ir_x64_select: fn(e: ^IRX64Emitter, m: IRModule, f: IRFunction, al: IRX64Allocat
                     ir_x64_call(e, m, f, al, x64_reloc_runtime(0, entry), -1, f.args, f.b[at], f.c[at] - 1, dst, al.stack[at])
                 }
                 else -> {
-                    ir_x64_call(e, m, f, al, x64_reloc_runtime(0, symbol), -1, f.args, f.b[at], f.c[at], dst, al.stack[at])
+                    c_abi_pair: m.c_abi_returns.get(symbol) == Val(true) && dst >= 0 && ir_x64_type(m, f, dst).kind == .Aggregate && ir_x64_type(m, f, dst).size <= 16
+                    ir_x64_call(e, m, f, al, x64_reloc_runtime(0, symbol), -1, f.args, f.b[at], f.c[at], dst, al.stack[at], c_abi_pair: c_abi_pair)
                 }
             }
             e.alloc_row = -1
