@@ -2,8 +2,8 @@
   "meta": {
     "version": 4,
     "project": "Jet",
-    "nextNum": 7049,
-    "rev": 115054,
+    "nextNum": 7050,
+    "rev": 115061,
     "ui": {
       "toggled": [
         "dec-group:syntax",
@@ -63627,6 +63627,89 @@
       "updated": "2026-11-27T16:56:10.669Z",
       "updatedBy": "Orchestrator",
       "criteriaLastN": 6
+    },
+    {
+      "id": "c0aularf",
+      "num": 7049,
+      "title": "Authoring friction P0: Jet Composition Laws (drop -> on if/loop, [loop ...] comprehensions, zero postfix markers, stacked #[A,B] slots), B9 header Type{}, and B17 hints",
+      "body": "Owner-approved Jet Composition Laws (A2 + LM1-LM6) plus B9 and B17 from Docs/Research/jet-authoring-friction-2026-11-27.md: (1) Land canonical Docs/Spec/composition-laws.md covering all 9 laws (Blocks as Exprs, Control-Flow Types + Universal Never + T? finite break-val loops, Flow-Binding Pattern Algebra in control contexts, Uniform Top-Down Expected-Type Propagation, Unified Type{...} + 3-stage smart DSL lexer, Uniform Postfix Chains + !/!! vs ?/??, Uniform Prefix/In-Body Stacked #[A,B] Markers with ZERO postfix markers, 3-class Lexically Scoped Jumps forbidding escape from defer/#Off/#run, and full coverage of pipes |>/<>, all 6 if forms, all 16+ marked blocks, staged #run/#if/#loop, and ownership/places). (2) Drop -> from if and loop completely (always { ... }; collecting loops wrap in container constructors [loop n in nums { n * n }], Set{ loop ... }, [K: V]{ loop ... }, keeping outer: loop labels plain and break(outer) distinct from break (expr)). (3) Eliminate ALL postfix markers: move #Through and #CatchAll to prefix (#Through 1 -> ..., #CatchAll else -> ...), keep in-body markers on types, and allow stacked #[A, B] marker lists uniformly in every marker slot (fixing TypeUse in MarkerRules.jet:140). (4) B9: Disambiguate Type{...} in if/loop headers so if Type{...} == x { ... } parses cleanly. (5) B17: Targeted diagnostic hints for binary ^ (bitwise XOR is ~) and Int / Int hitting Int slot (use /%).",
+      "kind": "task",
+      "track": "epoch",
+      "epoch": "G1",
+      "milestoneId": null,
+      "phase": "ready",
+      "priority": "P0",
+      "plan": null,
+      "checkSteps": null,
+      "probe": null,
+      "visualMedia": [],
+      "blockedBy": [],
+      "assignee": null,
+      "log": [],
+      "criteria": [
+        {
+          "n": 1,
+          "text": "Land exhaustive Docs/Spec/composition-laws.md covering all 9 Jet Composition Laws (blocks, control-flow types + T? finite break-val loops + Never, flow-binding patterns in control contexts, top-down expected-type propagation, Type{...}, postfix chains, prefix/in-body stacked #[A,B] markers with zero postfix markers, 3-class jump boundaries, and pipes/6 if forms/16+ marked blocks/staged/places) and pass adversarial review",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-11-27T17:33:25.471Z"
+        },
+        {
+          "n": 2,
+          "text": "A2 / LM1: Drop -> from if and loop completely (always { ... }); collecting loops use container wrappers [loop ... { ... }], Set{ loop ... }, [K: V]{ loop ... } (keeping outer: loop labels unambiguous and break(ident) distinct from break (expr)); migrate Compiler/Core/Examples/Tests/Docs/formatter with zero legacy shims",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-11-27T17:33:26.886Z"
+        },
+        {
+          "n": 3,
+          "text": "LM5: Eliminate all postfix markers (#Through and #CatchAll strictly prefix; in-body markers preserved on types) and parse/validate stacked #[A, B] marker lists uniformly across every marker slot (fixing TypeUse in MarkerRules.jet:140), with UI snapshots and O0/O1/O2 tests",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-11-27T17:33:28.335Z"
+        },
+        {
+          "n": 4,
+          "text": "LM3/LM4/LM5 soundness: enforce flow-binding pattern algebra (if/loop/guard only, never standalone Bool; &&/||/! rules), first-class Type.Never exempt from T->T? lift, and 3-class jump boundaries (forbid escape from defer/#Off/#On(.Deep)/#run/#Pre/#Post; LIFO unwind on task.group/#Transact/#Context/#Frame)",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-11-27T17:34:02.443Z"
+        },
+        {
+          "n": 5,
+          "text": "B9 & B17: Disambiguate Type{...} literals in if/loop headers (if Type{...} == x { ... }) without false E0637/body collisions; emit crisp hints for binary ^ (bitwise XOR is ~) and Int / Int hitting Int slot (use /%), with UI snapshots and O0/O1/O2 tests",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-11-27T17:34:03.866Z"
+        },
+        {
+          "n": 6,
+          "text": "Full repo sweep, golden examples across O0/O1/O2, and full test suite pass cleanly on the batch compiler",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-11-27T17:34:05.245Z"
+        }
+      ],
+      "refs": [],
+      "tags": [],
+      "parentId": null,
+      "needsAcceptance": false,
+      "created": "2026-11-27T17:33:24.075Z",
+      "updated": "2026-11-27T17:34:05.245Z",
+      "updatedBy": "Orchestrator",
+      "criteriaLastN": 6
     }
   ],
   "decisions": [
@@ -122696,6 +122779,55 @@
     }
   ],
   "events": [
+    {
+      "at": "2026-11-27T17:34:05.245Z",
+      "by": "Orchestrator",
+      "action": "card.criteria-add",
+      "ref": "c0aularf",
+      "note": "#6 Full repo sweep, golden examples across O0/O1/O2, and full t"
+    },
+    {
+      "at": "2026-11-27T17:34:03.866Z",
+      "by": "Orchestrator",
+      "action": "card.criteria-add",
+      "ref": "c0aularf",
+      "note": "#5 B9 & B17: Disambiguate Type{...} literals in if/loop headers"
+    },
+    {
+      "at": "2026-11-27T17:34:02.443Z",
+      "by": "Orchestrator",
+      "action": "card.criteria-add",
+      "ref": "c0aularf",
+      "note": "#4 LM3/LM4/LM5 soundness: enforce flow-binding pattern algebra "
+    },
+    {
+      "at": "2026-11-27T17:33:28.335Z",
+      "by": "Orchestrator",
+      "action": "card.criteria-add",
+      "ref": "c0aularf",
+      "note": "#3 LM5: Eliminate all postfix markers (#Through and #CatchAll s"
+    },
+    {
+      "at": "2026-11-27T17:33:26.886Z",
+      "by": "Orchestrator",
+      "action": "card.criteria-add",
+      "ref": "c0aularf",
+      "note": "#2 A2 / LM1: Drop -> from if and loop completely (always { ... "
+    },
+    {
+      "at": "2026-11-27T17:33:25.471Z",
+      "by": "Orchestrator",
+      "action": "card.criteria-add",
+      "ref": "c0aularf",
+      "note": "#1 Land exhaustive Docs/Spec/composition-laws.md covering all 9"
+    },
+    {
+      "at": "2026-11-27T17:33:24.075Z",
+      "by": "Orchestrator",
+      "action": "card.add",
+      "ref": "c0aularf",
+      "note": "Authoring friction P0: Jet Composition Laws (drop -> on if/loop, [loop ...] comprehensions, zero postfix markers, stacked #[A,B] slots), B9 header Type{}, and B17 hints"
+    },
     {
       "at": "2026-11-27T16:56:12.491Z",
       "by": "Orchestrator",
