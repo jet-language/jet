@@ -2,8 +2,8 @@
   "meta": {
     "version": 4,
     "project": "Jet",
-    "nextNum": 7050,
-    "rev": 115061,
+    "nextNum": 7051,
+    "rev": 115066,
     "ui": {
       "toggled": [
         "dec-group:syntax",
@@ -51,7 +51,7 @@
         "radar:G8"
       ]
     },
-    "completionCursor": "2026-11-27T12:27:51.280Z",
+    "completionCursor": "2026-11-27T17:44:34.100Z",
     "dayStart": {
       "date": "2026-11-27",
       "openCards": 302,
@@ -63710,6 +63710,62 @@
       "updated": "2026-11-27T17:34:05.245Z",
       "updatedBy": "Orchestrator",
       "criteriaLastN": 6
+    },
+    {
+      "id": "c0twto18",
+      "num": 7050,
+      "title": "Authoring friction P0: B11 (\\u{H} fix + multi/triple-backtick raw strings), B13 (U8{'c'} ASCII byte folding), B16 (..= hint + range .rev() / descending stride)",
+      "body": "Owner-approved remaining Section B P0 items from Docs/Research/jet-authoring-friction-2026-11-27.md: B11 (fix lexer ordering so \\u{H} Unicode scalar escapes inside \"...\" never trigger {expr} interpolation; add multi-backtick raw strings ... and multi-line dedented triple-backtick  raw strings rhyming with \"\"\"...\"\"\"), B13 (compile-time ASCII char-to-U8 folding U8{'\\n'}, U8{'#'}, U8{'\\\\'}, U8{'\\x1b'} with compile-time error on non-ASCII chars, zero new b'...' prefix), and B16 (keep Jet's inclusive .. and exclusive ..< ranges; emit crisp hint when someone writes ..= suggesting .. / ..<; add .rev() on ranges and verify descending stride e.g. 5..1, -1 across O0/O1/O2).",
+      "kind": "task",
+      "track": "epoch",
+      "epoch": "G1",
+      "milestoneId": null,
+      "phase": "ready",
+      "priority": "P0",
+      "plan": null,
+      "checkSteps": null,
+      "probe": null,
+      "visualMedia": [],
+      "blockedBy": [],
+      "assignee": null,
+      "log": [],
+      "criteria": [
+        {
+          "n": 1,
+          "text": "B11: Fix string lexer ordering so \\u{H} inside \"...\" parses as a Unicode scalar escape (never {expr} interpolation), and support multi-backtick (...) and multi-line dedented triple-backtick () raw strings across lexer/parser/formatter/O0/O1/O2",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-11-27T17:44:43.687Z"
+        },
+        {
+          "n": 2,
+          "text": "B13: Support compile-time ASCII Char-to-U8 folding U8{'\\n'}, U8{'#'}, U8{'\\\\'}, U8{'\\xNN'} (0x00..0x7F) with crisp compile-time diagnostic on non-ASCII Chars (e.g. U8{'é'}), verified on O0/O1/O2/web + UI snapshot",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-11-27T17:44:45.225Z"
+        },
+        {
+          "n": 3,
+          "text": "B16: Emit crisp parser hint on ..= teaching Jet's inclusive .. and exclusive ..< (UI snapshot), and support .rev() on ranges (loop i in (0..<n).rev()) plus descending stride (loop i in 5..1, -1) across O0/O1/O2",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-11-27T17:44:46.748Z"
+        }
+      ],
+      "refs": [],
+      "tags": [],
+      "parentId": null,
+      "needsAcceptance": false,
+      "created": "2026-11-27T17:44:42.207Z",
+      "updated": "2026-11-27T17:44:46.748Z",
+      "updatedBy": "Orchestrator",
+      "criteriaLastN": 3
     }
   ],
   "decisions": [
@@ -122779,6 +122835,41 @@
     }
   ],
   "events": [
+    {
+      "at": "2026-11-27T17:44:46.748Z",
+      "by": "Orchestrator",
+      "action": "card.criteria-add",
+      "ref": "c0twto18",
+      "note": "#3 B16: Emit crisp parser hint on ..= teaching Jet's inclusive "
+    },
+    {
+      "at": "2026-11-27T17:44:45.225Z",
+      "by": "Orchestrator",
+      "action": "card.criteria-add",
+      "ref": "c0twto18",
+      "note": "#2 B13: Support compile-time ASCII Char-to-U8 folding U8{'\\n'},"
+    },
+    {
+      "at": "2026-11-27T17:44:43.687Z",
+      "by": "Orchestrator",
+      "action": "card.criteria-add",
+      "ref": "c0twto18",
+      "note": "#1 B11: Fix string lexer ordering so \\u{H} inside \"...\" parses "
+    },
+    {
+      "at": "2026-11-27T17:44:42.207Z",
+      "by": "Orchestrator",
+      "action": "card.add",
+      "ref": "c0twto18",
+      "note": "Authoring friction P0: B11 (\\u{H} fix + multi/triple-backtick raw strings), B13 (U8{'c'} ASCII byte folding), B16 (..= hint + range .rev() / descending stride)"
+    },
+    {
+      "at": "2026-11-27T17:44:34.100Z",
+      "by": "owner",
+      "action": "done.clear",
+      "ref": null,
+      "note": "2026-11-27T17:44:34.100Z"
+    },
     {
       "at": "2026-11-27T17:34:05.245Z",
       "by": "Orchestrator",
