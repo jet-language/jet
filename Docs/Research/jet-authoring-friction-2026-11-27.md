@@ -21,8 +21,9 @@
 > - **#7056 [P0]:** `I46` (Single Source of Truth for Core library exports, canonical nominal type identity, single-file `jet check Core/<file>.jet`, monolith splits) + `I47` (poison broken declarations to stop error cascades)
 > - **#7057 [P0]:** `G39` (named effect bundles & callback polymorphism), `G42` (import hints, `E0003` paths, direct qualified access keeping strict no-shadowing), `G43` (unified dev warnings vs `--deny-warnings`/`--release`), `H45` (exempt scripts/tests from `L2401`/`L2421`)
 > - **#7058 [P0]:** `J48` (`jet check --errors` / `--warnings` / `--file` + errors last), `J49` (single `--flag value` CLI syntax + `jet test` fixes), `J50` (ZERO-cache fast cold single-file test + `jet fmt --stdout`/`--check-lines` + `jet inspect exports` + REPL `^name:`)
+> - **#7059 [P0]:** `D27 Part B` & `#7031` replacement — **Zero-Magic Memory Trio** (COW/SSO zero-copy `String` with zero `from var` boilerplate, direct-field `Shared<T>`/`Weak<T>` with single-thread fast path retiring `@T`, and plain honest `Pool<T>`/`ID<T>` — mandatory adversarial audit first!)
 >
-> **Remaining in this TODO list for owner discussion & decision:** **1 item** (`D27 Part B` — Handles vs. Views / `#7031`). Item numbers are kept stable as items are removed.
+> **Remaining in this TODO list for owner discussion & decision:** **0 items — ALL 52 ITEMS DECIDED & CARDED AS P0 ON TOWER (`#7042–#7059`, with `#7042`, `#7043`, `#7044` ALREADY CLOSED `done`)!**
 
 ---
 
@@ -30,8 +31,7 @@
 
 1. [The Bottom Line: Would Fixing These Make Jet Near-Perfect?](#1-the-bottom-line-would-fixing-these-make-jet-near-perfect)
 2. [Productive Friction Worth Keeping (What Forces *Good* Code)](#2-productive-friction-worth-keeping-what-forces-good-code)
-3. [Remaining TODO Items to Discuss & Decide (1 Item)](#3-remaining-todo-items-to-discuss--decide-1-item)
-   - [D. Ownership, Borrowing & Copying (`D27 Part B` — Handles vs. Views / `#7031`)](#d-ownership-borrowing--copying)
+3. [Remaining TODO Items to Discuss & Decide (0 Items — Complete!)](#3-remaining-todo-items-to-discuss--decide-0-items--complete)
 4. [Reference: Jet Error Handling vs. Go Error Handling](#4-reference-jet-error-handling-vs-go-error-handling)
 5. [What Already Works Really Well (Do Not Regress)](#5-what-already-works-really-well-do-not-regress)
 
@@ -49,9 +49,9 @@
 - **vs. TypeScript & Python:** Native compiled speed, sound static types, true multi-core parallelism (no GIL), and fearless large-scale refactoring.
 
 ### Brutal honesty: 4 deeper things that would *still* hold Jet back even after fixing every paper cut
-1. **Incremental compile & test speed (the #1 real-world make-or-break):** Sub-second incremental `jet check` and targeted `jet test` will improve real-world Jet code quality more than any single syntax tweak.
+1. **Cold compile & test speed (the #1 real-world make-or-break):** Fast cold single-file `jet check` and targeted `jet test` (no caching — true 30M LOC/s cold compilation) will improve real-world Jet code quality more than any single syntax tweak.
 2. **Cognitive budget & orthogonality (avoiding "C++/Scala syndrome"):** Keep the language small and orthogonal so programmers can *predict* how features combine instead of memorizing compiler special cases.
-3. **The borrowing middle ground (`View<T>` and borrowed `String`):** Make returning/passing borrowed views effortless so authors never disguise copies as `"{line}"`.
+3. **Zero-magic memory ergonomics (`String` COW/SSO + `Shared`/`Weak` + `Pool`/`ID`):** Eliminates disguised copies (`"{line}"`), `from var` lifetime noise, and ambient store magic.
 4. **Effect-system ergonomics at large codebase scale:** Let higher-order functions and layered libraries abstract over or bundle effects cleanly so leaf-effect additions don't ripple across packages.
 
 ---
@@ -63,9 +63,10 @@ All three agents **explicitly asked Jet to KEEP** these guardrails — annoying 
 | Guardrail | Why it forces *better* code (KEEP) |
 |---|---|
 | **Visible `^` and `^^` on bindings, parameters, and call sites** | Every mutation (`bump(^x)`) and ownership transfer (`send(^^msg)`) is readable right at the call site. Zero hidden side effects. |
-| **Visible `?` on every propagating fallible call** *(shipped in Batch 89!)* | Every early exit is visible at the call site; prevents silent error leaks 4 frames away. |
-| **Exhaustive enum matching by default** *(paired with P0 `#CatchAll` in `#7042`)* | Catches forgotten enum variants when types grow, while `#CatchAll` handles deliberate opt-outs. |
+| **Visible `!` / `!!` on fallible calls & `?` / `??` on optionals** | 1-to-1 symbol alignment with `T E!` vs `T?`; every early exit is visible at the call site. |
+| **Exhaustive enum matching by default** *(paired with prefix `#CatchAll` in `#7042`)* | Catches forgotten enum variants when types grow, while `#CatchAll` handles deliberate opt-outs. |
 | **Refusing never-written `^x` bindings (`E0514`)** | Keeps immutability honest: `^x` always means `x` actually changes. |
+| **Strict no-shadowing** | Keeps every identifier unambiguous within a scope. |
 | **Strict `Decimal` vs. `Float` separation on variables** | Prevents silent financial/binary-float rounding bugs. |
 | **Checked arithmetic, `/%` vs. `/`, and arbitrary-precision `Int` default** | Prevents silent integer overflow and silent integer-division truncation bugs. |
 | **Typed `#Error` enums + explicit `impl Target.From(Source)` across domain boundaries** | Prevents Go-style stringly-typed error soup across layers. |
@@ -76,21 +77,9 @@ All three agents **explicitly asked Jet to KEEP** these guardrails — annoying 
 
 ---
 
-## 3. Remaining TODO Items to Discuss & Decide (1 Item)
+## 3. Remaining TODO Items to Discuss & Decide (0 Items — Complete!)
 
-Legend:
-- `COUNTERPRODUCTIVE` = actively pushes authors to write *worse* code.
-- `ACCIDENTAL FRICTION` = costs time/readability while preventing zero bugs.
-- `BUG / COMPILER GAP` = genuine defect or incomplete implementation.
-- `TOOLING QUICK WIN` = CLI/test/diagnostic improvement with zero language risk.
-
----
-
-### D. Ownership, Borrowing & Copying
-
-#### D27 Part B. Borrowed `String` returns, Views, & Handles (`#7031` / `D-HANDLE-NAV1`) — `ACTIVE DISCUSSION`
-- **Context:** `Docs/Proposals/2026-11-24-greenfield-language.md` P9 (`#7031` ballot `D-HANDLE-NAV1`) proposes handles (`Pool<T>` / `ID<T>`) + short-lived views that cannot outlive the call that made them (eliminating `from var` provenance and `@T` links completely).
-- **Next step:** Finalize the clean, zero-magic, cohesive architecture for shared state, graphs, and zero-copy string returns (replacing `D-HANDLE-NAV1`'s implicit pool guessing).
+*All 52 items from the authoring friction audit and Jet-vs-Go error comparison have been discussed with the owner, refined, and carded as P0 on Tower (`#7042–#7059`).*
 
 ---
 
