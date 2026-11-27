@@ -2,8 +2,8 @@
   "meta": {
     "version": 4,
     "project": "Jet",
-    "nextNum": 7048,
-    "rev": 115045,
+    "nextNum": 7049,
+    "rev": 115050,
     "ui": {
       "toggled": [
         "dec-group:syntax",
@@ -63538,6 +63538,71 @@
       "updated": "2026-11-27T16:06:59.927Z",
       "updatedBy": "Orchestrator",
       "criteriaLastN": 5
+    },
+    {
+      "id": "c0vwceve",
+      "num": 7048,
+      "title": "Authoring friction P0: task {} return inference, chained pattern guards, unified {} arms, E0078 span, _: discard, and loop skip (A3, A4, A5-1, A6, A7, A8)",
+      "body": "Owner-approved Section A P0 items from Docs/Research/jet-authoring-friction-2026-11-27.md: A3 (multi-statement task {} infers Task<T> from tail expression + return exits task/lambda, never parent fn), A4 (chained pattern guards if a == .Val(x) && x > 0 && f(x) == .Val(y) + guard-clause extraction Val(x): opt ?? return / Ok(x): res !! return), A5-1 ({ ... } uniformly valid on 1-statement if/else arms without jet fmt forcing -> churn), A6 (anchor E0078 on loop keyword with ?? default_value fix-it), A7 (unify all non-linear discards under plain _: expr without moving, never ^_:, keeping .drop(\"reason\") strictly for linear/resource/error values), and A8 (rename loop keyword next -> skip across Compiler/Core/Examples/Tests/Docs/editor grammars, freeing next as an ordinary identifier, with crisp diagnostics for retired next and continue).",
+      "kind": "task",
+      "track": "epoch",
+      "epoch": "G1",
+      "milestoneId": null,
+      "phase": "ready",
+      "priority": "P0",
+      "plan": null,
+      "checkSteps": null,
+      "probe": null,
+      "visualMedia": [],
+      "blockedBy": [],
+      "assignee": null,
+      "log": [],
+      "criteria": [
+        {
+          "n": 1,
+          "text": "A3: Multi-statement task { ... } blocks infer Task<T> from their trailing expression (and return exits the innermost callable/task, never the parent fn), verified across O0/O1/O2",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-11-27T16:31:41.428Z"
+        },
+        {
+          "n": 2,
+          "text": "A4: Composable flow-binding pattern expressions (if a == .Val(x) && x > 0 && f(x) == .Val(y) { ... }) and guard-clause extraction (Val(x): opt ?? return / Ok(x): res !! return) work uniformly across Option/Result/enums on O0/O1/O2",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-11-27T16:31:42.405Z"
+        },
+        {
+          "n": 3,
+          "text": "A5-1: Single-statement if/else arms accept { ... } uniformly without jet fmt forcing -> churn across sibling arms",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-11-27T16:31:43.330Z"
+        },
+        {
+          "n": 4,
+          "text": "A6: E0078 for finite value-loops without fallback anchors on the loop keyword with a clear fix-it suggesting ?? default_value after the closing brace (pinned by UI snapshot)",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-11-27T16:31:44.203Z"
+        }
+      ],
+      "refs": [],
+      "tags": [],
+      "parentId": null,
+      "needsAcceptance": false,
+      "created": "2026-11-27T16:31:40.464Z",
+      "updated": "2026-11-27T16:31:44.203Z",
+      "updatedBy": "Orchestrator",
+      "criteriaLastN": 4
     }
   ],
   "decisions": [
@@ -122607,6 +122672,41 @@
     }
   ],
   "events": [
+    {
+      "at": "2026-11-27T16:31:44.203Z",
+      "by": "Orchestrator",
+      "action": "card.criteria-add",
+      "ref": "c0vwceve",
+      "note": "#4 A6: E0078 for finite value-loops without fallback anchors on"
+    },
+    {
+      "at": "2026-11-27T16:31:43.331Z",
+      "by": "Orchestrator",
+      "action": "card.criteria-add",
+      "ref": "c0vwceve",
+      "note": "#3 A5-1: Single-statement if/else arms accept { ... } uniformly"
+    },
+    {
+      "at": "2026-11-27T16:31:42.405Z",
+      "by": "Orchestrator",
+      "action": "card.criteria-add",
+      "ref": "c0vwceve",
+      "note": "#2 A4: Composable flow-binding pattern expressions (if a == .Va"
+    },
+    {
+      "at": "2026-11-27T16:31:41.428Z",
+      "by": "Orchestrator",
+      "action": "card.criteria-add",
+      "ref": "c0vwceve",
+      "note": "#1 A3: Multi-statement task { ... } blocks infer Task<T> from t"
+    },
+    {
+      "at": "2026-11-27T16:31:40.464Z",
+      "by": "Orchestrator",
+      "action": "card.add",
+      "ref": "c0vwceve",
+      "note": "Authoring friction P0: task {} return inference, chained pattern guards, unified {} arms, E0078 span, _: discard, and loop skip (A3, A4, A5-1, A6, A7, A8)"
+    },
     {
       "at": "2026-11-27T16:06:59.927Z",
       "by": "Orchestrator",
