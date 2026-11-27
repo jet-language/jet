@@ -131,8 +131,8 @@ sema_stmt_stream_element_type: fn(return_type: Type?) -> Type? {
         .Apply(name, args) -> {
             if name == "Stream" && args.len() == 1 -> return Val(args[0])
         }
-        .Result(ok, err) -> {
-            if err == (Type.Named{name: "Err"}) -> return sema_stmt_stream_element_type(Val(ok))
+        .Result(ok, _) -> {
+            return sema_stmt_stream_element_type(Val(ok))
         }
         .Int | .Float | .Bool | .String | .Char | .List(_) | .Map(_, _, _) | .Shared(_) | .Option(_) | .Fn(_, _, _, _, _, _) | .Named(_) | .TraitObject(_) | .Tuple(_) | .FixedList(_, _) | .IntN(_, _) | .InlineRange(_, _, _) | .Float32 | .Tagged(_, _) | .Union(_) | .Case(_, _) | .Quantity(_, _) | .Measure(_) -> {}
     }

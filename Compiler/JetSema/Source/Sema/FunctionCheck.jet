@@ -1,12 +1,13 @@
 // Function checking: a function's symbol and registration, its generic
 // parameters and owner type, and the passes that check its body.
-use jet_foundation.[
-    FnBody,
-    MarkerHook,
-    MARKER_SCALAR,
-    body_tree_new,
-    AST_NODE_GENERATED,
-    AccessConvention,
+use {
+    jet_foundation.[
+        FnBody,
+        MarkerHook,
+        MARKER_SCALAR,
+        body_tree_new,
+        AST_NODE_GENERATED,
+        AccessConvention,
     Diagnostic,
     InternerDelta,
     delta_has_rows,
@@ -44,7 +45,9 @@ use jet_foundation.[
     checked_symbol_local,
     type_structural_head_names,
     type_with_effective_parameter_fn_return,
-]
+    ]
+    jet_parser.[parse_type_text]
+}
 
 // The module symbol of `item`, with no id: a snapshot mints its own
 // (sema_register_item), and a synthetic function no registration holds
@@ -975,7 +978,9 @@ sema_function_check_pass: fn(func: Func, owner_key: String, function_kind: TFunc
         if returns_value {
             sema_stmt_value_block_tail_lints(func.body, !func.compiler_generated && !module_is_core(updated.module_identity), updated, program, check.context.fallback_tables, check.diagnostics)
         }
+        check.context.declared_emit_types = sema_function_declared_emit_types(func, updated, program, module_identity, generic_params)
         ^statements: sema_check_statements(func.body, Val(effective_return), check, 0)
+        check.context.declared_emit_types = [Type]{}
         // The caller's group joins every task this body spawned into a `Group`
         // parameter, so those handles owe no `join` here.
         sema_taskgroup_mark_spawns_owned(check, SemaTaskGroupOrigin.Parameter)
@@ -1196,4 +1201,19 @@ sema_function_trait_block_method: fn(program: SemaProgramTables, owner_key: Stri
         return graph.modules[module_index].nominals[owner].methods[index].trait_block_index >= 0
     }
     false
+}
+
+// Resolved `T` element types named by `Emit<T>` entries in `func.declared_effects`.
+sema_function_declared_emit_types: fn(func: Func, env: SemaScopeEnvironment, program: SemaProgramTables, module_identity: ModuleID, generic_params: [TGenericParam]) -> [Type] {
+    ^elements: [Type]{}
+    entries: func.declared_effects ?? return elements
+    loop entry in entries {
+        if entry.name.starts_with("!") -> next
+        if !entry.name.starts_with("Emit<") || !entry.name.ends_with(">") -> next
+        if parse_type_text(entry.name) == .Val(.Apply(name, args)) && name == "Emit" && args.len() == 1 {
+            resolved: sema_function_resolve_declared(env, program, args[0], module_identity, generic_params)
+            elements.push(resolved)
+        }
+    }
+    elements
 }

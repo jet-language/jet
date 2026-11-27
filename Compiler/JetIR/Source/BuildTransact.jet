@@ -563,6 +563,22 @@ ir_context_push_effect_borrowed: fn(m: ^IRModule, p: IRProgram, b: ^IRBuilder, k
     _: ir_runtime(m, b, "jet_ctx_value_push", [Int]{node}, -1)
 }
 
+// Installs a `-> Stream<T>` generator's emitter on the task's context value
+// chain: tag word 2 at offset 40, generator state pointer at offset 48.
+ir_context_push_generator_emitter: fn(m: ^IRModule, p: IRProgram, b: ^IRBuilder, key: String, state: Int) Never! {
+    pointer_row: ir_pointer_row(m)
+    node: ir_closure_box(m, p, b, pointer_row, 56, [IRCaptureSlot]{})
+    zero: ir_word_const(m, b, 0)
+    two: ir_word_const(m, b, 2)
+    ir_emit(b.f, IROp.Store, -1, node, 8, zero, b.line)
+    word: ir_word_const(m, b, ir_context_key_word(key))
+    ir_emit(b.f, IROp.Store, -1, node, 24, word, b.line)
+    ir_emit(b.f, IROp.Store, -1, node, 32, zero, b.line)
+    ir_emit(b.f, IROp.Store, -1, node, 40, two, b.line)
+    ir_emit(b.f, IROp.Store, -1, node, 48, state, b.line)
+    _: ir_runtime(m, b, "jet_ctx_value_push", [Int]{node}, -1)
+}
+
 // `context.get(key)` (BodyHostCall.ContextGet): a copy of the value the
 // innermost `#Context` block of the current task, or of a task it was
 // spawned from, set for the `#ContextKey` constant `key`

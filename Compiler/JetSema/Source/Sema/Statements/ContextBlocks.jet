@@ -1,32 +1,36 @@
 // Context blocks: the check of a `context` block, its scratch and deadline
 // guards, and the allocator a block installs with its handler.
-use jet_foundation.[
-    AST_NODE_GENERATED,
-    EFFECT_VOCABULARY_ROOTS,
-    AccessConvention,
-    CallArg,
-    ContextField,
-    Expr,
-    ExprPair,
-    StrPart,
-    authority_is_deny_only,
-    core_source_owns_type,
-    expr_span,
-    Span,
-    Stmt,
-    Symbol,
-    SymbolID,
-    SymbolKind,
-    TFieldRef,
-    TGenericParam,
-    TMethodRef,
-    Type,
-    AST_EMPTY_CALL_ARG_FLAGS,
-    symbol_is_none,
-    symbol_none,
-    symbol_table_key,
-    type_name,
-]
+use {
+    jet_foundation.[
+        AST_NODE_GENERATED,
+        EFFECT_VOCABULARY_ROOTS,
+        AccessConvention,
+        CallArg,
+        ContextField,
+        Expr,
+        ExprPair,
+        StrPart,
+        authority_is_deny_only,
+        core_source_owns_type,
+        expr_span,
+        Span,
+        Stmt,
+        Symbol,
+        SymbolID,
+        SymbolKind,
+        TFieldRef,
+        TGenericParam,
+        TMethodRef,
+        Type,
+        AST_EMPTY_CALL_ARG_FLAGS,
+        symbol_is_none,
+        symbol_none,
+        symbol_table_key,
+        type_carrier_identity,
+        type_name,
+    ]
+    jet_parser.[parse_type_text]
+}
 
 // Resolved `#Effect` trait target for `#Context(Effect: handler)` and ambient
 // `Effect.method(...)` calls.
@@ -40,6 +44,7 @@ SemaResolvedEffectTrait: struct {
     module_index: Int,
     nominal_row: Int,
     meta: SemaEffectTraitMeta,
+    emit_element: Type?{None},
 }
 
 // Whether `name` names a structural or non-swappable built-in effect that can
@@ -77,10 +82,12 @@ sema_context_resolve_effect_trait: fn(written: String, check: SemaBodyCheck) -> 
     trait_module: sema_registration_module_index(graph, trait_symbol.module_identity) ?? return None
     ^found_meta: SemaEffectTraitMeta?{None}
     ^trait_def_name: trait_symbol.name
+    ^is_prelude_emit: false
     loop item in graph.modules[trait_module].program.items {
         if item == .Trait(definition) && definition.name == trait_symbol.name && definition.type_params.len() == 0 {
             found_meta = sema_effect_trait_meta(definition)
             trait_def_name = definition.name
+            is_prelude_emit = sema_is_prelude_emit_trait(definition)
             break
         }
     }
@@ -96,17 +103,33 @@ sema_context_resolve_effect_trait: fn(written: String, check: SemaBodyCheck) -> 
     trait_key: symbol_table_key(graph.symbols, trait_symbol.id)
     module_name: graph.modules[trait_module].module_name
     trait_full_name: if module_name == "" -> trait_def_name else -> "{module_name}.{trait_def_name}"
-    effect_token: "{graph.modules[trait_module].package_identity}/{trait_def_name}"
+    ^effect_key: "effect:{trait_key}"
+    ^effect_token: "{graph.modules[trait_module].package_identity}/{trait_def_name}"
+    ^emit_element: Type?{None}
+    if is_prelude_emit {
+        nominal: graph.modules[trait_module].nominals[nominal_row]
+        loop candidate in nominal.trait_methods {
+            if candidate.symbol.name == "emit" && candidate.parameters.len() >= 2 {
+                item_ty: sema_type_resolve_declared_recursive(graph, candidate.parameters[1].ty, trait_module, [TGenericParam]{})
+                canon: type_carrier_identity(item_ty)
+                effect_key = "effect:core.prelude.Emit<{canon}>"
+                effect_token = "core.prelude/Emit<{canon}>"
+                emit_element = Val(item_ty)
+                break
+            }
+        }
+    }
     Val(SemaResolvedEffectTrait{
         written: written,
         trait_name: trait_full_name,
         trait_symbol: trait_symbol,
         trait_key: trait_key,
-        effect_key: "effect:{trait_key}",
+        effect_key: effect_key,
         effect_token: effect_token,
         module_index: trait_module,
         nominal_row: nominal_row,
         meta: meta,
+        emit_element: emit_element,
     })
 }
 
@@ -176,7 +199,29 @@ sema_effect_trait_receiver_name: fn(receiver: Expr, owner_type_args: [Type], che
 sema_call_effect_trait_method: fn(receiver: Expr, method: String, method_span: Span, owner_type_args: [Type], type_args: [Type], args: [CallArg], expected: Type?, check: ^SemaBodyCheck) -> SemaDirectSpecialCheck {
     unhandled: SemaDirectSpecialCheck{handled: false, value: None}
     written: sema_effect_trait_receiver_name(receiver, owner_type_args, check) ?? return unhandled
-    resolved: sema_context_resolve_effect_trait(written, check) ?? return unhandled
+    span: Span{start: expr_span(receiver).start, end: method_span.end}
+    resolved_opt: sema_context_resolve_effect_trait(written, check)
+    if resolved_opt == None {
+        if written == "Emit" && method == "emit" && owner_type_args.len() == 0 && type_args.len() == 0 {
+            return sema_call_check_emit_args(span, method_span, args, expected, check)
+        }
+        if written.starts_with("Emit<") && written.ends_with(">") && method == "emit" && type_args.len() == 0 {
+            ^raw_elem: Type?{None}
+            if owner_type_args.len() == 1 {
+                raw_elem = Val(owner_type_args[0])
+            } else if parse_type_text(written) == .Val(.Apply(name, parsed_args)) && name == "Emit" && parsed_args.len() == 1 {
+                raw_elem = Val(parsed_args[0])
+            }
+            if raw_elem == .Val(elem_ast) {
+                graph: check.program.registration_graph
+                caller: sema_scope_caller_row(check.environment.*, graph)
+                elem_ty: sema_type_resolve_declared_recursive(graph, elem_ast, caller, check.environment.generic_params)
+                return sema_call_check_emit_typed(span, method_span, elem_ty, false, args, expected, check)
+            }
+        }
+        return unhandled
+    }
+    resolved: resolved_opt
     failed: SemaDirectSpecialCheck{handled: true, value: None}
     graph: check.program.registration_graph
     nominal: graph.modules[resolved.module_index].nominals[resolved.nominal_row]
@@ -209,9 +254,12 @@ sema_call_effect_trait_method: fn(receiver: Expr, method: String, method_span: S
     if trait_method.declaration.return_type == .Val(ret_ty) {
         result_ty = sema_type_resolve_declared_recursive(graph, ret_ty, resolved.module_index, [TGenericParam]{})
     }
-    span: Span{start: expr_span(receiver).start, end: method_span.end}
+    ^call_type_args: type_args
+    if resolved.emit_element == .Val(elem_ty) && method == "emit" && call_type_args.len() == 0 {
+        call_type_args = [Type]{elem_ty}
+    }
     method_ref: TMethodRef{symbol: trait_method.symbol.id, name: method, mangled: false, trait_owner: Val(resolved.trait_symbol.id), operator_identity: None}
-    call_node: sema_tree_node(result_ty, TExprKind.HostCall{call: THostCall.EffectCall{effect_key: resolved.effect_key, effect_token: resolved.effect_token, trait_name: resolved.trait_name, method: method_ref, type_args: type_args, args: checked_args}}, span)
+    call_node: sema_tree_node(result_ty, TExprKind.HostCall{call: THostCall.EffectCall{effect_key: resolved.effect_key, effect_token: resolved.effect_token, trait_name: resolved.trait_name, method: method_ref, type_args: call_type_args, args: checked_args}}, span)
     SemaDirectSpecialCheck{handled: true, value: sema_expr_expected_owned(call_node, expected, check.environment.*, check.program.*, check.diagnostics)}
 }
 
@@ -337,11 +385,11 @@ sema_stmt_check_context_block: fn(fields: [ContextField], body: [Stmt], span: Sp
                         place_name = sema_ownership_place_name(places[0])
                         place_id = SymbolID{id: places[0].root_id.id}
                     }
-                    pending_borrows.push(SemaOwnershipContextBorrow{effect_name: field.name, effect_token: resolved.effect_token, place_name: place_name, place_id: place_id, has_write_receiver: resolved.meta.has_write_receiver, borrowed: true})
+                    pending_borrows.push(SemaOwnershipContextBorrow{effect_name: field.name, effect_token: resolved.effect_token, place_name: place_name, place_id: place_id, has_write_receiver: resolved.meta.has_write_receiver, borrowed: true, emit_element: resolved.emit_element})
                     guards.push(TContextGuard{field: field.name, value: checked_handler, key: resolved.effect_key, effect_trait: resolved.trait_key, effect_token: resolved.effect_token, borrowed: true, concrete_type: fit.concrete})
                 } else {
                     if resolved.meta.has_write_receiver {
-                        pending_borrows.push(SemaOwnershipContextBorrow{effect_name: field.name, effect_token: resolved.effect_token, place_name: "", place_id: symbol_none(), has_write_receiver: true, borrowed: false})
+                        pending_borrows.push(SemaOwnershipContextBorrow{effect_name: field.name, effect_token: resolved.effect_token, place_name: "", place_id: symbol_none(), has_write_receiver: true, borrowed: false, emit_element: resolved.emit_element})
                     }
                     boxed_value: if actual == .TraitObject(_) -> checked_handler else -> sema_tree_node(Type.TraitObject{bounds: [String]{resolved.trait_name}}, TExprKind.TraitBox{value: checked_handler, target: Type.TraitObject{bounds: [String]{resolved.trait_name}}}, field.span)
                     guards.push(TContextGuard{field: field.name, value: boxed_value, key: resolved.effect_key, effect_trait: resolved.trait_key, effect_token: resolved.effect_token, borrowed: false, concrete_type: fit.concrete})

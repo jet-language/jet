@@ -11,14 +11,23 @@
 // parameter, since a trait made at a use names concrete types.
 use {
     jet_foundation.[
+        AccessConvention,
+        CallLabel,
         Diagnostic,
         Expr,
         Func,
         Item,
+        Marker,
+        MarkerCallArg,
+        NamedSpan,
+        Param,
+        ParamZone,
         Span,
         Stmt,
+        TraitConstDecl,
         TraitDef,
         TraitImplBlock,
+        TraitMethodSig,
         Type,
         TypeParam,
         NameTable,
@@ -29,6 +38,84 @@ use {
         type_name,
     ]
     jet_parser.[parse_type_text]
+}
+
+// Whether `definition` is a concrete trait synthesized from the Prelude
+// `#Effect Emit: trait<T>` template (distinct from any user-declared `Emit`).
+sema_is_prelude_emit_trait: fn(definition: TraitDef) -> Bool Never! {
+    definition.name.starts_with("Emit<") && definition.name.ends_with(">") && definition.span.start == 0 && definition.span.end == 0
+}
+
+// Synthetic Prelude `#Effect Emit: trait<T> { emit: fn(^self, item: T) }`
+// template used whenever a module does not declare its own `Emit` trait.
+sema_trait_instances_prelude_emit_template: fn() -> TraitDef Never! {
+    zero: Span{start: 0, end: 0}
+    self_param: Param{
+        convention: AccessConvention.Write,
+        root: false,
+        name: "self",
+        name_span: zero,
+        public_label: None,
+        zone: ParamZone.Either,
+        ty: Type.Named{name: ""},
+        ty_span: zero,
+        default: None,
+        variadic: false,
+        variadic_bound_list: None,
+        declared_view_from_names: None,
+        declared_footprint: None,
+    }
+    item_param: Param{
+        convention: AccessConvention.Read,
+        root: false,
+        name: "item",
+        name_span: zero,
+        public_label: None,
+        zone: ParamZone.Either,
+        ty: Type.Named{name: "T"},
+        ty_span: zero,
+        default: None,
+        variadic: false,
+        variadic_bound_list: None,
+        declared_view_from_names: None,
+        declared_footprint: None,
+    }
+    emit_sig: TraitMethodSig{
+        name: "emit",
+        name_span: zero,
+        type_params: [TypeParam]{},
+        params: [Param]{self_param, item_param},
+        return_type: None,
+        span: zero,
+        default_body: None,
+        is_pure: false,
+        declared_effects: None,
+        return_view_provenance: None,
+        declared_return_view_provenance: None,
+        markers: [Marker]{},
+    }
+    effect_marker: Marker{
+        name: "Effect",
+        negated: false,
+        name_span: zero,
+        args: [MarkerCallArg]{},
+        arg_labels: [CallLabel?]{},
+        span: zero,
+        ct: None,
+    }
+    TraitDef{
+        span: zero,
+        is_pub: true,
+        is_package_pub: false,
+        name: "Emit",
+        name_span: zero,
+        supertraits: [String]{},
+        assoc_types: [NamedSpan]{},
+        constants: [TraitConstDecl]{},
+        methods: [TraitMethodSig]{emit_sig},
+        markers: [Marker]{effect_marker},
+        type_params: [TypeParam]{TypeParam{name: "T", name_span: zero, bounds: [String]{}, prep: None}},
+    }
 }
 
 SemaTraitInstances: struct {
@@ -49,10 +136,10 @@ SemaTraitMade: struct {
     definition: TraitDef,
 }
 
-// Rewrites every module input that declares a parameterized trait in place.
+// Rewrites every module input that declares a parameterized trait or uses
+// Prelude `Emit<T>` in place.
 sema_trait_instances_rewrite_inputs: fn(inputs: ^[SemaRegistrationModuleInput], diagnostics: ^[Diagnostic]) Never! {
     loop index in 0..<inputs.len() {
-        if !sema_trait_instances_declares_template(inputs[index].program.items) -> next
         inputs[index].program.items = sema_trait_instances_rewrite_items(inputs[index].program.items.move(), diagnostics)
     }
 }
@@ -67,17 +154,23 @@ sema_trait_instances_declares_template: fn(items: [Item]) -> Bool Never! {
 }
 
 // Each parameterized trait in `items` is replaced by the traits its uses
-// make, in the place it is declared.
+// make, in the place it is declared. Any concrete Prelude `Emit<T>` use in a
+// module that does not declare its own `Emit` trait appends its synthesized
+// trait to `items`.
 sema_trait_instances_rewrite_items: fn(items: ^^[Item], diagnostics: ^[Diagnostic]) -> [Item] Never! {
     ^instances: SemaTraitInstances{names: name_table(), templates: [TraitDef]{}, made: [SemaTraitMade]{}, seen: name_table()}
     // The structs and enums the module declares: `owners` holds each name
     // once, and `owner_items[id - 1]` is the item named by id `id`.
     ^owners: name_table()
     ^owner_items: [Int]{}
+    ^has_local_template: false
+    ^has_local_emit: false
     loop (index, item) in items {
         if item == {
             .Trait(definition) -> {
+                if definition.name == "Emit" -> has_local_emit = true
                 if definition.type_params.len() > 0 {
+                    has_local_template = true
                     id: Int{name_intern(instances.names, definition.name).id}
                     if id > instances.templates.len() -> instances.templates.push(definition) else if id > 0 {
                         instances.templates[id - 1] = definition
@@ -91,6 +184,14 @@ sema_trait_instances_rewrite_items: fn(items: ^^[Item], diagnostics: ^[Diagnosti
                 sema_trait_instances_owner(owners, owner_items, definition.name, index)
             }
             .Func(_) | .Distinct(_) | .TypeAlias(_) | .UnitFamily(_) | .Tag(_) | .EffectDecl(_) | .Impl(_) | .Const(_) | .Test(_) | .ExternRust(_) | .Module(_) | .CModule(_) | .CodeModule(_) | .ErrorConv(_) | .Migration(_) | .ProtocolDecl(_) | .TemplateLoop(_) | .GenericModule(_) | .ModuleAlias(_) | .MarkerDecl(_) | .FactDecl(_) -> {}
+        }
+    }
+    ^prelude_emit_id: 0
+    if !has_local_emit {
+        prelude_emit: sema_trait_instances_prelude_emit_template()
+        prelude_emit_id = Int{name_intern(instances.names, "Emit").id}
+        if prelude_emit_id > instances.templates.len() -> instances.templates.push(prelude_emit) else if prelude_emit_id > 0 {
+            instances.templates[prelude_emit_id - 1] = prelude_emit
         }
     }
     loop item in items {
@@ -143,6 +244,7 @@ sema_trait_instances_rewrite_items: fn(items: ^^[Item], diagnostics: ^[Diagnosti
             .Distinct(_) | .TypeAlias(_) | .UnitFamily(_) | .Tag(_) | .EffectDecl(_) | .Const(_) | .ExternRust(_) | .Module(_) | .CModule(_) | .CodeModule(_) | .ErrorConv(_) | .Migration(_) | .ProtocolDecl(_) | .TemplateLoop(_) | .GenericModule(_) | .ModuleAlias(_) | .MarkerDecl(_) | .FactDecl(_) -> {}
         }
     }
+    if !has_local_template && instances.made.len() == 0 -> return items
     ^out: [Item]{}
     loop item in items.move() {
         if item == .Trait(definition) {
@@ -155,6 +257,11 @@ sema_trait_instances_rewrite_items: fn(items: ^^[Item], diagnostics: ^[Diagnosti
             }
         }
         out.push(item)
+    }
+    if prelude_emit_id > 0 {
+        loop row in instances.made {
+            if row.template == prelude_emit_id -> out.push(Item.Trait{value: row.definition})
+        }
     }
     out
 }
@@ -362,6 +469,9 @@ sema_trait_instances_note: fn(instances: ^SemaTraitInstances, written: String, s
     }
     named: sema_trait_instances_names_parameter(written, scope) ?? ""
     if named != "" {
+        if parts.head == "Emit" && template.span.start == 0 && template.span.end == 0 {
+            return
+        }
         diagnostics.push(sema_error("E0104", span, "trait `{written}` names the type parameter `{named}`", "a use of a parameterized trait makes one trait for concrete types, so its arguments cannot be type parameters", "write the concrete type, as in `{parts.head}<Int>`"))
         return
     }

@@ -39,6 +39,7 @@ use jet_foundation.[
     ModuleCap,
     NamedSpan,
     Span,
+    TGenericParam,
     TraitDef,
     Type,
     authority_is_deny_only,
@@ -50,6 +51,7 @@ use jet_foundation.[
     effect_vocabulary_access,
     expr_span,
     sema_effect_covers,
+    type_carrier_identity,
     type_name,
 ]
 
@@ -83,6 +85,8 @@ SemaLibraryEffect: struct {
     problem: Diagnostic?{None},
     // True when declared as an `#Effect` trait rather than a struct/enum tag.
     is_trait: Bool{false},
+    // Canonical cross-module token override (used by Prelude `Emit<T>`).
+    canonical_token: String{""},
     // True when `#Context(E: handler)` may install a provider for this effect.
     swappable: Bool{false},
     irreversible: Bool{false},
@@ -271,7 +275,7 @@ sema_library_effect_declared_access: fn(items: [Item], name: String) -> EffectAc
     EffectAccess.Reads
 }
 
-sema_library_effect_collect: fn(effects: ^[SemaLibraryEffect], package_identity: String, module_index: Int, items: [Item]) Never! {
+sema_library_effect_collect: fn(effects: ^[SemaLibraryEffect], graph: SemaRegistrationGraph, package_identity: String, module_index: Int, items: [Item]) Never! {
     loop item in items {
         if item == {
             .Struct(definition) -> {
@@ -298,8 +302,17 @@ sema_library_effect_collect: fn(effects: ^[SemaLibraryEffect], package_identity:
             .Trait(definition) -> {
                 if !EFFECT_VOCABULARY_ROOTS.contains(definition.name) && definition.type_params.len() == 0 {
                     if sema_effect_trait_meta(definition) == .Val(meta) {
+                        ^pkg_id: package_identity
+                        ^canon_token: ""
+                        if sema_is_prelude_emit_trait(definition) {
+                            pkg_id = "core.prelude"
+                            if definition.methods.len() > 0 && definition.methods[0].params.len() >= 2 {
+                                item_ty: sema_type_resolve_declared_recursive(graph, definition.methods[0].params[1].ty, module_index, [TGenericParam]{})
+                                canon_token = "core.prelude/Emit<{type_carrier_identity(item_ty)}>"
+                            }
+                        }
                         effects.push(SemaLibraryEffect{
-                            package_identity: package_identity,
+                            package_identity: pkg_id,
                             module_index: module_index,
                             name: definition.name,
                             cases: [String]{},
@@ -308,6 +321,7 @@ sema_library_effect_collect: fn(effects: ^[SemaLibraryEffect], package_identity:
                             access: meta.access,
                             has_explicit_access: meta.has_explicit_access,
                             is_trait: true,
+                            canonical_token: canon_token,
                             swappable: meta.swappable && !meta.deny_only,
                             irreversible: meta.irreversible,
                             deny_only: meta.deny_only,
@@ -329,7 +343,7 @@ sema_library_effect_collect: fn(effects: ^[SemaLibraryEffect], package_identity:
 sema_library_effect_access: fn(effects: [SemaLibraryEffect], name: String) -> EffectAccess? Never! {
     base: effect_value_base(name)
     loop declared in effects {
-        token: "{declared.package_identity}/{declared.name}"
+        token: if declared.canonical_token != "" -> declared.canonical_token else -> "{declared.package_identity}/{declared.name}"
         if base == token || base == declared.name -> return Val(declared.access)
         loop (index, case_name) in declared.cases {
             case_token: "{token}.{case_name}"
@@ -349,7 +363,7 @@ sema_library_effects: fn(graph: SemaRegistrationGraph) -> [SemaLibraryEffect] Ne
     ^effects: [SemaLibraryEffect]{}
     loop (module_index, module_row) in graph.modules {
         if module_row.module_identity == graph.canonical_effect_module_identity -> next
-        sema_library_effect_collect(effects, module_row.package_identity, module_index, module_row.program.items)
+        sema_library_effect_collect(effects, graph, module_row.package_identity, module_index, module_row.program.items)
     }
     ^states: (loop _ in effects -> 0)
     loop index in 0..<effects.len() -> sema_library_effect_resolve(effects, graph, states, index)
@@ -470,7 +484,7 @@ sema_library_effect_push_name: fn(names: ^[SemaLibraryEffectName], written: Stri
 }
 
 sema_library_effect_add_names: fn(names: ^[SemaLibraryEffectName], prefix: String, declared: SemaLibraryEffect) Never! {
-    token: "{declared.package_identity}/{declared.name}"
+    token: if declared.canonical_token != "" -> declared.canonical_token else -> "{declared.package_identity}/{declared.name}"
     sema_library_effect_push_name(names, "{prefix}{declared.name}", token, declared)
     if declared.leaf != "" && declared.parent == .Val(parent_span) {
         sema_library_effect_push_name(names, "{prefix}{parent_span.name}.{declared.leaf}", token, declared)
@@ -481,8 +495,8 @@ sema_library_effect_add_names: fn(names: ^[SemaLibraryEffectName], prefix: Strin
     }
 }
 
-// The library effect names `source` may write: its own package's bare, and
-// each imported package's under the name it is imported as.
+// The library effect names `source` may write: its own package's bare,
+// Prelude `Emit<T>` bare, and each imported package's under its alias.
 sema_library_effect_view: fn(effects: [SemaLibraryEffect], source: SemaRegistrationModule) -> [SemaLibraryEffectName] Never! {
     ^names: [SemaLibraryEffectName]{}
     if effects.len() == 0 -> return names
@@ -490,6 +504,18 @@ sema_library_effect_view: fn(effects: [SemaLibraryEffect], source: SemaRegistrat
         if declared.package_identity == source.package_identity {
             sema_library_effect_add_names(names, "", declared)
         }
+    }
+    loop declared in effects {
+        if declared.package_identity != "core.prelude" -> next
+        if declared.package_identity == source.package_identity -> next
+        ^seen: false
+        loop existing in names {
+            if existing.written == declared.name {
+                seen = true
+                break
+            }
+        }
+        if !seen -> sema_library_effect_add_names(names, "", declared)
     }
     loop import_row in source.imports {
         if import_row.target_package_identity == source.package_identity -> next
@@ -671,9 +697,19 @@ sema_library_effect_check_list: fn(items: [Item], name: String, cap: ModuleCap?,
     }
 }
 
+// Whether a concrete Prelude `Emit<Concrete>` discharge covers a generic
+// callee's `Emit<T>` token whose argument names one of the callee's own type
+// parameters.
+sema_effect_emit_covers_generic: fn(discharged: String, effect_name: String, callee_type_params: [String]) -> Bool Never! {
+    if callee_type_params.len() == 0 -> return false
+    if !discharged.starts_with("core.prelude/Emit<") || !effect_name.starts_with("core.prelude/Emit<") -> return false
+    suffix: effect_name.slice("core.prelude/".len(), effect_name.len())
+    sema_trait_instances_names_parameter(suffix, callee_type_params) != None
+}
+
 // Whether every call from `caller` to `callee_key` discharges `effect_name`
 // (either directly or via an ancestor of `effect_name` in `ancestry`).
-sema_effect_edge_discharges: fn(caller: SemaEffectNode, callee_key: String, effect_name: String, ancestry: [String:[String]]) -> Bool Never! {
+sema_effect_edge_discharges: fn(caller: SemaEffectNode, callee_key: String, callee_type_params: [String], effect_name: String, ancestry: [String:[String]]) -> Bool Never! {
     rare: caller.rare ?? return false
     if rare.discharged_calls.len() == 0 -> return false
     if rare.undischarged_callees.get(callee_key) == Val(true) -> return false
@@ -683,7 +719,7 @@ sema_effect_edge_discharges: fn(caller: SemaEffectNode, callee_key: String, effe
         matched_any = true
         ^covered: false
         loop discharged in call.effects {
-            if discharged == effect_name || sema_effect_covers(discharged, effect_name) {
+            if discharged == effect_name || sema_effect_covers(discharged, effect_name) || sema_effect_emit_covers_generic(discharged, effect_name, callee_type_params) {
                 covered = true
                 break
             }
@@ -763,8 +799,9 @@ sema_library_effect_reach: fn(nodes: [SemaEffectNode], callers: [[Int]]) -> Sema
         incoming: pending[cursor]
         cursor += 1
         callee_key: nodes[incoming.node].key
+        callee_type_params: nodes[incoming.node].type_params
         loop caller in callers[incoming.node] {
-            if sema_effect_edge_discharges(nodes[caller], callee_key, incoming.name, ancestry) -> next
+            if sema_effect_edge_discharges(nodes[caller], callee_key, callee_type_params, incoming.name, ancestry) -> next
             if sema_effect_set_add(reached[caller], incoming.name) {
                 pending.push(SemaEffectPending{node: caller, name: incoming.name})
             }

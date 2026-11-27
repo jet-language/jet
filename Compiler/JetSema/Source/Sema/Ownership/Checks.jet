@@ -420,6 +420,7 @@ SemaOwnershipContextBorrow: struct {
     place_id: SymbolID,
     has_write_receiver: Bool,
     borrowed: Bool,
+    emit_element: Type?{None},
 }
 
 // E0204 when a write or move reaches an open block's allocator or a borrowed
@@ -731,7 +732,7 @@ sema_ownership_state_snapshot: fn(source: SemaOwnershipState) -> SemaOwnershipSt
         snapshot.block_allocators.push(SemaOwnershipBlockAllocator{name: open.name.copy(), id: open.id})
     }
     loop open in source.context_borrows {
-        snapshot.context_borrows.push(SemaOwnershipContextBorrow{effect_name: open.effect_name, effect_token: open.effect_token, place_name: open.place_name, place_id: open.place_id, has_write_receiver: open.has_write_receiver, borrowed: open.borrowed})
+        snapshot.context_borrows.push(SemaOwnershipContextBorrow{effect_name: open.effect_name, effect_token: open.effect_token, place_name: open.place_name, place_id: open.place_id, has_write_receiver: open.has_write_receiver, borrowed: open.borrowed, emit_element: open.emit_element})
     }
     snapshot
 }

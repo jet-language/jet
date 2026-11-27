@@ -3712,7 +3712,10 @@ sema_effect_node_from_source: fn(function: FnBody, sources: [SemaEffectFunctionS
                 }
                 // A library effect admits the kernel effects it lists; a
                 // denial of it is checked over the library effects reached.
-                library_name: sema_library_effect_find(library, raw) ?? {
+                library_name: sema_library_effect_find(library, raw) ?? if raw.starts_with("Emit<") && raw.ends_with(">") && raw.len() > "Emit<>".len() -> {
+                    emit_token: "core.prelude/{raw}"
+                    SemaLibraryEffectName{written: raw.move(), kernel: [String]{}, token: emit_token, ancestors: [String]{}, fields: [SemaLibraryEffectField]{}, access: EffectAccess.Adds, is_trait: true, swappable: true, has_write_receiver: true}
+                } else -> {
                     diagnostics.push(sema_effect_unknown_entry(raw, entry.span, sema_effect_row_sources(effect_row), index))
                     next
                 }
@@ -5446,8 +5449,22 @@ sema_effect_walk_expr_enter: fn(nodes: ^[SemaEffectNode], node_index: Int, tree:
 
 sema_effect_collect_function: fn(nodes: ^[SemaEffectNode], node_index: Int, function: FnBody, facts: SemaEffectCallIndex, module_facts: [SemaCallSiteFact], module_index: Int, diagnostics: ^[Diagnostic]) {
     caller: sema_effect_caller_slot(facts, module_index, function.key)
+    ^pushed_stream_emit: false
+    if sema_stmt_stream_element_type(function.ret) == .Val(elem) {
+        emit_token: "core.prelude/Emit<{type_carrier_identity(elem)}>"
+        sema_effect_node_rare_open(nodes[node_index])
+        if nodes[node_index].rare.in_place() == .Val(rare) {
+            rare.active_discharges.push(emit_token)
+            pushed_stream_emit = true
+        }
+    }
     loop statement in function.body {
         sema_effect_walk_stmt_children(SemaEffectWalk.Collect{node_index: node_index}, nodes, facts, module_facts, diagnostics, caller, function.tree, function.tree.stmts[statement])
+    }
+    if pushed_stream_emit {
+        if nodes[node_index].rare.in_place() == .Val(rare) {
+            ^_: rare.active_discharges.pop()
+        }
     }
     sema_effect_node_settle_edges(nodes[node_index])
 }

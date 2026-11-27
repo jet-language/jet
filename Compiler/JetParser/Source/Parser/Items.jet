@@ -1869,14 +1869,15 @@ parser_function_body_missing: fn(state: ^JetParserState) -> Bool Never! {
     kind == TOKEN_KW_FN || kind == TOKEN_KW_PRIV || kind == TOKEN_KW_STRUCT || kind == TOKEN_KW_ENUM || kind == TOKEN_KW_MODULE || kind == TOKEN_KW_IMPL || kind == TOKEN_KW_TRAIT || kind == TOKEN_KW_USE || kind == TOKEN_KW_EXTERN || kind == TOKEN_EOF || kind == TOKEN_RBRACE || kind == TOKEN_SEMI
 }
 
-// A unit or unit-fallible (`E!`) result carries no value, so the body's final
-// line stays a statement.
+// A unit, unit-fallible (`E!`), or `Stream<T>` generator result carries no
+// tail value, so the body's final line stays a statement.
 parser_return_type_has_value: fn(return_type: Type?) -> Bool Never! {
     ty: return_type ?? return false
     if ty == {
         .Named(name) -> name != "Unit"
-        .Result(ok, _) -> ok != (Type.Named{name: "Unit"})
-        .Int | .Float | .Bool | .String | .Char | .List(_) | .Map(_, _, _) | .Shared(_) | .Option(_) | .Fn(_, _, _, _, _, _) | .Apply(_, _) | .TraitObject(_) | .Tuple(_) | .FixedList(_, _) | .IntN(_, _) | .InlineRange(_, _, _) | .Float32 | .Tagged(_, _) | .Union(_) | .Case(_, _) | .Quantity(_, _) | .Measure(_) -> true
+        .Apply(name, _) -> name != "Stream"
+        .Result(ok, _) -> parser_return_type_has_value(Val(ok))
+        .Int | .Float | .Bool | .String | .Char | .List(_) | .Map(_, _, _) | .Shared(_) | .Option(_) | .Fn(_, _, _, _, _, _) | .TraitObject(_) | .Tuple(_) | .FixedList(_, _) | .IntN(_, _) | .InlineRange(_, _, _) | .Float32 | .Tagged(_, _) | .Union(_) | .Case(_, _) | .Quantity(_, _) | .Measure(_) -> true
     }
 }
 

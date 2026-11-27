@@ -22,9 +22,11 @@ use {
         CopyFact,
         Span,
         StrPart,
+        SymbolID,
         SymbolKind,
         TFailureCarrier,
         TLetTy,
+        TMethodRef,
         TextEdit,
         Type,
         diagnostic_with_edit,
@@ -33,6 +35,8 @@ use {
         checked_generated_local,
         core_input_method_module,
         core_input_method_role,
+        symbol_none,
+        type_carrier_identity,
         type_identity_equal,
         type_name,
         Func,
@@ -367,6 +371,7 @@ sema_call_try_ambient_prelude: fn(call: Call, expected: Type?, check: ^SemaBodyC
         return SemaDirectSpecialCheck{handled: false, value: None}
     }
     if call.name == {
+        "emit" -> sema_call_check_emit(call, expected, check)
         "channel" -> sema_call_check_channel(call, expected, check)
         "freeze" -> sema_call_check_freeze(call, expected, check)
         "print" -> sema_call_check_ambient_print(call, check)
@@ -433,6 +438,142 @@ sema_call_try_ambient_prelude: fn(call: Call, expected: Type?, check: ^SemaBodyC
             sema_call_check_value_constructor(call, call.name, components, true, expected, check)
         }
     }
+}
+
+// Ambient `emit(value)` sugar for the Prelude `#Effect Emit: trait<T>`:
+// resolves `T` from the innermost active `#Context(Emit<T>: ...)` handler,
+// the enclosing `-> Stream<T>` generator, or the enclosing function's
+// `-[Emit<T>]>` effect row, and emits `THostCall.EffectCall`.
+sema_call_check_emit: fn(call: Call, expected: Type?, check: ^SemaBodyCheck) -> SemaDirectSpecialCheck {
+    if call.type_args.len() == 1 {
+        graph: check.program.registration_graph
+        caller: sema_scope_caller_row(check.environment.*, graph)
+        elem_ty: sema_type_resolve_declared_recursive(graph, call.type_args[0], caller, check.environment.generic_params)
+        return sema_call_check_emit_typed(call.name_span, call.name_span, elem_ty, false, call.args, expected, check)
+    }
+    if call.type_args.len() > 1 {
+        check.diagnostics.push(sema_error("E0104", call.name_span, "`emit` takes at most 1 type argument, got {call.type_args.len()}", "`Emit<T>` is parameterized by a single emitted element type", "write `emit(value)` or `Emit<T>.emit(value)`"))
+        return SemaDirectSpecialCheck{handled: true, value: None}
+    }
+    sema_call_check_emit_args(call.name_span, call.name_span, call.args, expected, check)
+}
+
+sema_call_emit_probe_type: fn(args: [CallArg], check: ^SemaBodyCheck) -> Type? {
+    if args.len() != 1 -> return None
+    ^probe_diagnostics: [Diagnostic]{}
+    offered: sema_probe_expression(args[0].expr, None, check, probe_diagnostics) ?? return None
+    Val(offered.ty)
+}
+
+sema_call_emit_borrow_element: fn(borrows: [SemaOwnershipContextBorrow], index: Int) -> Type? Never! {
+    borrows[index].emit_element
+}
+
+sema_call_check_emit_args: fn(span: Span, name_span: Span, args: [CallArg], expected: Type?, check: ^SemaBodyCheck) -> SemaDirectSpecialCheck {
+    ^context_count: 0
+    ^first_context_index: -1
+    ^index: check.state.context_borrows.len() - 1
+    loop index >= 0 {
+        if check.state.context_borrows[index].emit_element != None {
+            if first_context_index < 0 -> first_context_index = index
+            context_count += 1
+        }
+        index -= 1
+    }
+    if context_count > 0 {
+        ^chosen: first_context_index
+        if context_count > 1 {
+            if sema_call_emit_probe_type(args, check) == .Val(offered_ty) {
+                ^scan: check.state.context_borrows.len() - 1
+                loop scan >= 0 {
+                    if check.state.context_borrows[scan].emit_element == .Val(elem) && type_identity_equal(offered_ty, elem) {
+                        chosen = scan
+                        break
+                    }
+                    scan -= 1
+                }
+            }
+        }
+        if sema_call_emit_borrow_element(check.state.context_borrows, chosen) == .Val(elem_ty) {
+            return sema_call_check_emit_typed(span, name_span, elem_ty, false, args, expected, check)
+        }
+    }
+    if sema_stmt_stream_element_type(check.scopes.return_type) == .Val(elem_ty) {
+        return sema_call_check_emit_typed(span, name_span, elem_ty, true, args, expected, check)
+    }
+    declared_count: check.context.declared_emit_types.len()
+    if declared_count > 0 {
+        ^chosen: 0
+        if declared_count > 1 {
+            if sema_call_emit_probe_type(args, check) == .Val(offered_ty) {
+                loop scan in 0..<declared_count {
+                    if type_identity_equal(offered_ty, check.context.declared_emit_types[scan]) {
+                        chosen = scan
+                        break
+                    }
+                }
+            }
+        }
+        elem_ty: check.context.declared_emit_types[chosen]
+        return sema_call_check_emit_typed(span, name_span, elem_ty, false, args, expected, check)
+    }
+    check.diagnostics.push(sema_error("E0805", name_span, "`emit` outside a generator or `Emit<T>` context", "`emit` sends a value to the enclosing `-> Stream<T>` generator, `-[Emit<T>]>` function, or `#Context(Emit<T>: ...)` handler", "declare `-> Stream<T>` or `-[Emit<T>]>` on this function, or wrap the call in `#Context(Emit<T>: ...)`"))
+    loop arg in args {
+        ^_: sema_check_expression(arg.expr, None, check)
+    }
+    SemaDirectSpecialCheck{handled: true, value: None}
+}
+
+sema_call_check_emit_typed: fn(span: Span, name_span: Span, elem_type: Type, target_is_stream: Bool, args: [CallArg], expected: Type?, check: ^SemaBodyCheck) -> SemaDirectSpecialCheck {
+    failed: SemaDirectSpecialCheck{handled: true, value: None}
+    if args.len() != 1 {
+        check.diagnostics.push(sema_error("E0104", name_span, "`emit` expects 1 argument, got {args.len()}", "`emit` sends a single value to the active `Emit<T>` handler or `-> Stream<T>` generator", "pass one value: `emit(value)`"))
+        loop arg in args {
+            ^_: sema_check_expression(arg.expr, None, check)
+        }
+        return failed
+    }
+    value: args[0].expr
+    diagnostic_start: check.diagnostics.len()
+    checked: sema_check_expression(value, Val(elem_type), check) ?? {
+        mismatch_index: sema_value_mismatch_index(check.diagnostics, diagnostic_start, expr_span(value)) ?? return failed
+        ^probe_diagnostics: [Diagnostic]{}
+        offered: sema_probe_expression(value, None, check, probe_diagnostics) ?? return failed
+        check.diagnostics[mismatch_index] = sema_stmt_emit_mismatch(elem_type, offered.ty, target_is_stream, expr_span(value))
+        return failed
+    }
+    if !sema_copy_site_check_guard_owned(checked, check, false) -> return failed
+    ^emitted: checked
+    if !type_identity_equal(checked.ty, elem_type) {
+        if {
+            sema_expr_numeric_value_widening(checked, elem_type) == Val(true) -> {
+                line: sema_source_line_at(check.environment.source_segments, checked.span) ?? 0
+                emitted = sema_expr_numeric_literal_conversion(checked, elem_type, checked.span, line, check.diagnostics) ?? return failed
+            }
+            else -> {
+                check.diagnostics.push(sema_stmt_emit_mismatch(elem_type, checked.ty, target_is_stream, checked.span))
+                return failed
+            }
+        }
+    }
+    if target_is_stream {
+        if !sema_stmt_move_direct(value, check, "`emit`") -> return failed
+    }
+    canon: type_carrier_identity(elem_type)
+    effect_key: "effect:core.prelude.Emit<{canon}>"
+    effect_token: "core.prelude/Emit<{canon}>"
+    trait_name: "Emit<{canon}>"
+    method_ref: TMethodRef{symbol: symbol_none(), name: "emit", mangled: false, trait_owner: None, operator_identity: None}
+    checked_args: [TCallArg]{TCallArg{value: emitted, template_items: [SymbolID]{}, borrow: !target_is_stream, mut_borrow: false, fn_coerce: None, widen_to_vec: false, widen_to_union: None, box_as_trait: None, label: None, spread: false}}
+    call_node: sema_tree_node(Type.Named{name: "Unit"}, TExprKind.HostCall{call: THostCall.EffectCall{effect_key: effect_key, effect_token: effect_token, trait_name: trait_name, method: method_ref, type_args: [Type]{elem_type}, args: checked_args}}, span)
+    SemaDirectSpecialCheck{handled: true, value: sema_expr_expected_owned(call_node, expected, check.environment.*, check.program.*, check.diagnostics)}
+}
+
+sema_stmt_emit_mismatch: fn(element: Type, offered: Type, target_is_stream: Bool, span: Span) -> Diagnostic {
+    if target_is_stream {
+        return sema_error("E0807", span, "this emits {sema_type_show(offered)}, but the stream is `Stream<{sema_type_show(element)}>`", "every `emit` in a generator must hand back the stream's element type", sema_type_fix_hint(element, offered))
+    }
+    sema_error("E0807", span, "this emits {sema_type_show(offered)}, but the active `Emit` expects {sema_type_show(element)}", "every `emit` call must match the element type of its active `Emit<T>` handler", sema_type_fix_hint(element, offered))
 }
 
 // `Mat3<Int>(…)`: a built-in value type built by a call has fixed component

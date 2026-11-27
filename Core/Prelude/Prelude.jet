@@ -56,6 +56,14 @@ F32: IEEE<8, 23>
 
 F64: IEEE<11, 52>
 
+// The stream emission effect: a `-> Stream<T>` function installs a lazy
+// generator handler for `Emit<T>` automatically; a `#Context(Emit<T>: ...)`
+// block installs a synchronous collector or custom handler without a fiber.
+#Effect
+Emit: trait<T> {
+    emit: fn(^self, item: T)
+}
+
 // `keep` is the compiler's identity/use-site barrier. The other helpers,
 // including the optional-to-failure view, are ordinary reachable Jet bodies.
 keep: fn<T>(value: T) -> T Never! { value }

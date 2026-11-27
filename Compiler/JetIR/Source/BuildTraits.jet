@@ -687,18 +687,50 @@ IRTraitDispatchTargets: struct {
 }
 
 ir_trait_collect_targets: fn(p: IRProgram, b: ^IRBuilder, owner: SymbolID, method_name: String, span: Span) -> IRTraitDispatchTargets Never! {
+    short: ir_short_name(ir_symbol_key(p, owner))
+    candidates: p.trait_methods.rows[ir_trait_method_slot(p.trait_methods, short, method_name)]
+    ir_trait_collect_targets_in(p, b, candidates, short, Val(owner), "", span)
+}
+
+ir_trait_collect_emit_targets: fn(p: IRProgram, b: ^IRBuilder, concrete_elem: Type, span: Span) -> IRTraitDispatchTargets Never! {
+    elem_name: ir_type_name(ir_untag(concrete_elem))
+    short_exact: "Emit<{elem_name}>"
+    leaf_name: ir_short_name(elem_name)
+    short_leaf: "Emit<{leaf_name}>"
+    ^candidates: [Int]{}
+    exact_slot: ir_trait_method_slot(p.trait_methods, short_exact, "emit")
+    if exact_slot > 0 {
+        loop idx in p.trait_methods.rows[exact_slot] -> candidates.push(idx)
+    }
+    if short_leaf != short_exact {
+        leaf_slot: ir_trait_method_slot(p.trait_methods, short_leaf, "emit")
+        if leaf_slot > 0 {
+            loop idx in p.trait_methods.rows[leaf_slot] -> candidates.push(idx)
+        }
+    }
+    ir_trait_collect_targets_in(p, b, candidates, short_exact, None, elem_name, span)
+}
+
+ir_trait_collect_targets_in: fn(p: IRProgram, b: ^IRBuilder, candidates: [Int], short: String, owner_filter: SymbolID?, emit_elem_name: String, span: Span) -> IRTraitDispatchTargets Never! {
     ^targets: [IRTraitTarget]{}
     ^returned: Type.Named{name: "Unit"}
     ^seen: name_table_sized(8)
     ^lent: false
-    short: ir_short_name(ir_symbol_key(p, owner))
-    candidates: p.trait_methods.rows[ir_trait_method_slot(p.trait_methods, short, method_name)]
     ^picks: [{row: Int, concrete: Type, args: [Type]}]{}
     ^generic: [Int]{}
     loop index in candidates {
-        if p.functions[index].generic_params.len() > 0 -> next
-        if ir_function_row(p, p.functions[index].key) != (Val(index)) -> next
-        implementer: ir_trait_implementer(p, index, owner) ?? next
+        func: p.functions[index]
+        if func.generic_params.len() > 0 -> next
+        if ir_function_row(p, func.key) != Val(index) -> next
+        if emit_elem_name != "" {
+            if func.name != "emit" || func.params.len() != 1 -> next
+            if ir_type_name(ir_untag(func.params[0].ty)) != emit_elem_name -> next
+        }
+        implementer: if owner_filter == .Val(owner) -> {
+            ir_trait_implementer(p, index, owner)
+        } else -> {
+            ir_trait_any_implementer(p, index)
+        } ?? next
         if ir_owner_generic(p, implementer) {
             generic.push(index)
             next
@@ -706,7 +738,11 @@ ir_trait_collect_targets: fn(p: IRProgram, b: ^IRBuilder, owner: SymbolID, metho
         picks.push({row: index, concrete: implementer, args: [Type]{}})
     }
     loop index in generic {
-        implementer: ir_trait_implementer(p, index, owner) ?? next
+        implementer: if owner_filter == .Val(owner) -> {
+            ir_trait_implementer(p, index, owner)
+        } else -> {
+            ir_trait_any_implementer(p, index)
+        } ?? next
         head: ir_trait_head_identity(p, implementer) ?? next
         instances: ir_trait_boxed_of(p.trait_boxed, short)
         loop instance in instances.move() {
@@ -727,6 +763,14 @@ ir_trait_collect_targets: fn(p: IRProgram, b: ^IRBuilder, owner: SymbolID, metho
         targets.push(IRTraitTarget{key: p.functions[pick.row].key.copy(), concrete: pick.concrete, access: ir_receiver_access(p.functions[pick.row].kind), args: pick.args})
     }
     IRTraitDispatchTargets{targets: targets, returned: returned, lent: lent}
+}
+
+ir_trait_any_implementer: fn(p: IRProgram, row: Int) -> Type? Never! {
+    if p.functions[row].kind == {
+        .Method(_, owner_type) | .TraitMethod(_, _, owner_type, _, _) -> return Val(owner_type)
+        .TopLevel -> {}
+    }
+    None
 }
 
 // `receiver.method(args)` on a trait value: the payload key selects the
@@ -829,36 +873,91 @@ ir_trait_call: fn(m: ^IRModule, p: IRProgram, b: ^IRBuilder, receiver: Int, meth
     ir_trait_propagate(m, p, b, method, result, ty, span)
 }
 
+
 // `Effect.method(args)` (BodyHostCall.EffectCall): looks up the innermost
-// `#Context(Effect: handler)` node on the task's context chain by canonical
-// monomorphized trait key, extracts `(payload_key, receiver_address)` for
-// either an owned `TraitBox` (tag 0 at +40, box at +48) or a borrowed local
-// handler (tag 1 at +40, payload_key at +48, local address at +56), and
-// dispatches to the matching implementation.
+// `#Context(Effect: handler)` or `-> Stream<T>` generator node on the task's
+// context chain by canonical monomorphized trait key, dispatches tag 2 directly
+// to `jet_rt_native_generator_yield` for Prelude `Emit<T>.emit`, or extracts
+// `(payload_key, receiver_address)` for owned `TraitBox` (tag 0 at +40, box at
+// +48) or borrowed local handler (tag 1 at +40, payload_key at +48, local
+// address at +56) and dispatches to the matching implementation.
 ir_effect_call: fn(m: ^IRModule, p: IRProgram, b: ^IRBuilder, effect_key: String, trait_name: String, method: TMethodRef, type_args: [Type], args: [BodyCallArg], ty: Type, span: Span) -> Int Never! {
-    if type_args.len() > 0 {
+    is_prelude_emit: effect_key.starts_with("effect:core.prelude.Emit<") && method.name == "emit" && args.len() == 1
+    ^actual_effect_key: effect_key
+    ^actual_trait_name: trait_name
+    ^concrete_elem: Type.Named{name: "Unit"}
+    if is_prelude_emit {
+        if type_args.len() == 1 {
+            concrete_elem = ir_untag(ir_fact(p, b, type_args[0], span))
+            if ir_failed(b) -> return -1
+            elem_name: ir_type_name(concrete_elem)
+            actual_effect_key = "effect:core.prelude.Emit<{elem_name}>"
+            actual_trait_name = "Emit<{elem_name}>"
+        } else if type_args.len() > 1 {
+            return ir_fail_slot(b, span, "generic dynamic effect trait methods are not supported yet")
+        }
+    } else if type_args.len() > 0 {
         return ir_fail_slot(b, span, "generic dynamic effect trait methods are not supported yet")
     }
-    owner: method.trait_owner ?? return ir_fail_slot(b, span, "effect trait call has no trait owner")
-    collected: ir_trait_collect_targets(p, b, owner, method.name, span)
+    collected: if is_prelude_emit -> {
+        ir_trait_collect_emit_targets(p, b, concrete_elem, span)
+    } else -> {
+        owner: method.trait_owner ?? return ir_fail_slot(b, span, "effect trait call has no trait owner")
+        ir_trait_collect_targets(p, b, owner, method.name, span)
+    }
     targets: collected.targets
     returned: collected.returned
     lent: collected.lent
-    if targets.len() == 0 {
-        ir_effect_missing_unreachable(m, b, trait_name)
+    if !is_prelude_emit && targets.len() == 0 {
+        ir_effect_missing_unreachable(m, b, actual_trait_name)
         return ir_unreachable_value(m, p, b, ty)
     }
     pointer_row: ir_pointer_row(m)
     word_row: ir_word_row(m)
-    key_word: ir_word_const(m, b, ir_context_key_word(effect_key))
+    key_word: ir_word_const(m, b, ir_context_key_word(actual_effect_key))
     node: ir_runtime(m, b, "jet_ctx_value_find", [Int]{key_word}, pointer_row)
     zero: ir_word_const(m, b, 0)
     missing: ir_bool_op(m, b, IROp.Eq, node, zero)
     ir_open_if(b.f, missing, b.line)
-    ir_effect_missing_unreachable(m, b, trait_name)
+    ir_effect_missing_unreachable(m, b, actual_trait_name)
     ir_end(b.f, b.line)
-    is_borrowed: ir_load_word(m, b, node, 40)
-    borrowed_cond: ir_bool_op(m, b, IROp.Ne, is_borrowed, zero)
+    tag: ir_load_word(m, b, node, 40)
+    ^result: -1
+    if !ir_unit_type(returned) {
+        result_row: ir_value_type(m, p, returned) ?? return ir_type_fail(b, span, returned)
+        result = ir_temp(m, b, result_row)
+    }
+    before: ir_own_states(b, b.bindings.len())
+    ^tests: [Int]{}
+    ^arm_states: [[IROwnState]]{}
+    ^arm_leaves: [Bool]{}
+    if is_prelude_emit {
+        two: ir_word_const(m, b, 2)
+        is_generator: ir_bool_op(m, b, IROp.Eq, tag, two)
+        ir_open_if(b.f, is_generator, b.line)
+        gen_state: ir_temp(m, b, pointer_row)
+        ir_emit(b.f, IROp.Load, gen_state, node, 48, -1, b.line)
+        _: ir_generator_yield_with_state(m, p, b, gen_state, args[0].value, span)
+        if ir_failed(b) -> return -1
+        if result >= 0 {
+            if ir_untag(returned) == .Result(ok, _) && ir_unit_type(ir_untag(ok)) {
+                ok_box: ir_result_box(m, p, b, returned, true, -1)
+                ir_emit(b.f, IROp.Copy, result, ok_box, -1, -1, b.line)
+                b.fresh[ok_box] = false
+            }
+        }
+        tests.push(is_generator)
+        arm_states.push(ir_own_states(b, before.len()))
+        arm_leaves.push(false)
+        ir_else(b.f, b.line)
+        ir_set_own_states(b, before)
+        if targets.len() == 0 {
+            ir_effect_missing_unreachable(m, b, actual_trait_name)
+            ir_close_arms(m, b, tests, arm_states, arm_leaves, true)
+            return -1
+        }
+    }
+    borrowed_cond: ir_bool_op(m, b, IROp.Ne, tag, zero)
     key_slot: ir_temp(m, b, word_row)
     addr_slot: ir_temp(m, b, pointer_row)
     ir_open_if(b.f, borrowed_cond, b.line)
@@ -873,15 +972,6 @@ ir_effect_call: fn(m: ^IRModule, p: IRProgram, b: ^IRBuilder, effect_key: String
     ir_emit(b.f, IROp.Copy, key_slot, owned_key, -1, -1, b.line)
     ir_emit(b.f, IROp.Copy, addr_slot, owned_addr, -1, -1, b.line)
     ir_end(b.f, b.line)
-    ^result: -1
-    if !ir_unit_type(returned) {
-        result_row: ir_value_type(m, p, returned) ?? return ir_type_fail(b, span, returned)
-        result = ir_temp(m, b, result_row)
-    }
-    before: ir_own_states(b, b.bindings.len())
-    ^tests: [Int]{}
-    ^arm_states: [[IROwnState]]{}
-    ^arm_leaves: [Bool]{}
     loop target in targets {
         target_key: ir_trait_key(p, target.concrete)
         expected: ir_word_const(m, b, target_key)
@@ -922,6 +1012,9 @@ ir_effect_call: fn(m: ^IRModule, p: IRProgram, b: ^IRBuilder, effect_key: String
     if result >= 0 {
         b.fresh[result] = ir_has_drop(m, b, result)
         if lent -> b.lent[result] = true
+    }
+    if is_prelude_emit && result >= 0 && ir_untag(returned) == .Result(_, _) && !(ir_untag(ty) == .Result(_, _)) {
+        return ir_try_slot(m, p, b, result, returned, TTryConvert.NoConversion, None, span)
     }
     ir_trait_propagate(m, p, b, method, result, ty, span)
 }

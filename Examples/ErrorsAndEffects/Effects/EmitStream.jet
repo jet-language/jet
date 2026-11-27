@@ -1,0 +1,84 @@
+// `#Effect Emit: trait<T>` unifies lazy `-> Stream<T>` generators and
+// synchronous `#Context(Emit<T>: ...)` collectors over the same `-[Emit<T>]>`
+// helpers.
+
+IntCollector: struct {
+    items: [Int],
+
+    impl Emit<Int> {
+        emit: fn(^self, item: Int) {
+            self.items.push(item)
+        }
+    }
+}
+
+StrCollector: struct {
+    items: [String],
+
+    impl Emit<String> {
+        emit: fn(^self, item: String) {
+            self.items.push(item.copy())
+        }
+    }
+}
+
+// A recursive `-[Emit<Int>]>` helper works unchanged under both lazy streams
+// and synchronous `#Context` collectors.
+emit_range: fn(lo: Int, hi: Int) -[Emit<Int>]> {
+    if lo >= hi -> return
+    emit(lo)
+    emit_range(lo + 1, hi)
+}
+
+// A generic `-[Emit<T>]>` helper works across concrete element types.
+emit_pair: fn<T>(first: T, second: T) -[Emit<T>]> {
+    Emit<T>.emit(first)
+    emit(second)
+}
+
+// `-> Stream<Int>` auto-installs and auto-discharges `Emit<Int>`.
+lazy_numbers: fn(hi: Int) -[]> Stream<Int> {
+    emit_range(1, hi)
+}
+
+lazy_words: fn() -[]> Stream<String> {
+    emit_pair<String>("alpha", "beta")
+}
+
+// Zero-fiber synchronous collection discharges `Emit<Int>` to pure `-[]>`.
+collect_numbers: fn(hi: Int) -[]> [Int] {
+    ^buf: IntCollector{items: [Int]{}}
+    #Context(Emit<Int>: ^buf) {
+        emit_range(1, hi)
+    }
+    buf.items
+}
+
+collect_words: fn() -[]> [String] {
+    ^buf: StrCollector{items: [String]{}}
+    #Context(Emit<String>: ^buf) {
+        emit_pair<String>("gamma", "delta")
+    }
+    buf.items
+}
+
+run: fn() -[IO]> {
+    // 1. Lazy pull with early break via `-> Stream<Int>` auto-handle.
+    ^seen: [Int]{}
+    loop x in lazy_numbers(10) {
+        seen.push(x)
+        if x == 3 -> break
+    }
+    print("lazy: {seen[0]},{seen[1]},{seen[2]} (len={seen.len()})")
+
+    // 2. Synchronous zero-fiber collection via `#Context(Emit<Int>: ^buf)`.
+    all: collect_numbers(5)
+    print("sync: {all[0]},{all[1]},{all[2]},{all[3]} (len={all.len()})")
+
+    // 3. Generic `-[Emit<T>]>` helper under both Stream and #Context.
+    ^stream_words: [String]{}
+    loop w in lazy_words() -> stream_words.push(w)
+    sync_words: collect_words()
+    print("generic-stream: {stream_words[0]}-{stream_words[1]}")
+    print("generic-sync: {sync_words[0]}-{sync_words[1]}")
+}

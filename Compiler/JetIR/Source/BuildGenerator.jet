@@ -76,7 +76,7 @@ ir_build_generator: fn(m: ^IRModule, p: IRProgram, b: ^IRBuilder, function: FnBo
     if ir_failed(b) {
         return
     }
-    producer: ir_generator_producer(m, p, b, function, captures)
+    producer: ir_generator_producer(m, p, b, function, captures, element)
     if producer < 0 {
         return
     }
@@ -115,8 +115,9 @@ ir_build_generator: fn(m: ^IRModule, p: IRProgram, b: ^IRBuilder, function: FnBo
 }
 
 // The producer(env, result) of generator `function`: the body, run as the
-// generator's child task over the parameters it takes from the env.
-ir_generator_producer: fn(m: ^IRModule, p: IRProgram, b: ^IRBuilder, function: FnBody, captures: [IRGeneratorCapture]) -> Int Never! {
+// generator's child task over the parameters it takes from the env, with
+// `#Effect Emit<element>` installed as the active generator emitter.
+ir_generator_producer: fn(m: ^IRModule, p: IRProgram, b: ^IRBuilder, function: FnBody, captures: [IRGeneratorCapture], element: Type) -> Int Never! {
     ^a: ir_builder_new(ir_hashed_function("{b.f.name}.generator", "{b.f.key}#generator", "jet_ir_generator_", b.f.source_file, function.line))
     a.instance = b.instance.copy()
     a.row = b.row
@@ -150,6 +151,9 @@ ir_generator_producer: fn(m: ^IRModule, p: IRProgram, b: ^IRBuilder, function: F
     ir_cell_params(m, a)
     ir_sentry_frame(m, p, a)
     ir_effect_scope_frame(m, a, function.effect_scope)
+    emit_key: "effect:core.prelude.Emit<{ir_type_name(element)}>"
+    ir_context_push_generator_emitter(m, p, a, emit_key, state)
+    a.transactions.push(IRTxFrame{handle: -1, stm: -1, snapshots: [IRTxSnapshot]{}, loops: 0, shield: false, deadline: -1, values: 1, allocator: -1, frame_id: -1, bindings: a.bindings.len()})
     if !ir_failed(a) {
         ir_stmts(m, p, a, function.body)
         if !ir_failed(a) && a.failures.len() == 0 -> ir_return_fallthrough(m, p, a)
@@ -207,11 +211,11 @@ ir_generator_release: fn(m: ^IRModule, p: IRProgram, b: ^IRBuilder, function: Fn
     id
 }
 
-// `yield value` in a producer body: the value moves to the consumer through
-// the runtime, which returns at the next pull, or delivers the cancel of a
-// dropped stream (the stop check after the call unwinds the body).
-ir_generator_yield: fn(m: ^IRModule, p: IRProgram, b: ^IRBuilder, value: Int, span: Span) -> Int Never! {
-    if b.generator < 0 -> return ir_fail_slot(b, span, "`yield` outside a generator body")
+// Emits `value` into the generator runtime state `state`: the value moves to
+// the consumer through the runtime, which returns at the next pull, or
+// delivers the cancel of a dropped stream (the stop check after the call
+// unwinds the body).
+ir_generator_yield_with_state: fn(m: ^IRModule, p: IRProgram, b: ^IRBuilder, state: Int, value: Int, span: Span) -> Int Never! {
     slot: ir_expr(m, p, b, value)
     if ir_failed(b) -> return -1
     ^size: 8
@@ -229,7 +233,12 @@ ir_generator_yield: fn(m: ^IRModule, p: IRProgram, b: ^IRBuilder, value: Int, sp
         zero: ir_word_const(m, b, 0)
         ir_move_stored_into(m, p, b, b.f.slot_type[slot], storage, 0, IR_MOVE_ENTER, zero)
     }
-    state: b.generator
     _: ir_runtime(m, b, "jet_rt_native_generator_yield", [Int]{state, storage}, -1)
+    ^_: span
     return -1
+}
+
+ir_generator_yield: fn(m: ^IRModule, p: IRProgram, b: ^IRBuilder, value: Int, span: Span) -> Int Never! {
+    if b.generator < 0 -> return ir_fail_slot(b, span, "`emit` outside a generator body")
+    ir_generator_yield_with_state(m, p, b, b.generator, value, span)
 }
