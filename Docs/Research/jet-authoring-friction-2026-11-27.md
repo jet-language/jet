@@ -17,8 +17,9 @@
 > - **#7052 [P0]:** `D28` (two-phase borrows for sequential nested calls — adversarial safety audit first), `D30` (`.in_place()` & `^guard: cell.guard_edit()` diagnostic hints)
 > - **#7053 [P0]:** `D27 Part A` (structural `Copy` for small plain all-scalar structs), `D29` (zero-refcount `Shared<T>` borrow in scoped tasks — adversarial safety audit first)
 > - **#7054 [P0]:** `E31`/`E51` (ordinary `fn` defaults infallible `Never!`, `run`/`#Test` keep `Err!`), `E33`/`E52` (nested `Task<T E!>.join()` ergonomics)
+> - **#7055 [P0]:** `F34` (empty `[]`/`{}`/`None` inference), `F36` (`String.find` -> `Int?`, `StringBuilder`, `from_byte`, `byte_slice`, iterator `.to_list()` hint), `F38` (`UseAfterMove` `.copy()` hint), `G40` (anonymous `task.group {}`)
 >
-> **Remaining in this TODO list for owner discussion & decision:** **14 items** (`D27 Part B`, `F34`, `F36`, `F38`, `G39–G40`, `G42–G43`, `H45`, `I46–I47`, `J48–J50`). Item numbers are kept stable as items are removed.
+> **Remaining in this TODO list for owner discussion & decision:** **10 items** (`D27 Part B`, `G39`, `G42–G43`, `H45`, `I46–I47`, `J48–J50`). Item numbers are kept stable as items are removed.
 
 ---
 
@@ -26,10 +27,9 @@
 
 1. [The Bottom Line: Would Fixing These Make Jet Near-Perfect?](#1-the-bottom-line-would-fixing-these-make-jet-near-perfect)
 2. [Productive Friction Worth Keeping (What Forces *Good* Code)](#2-productive-friction-worth-keeping-what-forces-good-code)
-3. [Remaining TODO Items to Discuss & Decide (14 Items)](#3-remaining-todo-items-to-discuss--decide-14-items)
-   - [D. Ownership, Borrowing & Copying (`D27 Part B`)](#d-ownership-borrowing--copying)
-   - [F. Collections, Strings, Bytes & Stdlib Ergonomics (`F34`, `F36`, `F38`)](#f-collections-strings-bytes--stdlib-ergonomics)
-   - [G. Concurrency, Effects & Imports (`G39–G40`, `G42–G43`)](#g-concurrency-effects--imports)
+3. [Remaining TODO Items to Discuss & Decide (10 Items)](#3-remaining-todo-items-to-discuss--decide-10-items)
+   - [D. Ownership, Borrowing & Copying (`D27 Part B` — parked on `#7031`)](#d-ownership-borrowing--copying)
+   - [G. Concurrency, Effects & Imports (`G39`, `G42–G43`)](#g-concurrency-effects--imports)
    - [H. Lints & Low-Level Code (`H45`)](#h-lints--low-level-code)
    - [I. Compiler Architecture & Core Library Coupling (`I46–I47`)](#i-compiler-architecture--core-library-coupling)
    - [J. CLI, Testing, Formatting & Diagnostics Tooling (`J48–J50`)](#j-cli-testing-formatting--diagnostics-tooling)
@@ -77,7 +77,7 @@ All three agents **explicitly asked Jet to KEEP** these guardrails — annoying 
 
 ---
 
-## 3. Remaining TODO Items to Discuss & Decide (14 Items)
+## 3. Remaining TODO Items to Discuss & Decide (10 Items)
 
 Legend:
 - `COUNTERPRODUCTIVE` = actively pushes authors to write *worse* code.
@@ -89,55 +89,19 @@ Legend:
 
 ### D. Ownership, Borrowing & Copying
 
-#### D27 Part B. Functional `View<str>` / `View<T>` with inferred provenance (no `from var` boilerplate) & last-use auto-move — `COUNTERPRODUCTIVE`
-- **What happens:** Returning a plain borrowed `String` parameter as `View<str>` currently fails (`E2307` in `StringViews.jet:302` refuses plain `String` without `.trim()`/`.before()`/`.after()`), AND requires noisy `from line` provenance even when there's only 1 borrowable input or `self`. Also last-use local moves into `^^` params still sometimes require `.move()` noise.
-- **Interaction with `Docs/Proposals/memory-model-2026-10-05.md:396` & `#7031`:** Matches the memory-model proposal directly (`-> View<str>` infers `from self` on methods and `from param` on single-input fns; `from a | b` only needed when disambiguating multiple public inputs), and `#7031` explicitly keeps `View<T>`/`View<str>`.
-- **Proposed fixes / ideas:**
-  - Infer `View` provenance automatically on `self` methods and single-input functions (no `from var` needed!).
-  - Allow `View<str>` / `View<T>` to accept plain borrowed `String` / `T` parameters directly (zero-copy pass-through).
-  - Auto-move last-use locals into `^^` parameters without `.move()` noise.
-
----
-
-### F. Collections, Strings, Bytes & Stdlib Ergonomics
-
-#### F34. Empty collection / `None` literals require repeating known types (`[Int]{}`, `Int?{None}`) — `ACCIDENTAL FRICTION`
-- **What happens:** Even inside a struct literal or typed parameter where the type is already known (`IROptOptions{disabled: [String]{}}`, `^idx: Int?{None}`, `Shared<[Int]>{[Int]{}}`), you must repeat the full type head on every empty list, map, or `None`.
-- **Proposed fixes / ideas:**
-  - Infer `[]`, `[:]`, and `None` whenever an expected `[T]`, `[K:V]`, or `T?` type is known from a struct field, parameter, binding, or return type.
-
-#### F36. `String` stdlib rough edges (`find` returns `-1`, no `StringBuilder`, `split` returns iterator, no `byte_slice` / `from_byte`) — `ACCIDENTAL FRICTION`
-- **What happens:**
-  - `String.find` / `rfind` returns `-1` instead of `Int?` (contradicting Jet's "no sentinel values" law!).
-  - Building strings either does quadratic `out = "{out}{piece}"` or manually pushes `U8` into `[U8]{}` + `String.from_bytes(...) ?? ""`.
-  - `s.split("\n")[0]` fails because `split` returns an iterator (needs `.to_list()`).
-  - Emitting one byte (like ESC `27`) requires `String.from_bytes([U8]{27}) ?? ""`.
-  - `len()` vs. `count_bytes()` vs. `slice(a..<b)` leads every package to roll its own clamped byte slicer.
-  - `Float` `Display` prints `2.0` while `Complex` strips `.0` (`2 + 3i`).
-- **Proposed fixes / ideas:**
-  - Return `Int?` from `String.find` / `rfind`.
-  - Add `StringBuilder` (or `^s.push_str(...)`), `String.from_byte(b: U8)`, `String.byte_slice(a..<b)`, and a targeted fix hint when indexing an iterator (*"call `.to_list()` first"*).
-  - Document `Float` vs. `Complex`/`Quaternion` display formatting in one reference table.
-
-#### F38. List literals `[a, b]` move elements without suggesting `.copy()` cleanly — `ACCIDENTAL FRICTION`
-- **What happens:** Building a quick inspection list `[first, second]` of non-Copy values moves them and causes `UseAfterMove` later.
-- **Proposed fixes / ideas:**
-  - Keep strict move semantics, and enhance `UseAfterMove` hints to suggest `.copy()` when the element type implements `Clone`.
+#### D27 Part B. Borrowed `String` returns & `View` model — `PARKED ON #7031 (P9)`
+- **Context:** `Docs/Proposals/2026-11-24-greenfield-language.md` P9 (`#7031` ballot `D-HANDLE-NAV1`) proposes handles (`Pool<T>` / `ID<T>`) + short-lived views that cannot outlive the call that made them (eliminating `from var` provenance and `@T` links completely).
+- **Next step:** Hold `View`-return design until `#7031` is decided; auto-move last-use locals into `^^` params is independent and safe either way.
 
 ---
 
 ### G. Concurrency, Effects & Imports
 
-#### G39. Rigid explicit effect lists cause cross-package churn (`#6861`) & unclear callback effects — `ACCIDENTAL FRICTION`
-- **What happens:** Adding a legitimate low-level read effect (`Env` / `FS.Read`) to `Core/Net/TLS.jet` (e.g., reading system CA roots) immediately broke `Core/HTTP/Client.jet` and `Server.jet` because those callers spelled out explicit leaf ceilings (`-[Net, Time.Wait]>`). Separately, on callback types like `ask: fn(^Session, Int) -> Bool`, it's hard to predict whether the callback is pure or effect-polymorphic.
+#### G39. Named effect bundles/aliases & callback effect-row polymorphism — `ACCIDENTAL FRICTION`
+- **Live check:** Scoped effects (`FS.Read("assets/")`, `Net("api.example.com")`, `-[!FS.Read("secrets/")]>`) are **already built** (`Docs/Spec/spec.md:3377-3438`), **but** named effect bundles/aliases (combining `Net` + `Env` + `FS.Read("/etc/ssl")` into one reusable name like `Net.TLS`) and callback effect-row polymorphism do NOT exist yet.
 - **Proposed fixes / ideas:**
-  - Support effect bundles / aliases (e.g. `Net.TLS`) or effect-row polymorphism on higher-order helpers and traits so internal leaf additions don't ripple across every transitive caller.
-  - Show inferred/allowed effect rows clearly on `fn(...)` types in LSP hover and diagnostics.
-
-#### G40. Mandatory unused group name in `task.group g { ... }` & `task.all` shapes — `ACCIDENTAL FRICTION`
-- **What happens:** `task.group workers { h: task foo() }` forces inventing an unused identifier `workers` even when bare `task` implicitly joins the group. Meanwhile `task.all` has 3 subtly different shapes (`task.all { a(), b() }`, `task.all { left: a(), right: b() }`, `task.all([t1, t2])`).
-- **Proposed fixes / ideas:**
-  - Allow anonymous `task.group { ... }` and `task.group(limit: 2) { ... }` when the group handle isn't referenced.
+  - Add named **effect bundles / aliases** (supporting scoped effects inside bundles!) so internal leaf additions don't ripple across callers.
+  - Add **effect-row polymorphism** on higher-order callbacks/traits and display inferred/allowed effect rows clearly in LSP hover.
 
 #### G42. Import alias shadowing, non-obvious `pkg.[a, b]` syntax, & opaque `E0003` — `ACCIDENTAL FRICTION`
 - **What happens:**
