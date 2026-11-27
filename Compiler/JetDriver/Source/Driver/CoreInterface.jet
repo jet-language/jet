@@ -734,7 +734,7 @@ jet_driver_core_open_parse: fn(text: String, threads: CompilerThreads) -> JetDri
     loop item in parsed.program.items {
         if item == {
             .Func(value) -> {
-                if !jet_driver_core_body_blank(value) {
+                if !jet_driver_core_body_blank(value) && !(value.params.len() == 0 && value.body.len() == 1) {
                     jet_driver_core_body_push(spans, braces, opens, value.name_span.end, value.span.end)
                 }
             }

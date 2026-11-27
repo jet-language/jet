@@ -7812,7 +7812,7 @@ jet_driver_compile_loaded_stages: fn(request: JetDriverCompileRequest, kg: ^JetD
         jet_driver_trace_step_end(request.trace_sink, "driver.result.capture", -1)
     } else if request.mode == JetDriverCompileMode.Doc { doc_interner = Val(interner.move()) }
     jet_driver_trace_step_begin(request.trace_sink, "driver.result.compile")
-    ^result: jet_driver_compile_result(load, None, true, trace)
+    ^result: jet_driver_compile_result(load, failed_stage, failed_stage == None, trace)
     result.entry_effects = entry_effects.move()
     result.package_effects = package_effects.move()
     result.rust_foreign = rust_foreign.move()

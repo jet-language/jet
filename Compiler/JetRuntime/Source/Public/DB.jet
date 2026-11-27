@@ -68,6 +68,11 @@ db: module {
     // The wall clock in milliseconds since the Unix epoch.
     #Import(c) priv vfs_now_ms: fn() -[DB]> Int = "jet_db_vfs_now_ms"
 
+    // Lock-free fast-path flag for VFS boundary tracing (HostDBVfs.jet).
+    #Import(c) priv vfs_trace_active: fn() -[DB]> Bool = "jet_db_vfs_trace_active"
+
+    #Import(c) priv vfs_set_trace_active: fn(active: Bool) -[DB]> = "jet_db_vfs_set_trace_active"
+
     // Publishes a job-queue observation to the Devtools event sink.
     #Import(c) priv job_publish_parts: fn(timestamp_ms: Int, source: String, kind: String, entity: String, fields: String) -[DB]> = "jet_job_queue_publish_parts"
 

@@ -3592,11 +3592,11 @@ priv workflow_sleep: fn(workflow: ServiceWorkflow, duration: Duration) ServiceEr
     // deadline-blown sleep is recorded before the workflow fails.
     if service_time_rt.workflow_sleep_wait(nanos) == {
         1 -> {
-            workflow_append_handle(workflow, "workflow-wait-sleep-canceled:{workflow.run_id}")
+            #Shield { workflow_append_handle(workflow, "workflow-wait-sleep-canceled:{workflow.run_id}") }
             Err(ServiceError.Policy("workflow sleep was canceled"))
         }
         2 -> {
-            workflow_append_handle(workflow, "workflow-wait-sleep-deadline:{workflow.run_id}")
+            #Shield { workflow_append_handle(workflow, "workflow-wait-sleep-deadline:{workflow.run_id}") }
             Err(ServiceError.Policy("workflow sleep deadline expired"))
         }
         else -> Ok()

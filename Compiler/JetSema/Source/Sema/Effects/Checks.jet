@@ -5230,6 +5230,23 @@ sema_effect_walk_expr_enter: fn(nodes: ^[SemaEffectNode], node_index: Int, tree:
             if !sema_effect_in_assume_det(nodes[node_index], node.span) && sema_effect_walk_record_call_node(nodes, node_index, tree, node, facts, module_facts, diagnostics, caller) {
                 return true
             }
+            result: body_type(facts.interner, tree, expression)
+            allocator: sema_call_memory_allocator_name(result) ?? ""
+            if allocator == "Arena" || allocator == "Bump" {
+                if sema_effect_find_fact(facts, module_facts, caller, node.span) == .Val(position) {
+                    if module_facts[position].callee == .Val(callee_sym) {
+                        callee_key: symbol_key(facts.symbols, tree.symbols, callee_sym)
+                        if (callee_key.starts_with("function:<corelib>/core.mem.") || callee_key.starts_with("method:<corelib>/core.mem.")) && callee_key.ends_with(".new") {
+                            ^bound: Int?{None}
+                            if args.len() > 0 && body_node(tree, args[0].value).kind == .IntLit(bytes, _) && bytes >= 0 {
+                                bound = Val(bytes)
+                            }
+                            sema_effect_push_memory_event(nodes, node_index, node.span, "`{allocator}.new` reserves bounded arena storage", "arena", bound)
+                            sema_effect_push_memory_event(nodes, node_index, node.span, "`{allocator}.new` allocates from arena storage", "alloc", None)
+                        }
+                    }
+                }
+            }
             sema_effect_record_function_arguments(nodes, facts, node_index, tree, args)
         }
         .MethodCall(_, method, _, args) -> {

@@ -17,7 +17,7 @@ listing: fn(key: Int, index: Int, output: ^[String]) -[FS.Read]> Bool {
     }
     children.sort_by(fn(left: Int, right: Int) {
         if files.entries_before(key, left, right) -> return Ordering.Less
-        if files.entries_before(key, right, left) -> return Ordering.Greater
+        if files.entries_before(key, left: right, right: left) -> return Ordering.Greater
         Ordering.Equal
     })
     loop child in children {

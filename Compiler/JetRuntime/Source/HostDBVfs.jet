@@ -385,3 +385,17 @@ db_vfs_path_fact: fn(path: I64, call: I64, offset: I64, mask: I64) -> I64 {
     jet_rt_free(clock, I64{16}, I64{8})
     jet_int_owned_from_i64(ms)
 }
+
+^db_vfs_trace_flag: I64{0}
+
+// Lock-free fast-path flag for core.db VFS boundary tracing: read on every VFS
+// write/sync without taking a lock when tracing is off.
+#Export(c) jet_db_vfs_trace_active: fn() -> Bool {
+    db_vfs_trace_flag != I64{0}
+}
+
+#Export(c) jet_db_vfs_set_trace_active: fn(active: Bool) {
+    #Unsafe("serialized under Core/DB init_os_trace exclusive guard") {
+        db_vfs_trace_flag = if active -> I64{1} else -> I64{0}
+    }
+}

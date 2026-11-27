@@ -110,6 +110,14 @@ jet_cli_fix_collect: fn(file: String, source: String, files: [JetCLIFixFile], te
             loop diagnostic in jet_driver_present_diagnostics(result.advice, snapshot, result.generated_source_files) {
                 found.push(diagnostic)
             }
+            if !parse_failed {
+                loop diagnostic in found {
+                    if diagnostic.severity == DIAGNOSTIC_ERROR && (diagnostic.code == "E0001" || diagnostic.code == "E0002" || diagnostic.code == "E0003" || diagnostic.code == "E0004") {
+                        parse_failed = true
+                        break
+                    }
+                }
+            }
             loop diagnostic in found.move() {
                 if jet_cli_fix_elsewhere(diagnostic, canonical, source) {
                     in_scope: jet_cli_fix_swept(scope, diagnostic, result.generated_source_files)
