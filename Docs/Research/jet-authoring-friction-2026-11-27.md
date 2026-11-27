@@ -12,8 +12,9 @@
 > - **#7047 [P0]:** Option 1 (`!` / `!(context)` / `!!` exclusively for Fallible `T E!`, reserving `?` / `?.` / `??` strictly for Optional `T?`, superseding `#7034`'s `?` failure-mark spelling)
 > - **#7048 [P0]:** `A3` (`task {}` return inference), `A4` (chained pattern guards + guard extraction), `A5` (uniform `{}` arms + `L0514` at 2+ distinct variants), `A6` (`E0078` span on `loop`), `A7` (non-moving `_: expr` discard + `.drop` for linear), `A8` (rename loop `next` -> `skip`)
 > - **#7049 [P0]:** `A2` + **Jet Composition Laws** (drop `->` on `if`/`loop`, `[loop ...]` comprehensions, zero postfix markers + stacked `#[A, B]` slots + in-body markers, flow-binding pattern algebra, `T?` finite `break val` loops, 3-class jump boundaries, full surface coverage), `B9` (`Type{...}` in `if`/`loop` headers), `B17` (binary `^` and `Int / Int` hints)
+> - **#7050 [P0]:** `B11` (`\u{H}` lexer fix + multi/triple-backtick raw strings), `B13` (`U8{'\n'}` ASCII byte folding), `B16` (`..=` hint + range `.rev()` / descending stride)
 >
-> **Remaining in this TODO list for owner discussion & decision:** **28 items** (`B11`, `B13`, `B16`, `C18–C19`, `C22`, `C24–C25`, `D27–D30`, `E31`, `E33`, `E51–E53`, `F34`, `F36`, `F38`, `G39–G40`, `G42–G43`, `H45`, `I46–I47`, `J48–J50`). Item numbers are kept stable as items are removed.
+> **Remaining in this TODO list for owner discussion & decision:** **25 items** (`C18–C19`, `C22`, `C24–C25`, `D27–D30`, `E31`, `E33`, `E51–E53`, `F34`, `F36`, `F38`, `G39–G40`, `G42–G43`, `H45`, `I46–I47`, `J48–J50`). Item numbers are kept stable as items are removed.
 
 ---
 
@@ -21,8 +22,7 @@
 
 1. [The Bottom Line: Would Fixing These Make Jet Near-Perfect?](#1-the-bottom-line-would-fixing-these-make-jet-near-perfect)
 2. [Productive Friction Worth Keeping (What Forces *Good* Code)](#2-productive-friction-worth-keeping-what-forces-good-code)
-3. [Remaining TODO Items to Discuss & Decide (28 Items)](#3-remaining-todo-items-to-discuss--decide-28-items)
-   - [B. Syntax, Braces, Literals & Strings (`B11`, `B13`, `B16`)](#b-syntax-braces-literals--strings)
+3. [Remaining TODO Items to Discuss & Decide (25 Items)](#3-remaining-todo-items-to-discuss--decide-25-items)
    - [C. Types, Structs, Enums, Generics & Signatures (`C18–C19`, `C22`, `C24–C25`)](#c-types-structs-enums-generics--signatures)
    - [D. Ownership, Borrowing & Copying (`D27–D30`)](#d-ownership-borrowing--copying)
    - [E. Error Handling & Jet-vs-Go Remaining Items (`E31`, `E33`, `E51–E53`)](#e-error-handling--jet-vs-go-remaining-items)
@@ -75,33 +75,13 @@ All three agents **explicitly asked Jet to KEEP** these guardrails — annoying 
 
 ---
 
-## 3. Remaining TODO Items to Discuss & Decide (28 Items)
+## 3. Remaining TODO Items to Discuss & Decide (25 Items)
 
 Legend:
 - `COUNTERPRODUCTIVE` = actively pushes authors to write *worse* code.
 - `ACCIDENTAL FRICTION` = costs time/readability while preventing zero bugs.
 - `BUG / COMPILER GAP` = genuine defect or incomplete implementation.
 - `TOOLING QUICK WIN` = CLI/test/diagnostic improvement with zero language risk.
-
----
-
-### B. Syntax, Braces, Literals & Strings
-
-#### B11. Every `"..."` string interpolates `{...}`, turning JSON, tests & `\u{...}` into `{{{{` soup — `ACCIDENTAL FRICTION`
-- **What happens:** `"if true {"` fails to compile (*unterminated `{`*). `"\\u{7f}"` fails with *"f isn't a unit in scope"* (because `{7f}` parses as `7` with suffix `f`!). JSON becomes `"{{\"textDocument\":{{\"uri\":{uri}}}}}"`. Backtick raw strings `` `...` `` skip `{...}` interpolation, **but** cannot contain `\n`, `\t`, or `\u{...}`, and you cannot nest backticks inside backtick strings.
-- **Proposed fixes / ideas:**
-  - Keep `"..."` interpolating + fix the `\u{...}` escape bug + support multi-backtick raw strings (`` ``...`` `` and multi-line dedented ```` ```...``` ````) alongside `#7046` unquoted DSLs (`JSON{...}`, `HTML{...}`, `Regex{...}`).
-
-#### B13. No ASCII byte literal syntax (`U8{'\n'}`, `U8{'#'}`, `U8{'\\'}`) — `ACCIDENTAL FRICTION`
-- **What happens:** Parsers, lexers, terminal decoders, and binary encoders are full of unreadable ASCII magic numbers: `U8{10}`, `U8{13}`, `U8{27}`, `U8{92}`, `b2 == 51`, `(Int{bytes[i]}) == 46`.
-- **Proposed fixes / ideas:**
-  - Compile-time char-to-ASCII-byte folding via `U8{'\n'}`, `U8{'#'}`, `U8{'\\'}` (uses Jet's one `Type{...}` constructor; compile error on non-ASCII chars).
-
-#### B16. Reverse range `(0..<n).rev()` & crisp hint for Rust-style `1..=N` — `ACCIDENTAL FRICTION`
-- **What happens:** Jet's `..` is **already inclusive** (`1..5`) and `..<` is exclusive (`0..<5`), so someone writing `1..=20` gets a generic `Expected a value, found =` with no hint; and iterating backwards requires manual `^i: n - 1; loop i >= 0 { ...; i -= 1 }`.
-- **Proposed fixes / ideas:**
-  - Emit a crisp hint on `..=` (*"Jet's `..` is already inclusive (`1..20`); use `..<` for exclusive"*).
-  - Add `.rev()` (and `.step(k)` / descending stride support) on ranges (`loop i in (0..<n).rev()`).
 
 ---
 
