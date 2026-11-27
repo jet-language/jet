@@ -18,11 +18,11 @@
 > - **#7053 [P0]:** `D27 Part A` (structural `Copy` for small plain all-scalar structs) + `D27` last-use auto-move into `^^`, `D29` (zero-refcount `Shared<T>` borrow in scoped tasks — adversarial safety audit first)
 > - **#7054 [P0]:** `E31`/`E51` (ordinary `fn` defaults infallible `Never!`, `run`/`#Test` keep `Err!`), `E33`/`E52` (nested `Task<T E!>.join()` ergonomics)
 > - **#7055 [P0]:** `F34` (empty `[]`/`{}`/`None` inference), `F36` (`String.find` -> `Int?`, `StringBuilder`, `from_byte`, `byte_slice`, iterator `.to_list()` hint), `F38` (`UseAfterMove` `.copy()` hint), `G40` (anonymous `task.group {}`)
-> - **#7056 [P0]:** `I46` (Single Source of Truth for Core library exports, canonical nominal type identity, single-file `jet check Core/<file>.jet`, monolith splits)
-> - **#7057 [P0]:** `G39` (named effect bundles & callback polymorphism), `G42` (import hints, `E0003` paths, alias shadowing), `G43` (unified dev warnings vs `--deny-warnings`/`--release`), `H45` (exempt scripts/tests from `L2401`/`L2421`)
+> - **#7056 [P0]:** `I46` (Single Source of Truth for Core library exports, canonical nominal type identity, single-file `jet check Core/<file>.jet`, monolith splits) + `I47` (poison broken declarations to stop error cascades)
+> - **#7057 [P0]:** `G39` (named effect bundles & callback polymorphism), `G42` (import hints, `E0003` paths, direct qualified access keeping strict no-shadowing), `G43` (unified dev warnings vs `--deny-warnings`/`--release`), `H45` (exempt scripts/tests from `L2401`/`L2421`)
 > - **#7058 [P0]:** `J48` (`jet check --errors` / `--warnings` / `--file` + errors last), `J49` (single `--flag value` CLI syntax + `jet test` fixes), `J50` (ZERO-cache fast cold single-file test + `jet fmt --stdout`/`--check-lines` + `jet inspect exports` + REPL `^name:`)
 >
-> **Remaining in this TODO list for owner discussion & decision:** **2 items** (`D27 Part B` — Handles vs. Views / `#7031`, and `I47` — declaration typo error-cascade poisoning). Item numbers are kept stable as items are removed.
+> **Remaining in this TODO list for owner discussion & decision:** **1 item** (`D27 Part B` — Handles vs. Views / `#7031`). Item numbers are kept stable as items are removed.
 
 ---
 
@@ -30,9 +30,8 @@
 
 1. [The Bottom Line: Would Fixing These Make Jet Near-Perfect?](#1-the-bottom-line-would-fixing-these-make-jet-near-perfect)
 2. [Productive Friction Worth Keeping (What Forces *Good* Code)](#2-productive-friction-worth-keeping-what-forces-good-code)
-3. [Remaining TODO Items to Discuss & Decide (2 Items)](#3-remaining-todo-items-to-discuss--decide-2-items)
+3. [Remaining TODO Items to Discuss & Decide (1 Item)](#3-remaining-todo-items-to-discuss--decide-1-item)
    - [D. Ownership, Borrowing & Copying (`D27 Part B` — Handles vs. Views / `#7031`)](#d-ownership-borrowing--copying)
-   - [I. Compiler Architecture & Core Library Coupling (`I47`)](#i-compiler-architecture--core-library-coupling)
 4. [Reference: Jet Error Handling vs. Go Error Handling](#4-reference-jet-error-handling-vs-go-error-handling)
 5. [What Already Works Really Well (Do Not Regress)](#5-what-already-works-really-well-do-not-regress)
 
@@ -77,7 +76,7 @@ All three agents **explicitly asked Jet to KEEP** these guardrails — annoying 
 
 ---
 
-## 3. Remaining TODO Items to Discuss & Decide (2 Items)
+## 3. Remaining TODO Items to Discuss & Decide (1 Item)
 
 Legend:
 - `COUNTERPRODUCTIVE` = actively pushes authors to write *worse* code.
@@ -91,16 +90,7 @@ Legend:
 
 #### D27 Part B. Borrowed `String` returns, Views, & Handles (`#7031` / `D-HANDLE-NAV1`) — `ACTIVE DISCUSSION`
 - **Context:** `Docs/Proposals/2026-11-24-greenfield-language.md` P9 (`#7031` ballot `D-HANDLE-NAV1`) proposes handles (`Pool<T>` / `ID<T>`) + short-lived views that cannot outlive the call that made them (eliminating `from var` provenance and `@T` links completely).
-- **Next step:** Discuss `#7031` (`D-HANDLE-NAV1`) + how borrowed `String` / `View` returns work cleanly under the handle model.
-
----
-
-### I. Compiler Architecture & Core Library Coupling
-
-#### I47. Single declaration typos cascade into 20+ bogus downstream errors — `TOOLING QUICK WIN`
-- **What happens:** One syntax typo (`DomainError: error { ... }`) triggered 20 follow-on errors (`E0119`, `E2417`, `E0107`, `E1102`, plus bogus `L0102: Parameter label is never used` on functions whose bodies never checked).
-- **Proposed fixes / ideas:**
-  - Poison/taint unresolved declaration symbols cleanly so downstream type/sendability/unused-param diagnostics stay silent on broken items.
+- **Next step:** Finalize the clean, zero-magic, cohesive architecture for shared state, graphs, and zero-copy string returns (replacing `D-HANDLE-NAV1`'s implicit pool guessing).
 
 ---
 
