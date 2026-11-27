@@ -221,10 +221,6 @@ parser_parse_item_or_import: fn(state: ^JetParserState) -> ParsedItemOrImport {
         value: parser_parse_c_module(state)
         return ParsedItemOrImport{item: Val(value), handled: true}
     }
-    if parser_foreign_marker_ahead_at(state, 0) {
-        value: parser_parse_foreign_marker(state)
-        return ParsedItemOrImport{item: Val(value), handled: true}
-    }
     modifiers: parser_parse_item_modifiers(state, true)
     if {
         parser_module_ahead(state) -> {

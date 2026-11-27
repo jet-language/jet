@@ -36,14 +36,14 @@
 <h2>Fix</h2>
 <p class="diag-copy fix" data-registry-field="fix">Give each `#Context` field its required type.</p>
 <h2>Worked example</h2>
-<p>First UI snapshot mentioning <code>Jet.ContextFieldTypeMismatch</code>: <code>Tests/UI/context_wrong_type.stderr</code>.</p>
-<pre class="diag">Error: Jet.ContextFieldTypeMismatch: `allocator` needs an allocator, got Int (a whole number)
-  --&gt; Tests/UI/context_wrong_type.jet:3:14
+<p>First UI snapshot mentioning <code>Jet.ContextFieldTypeMismatch</code>: <code>Tests/UI/context_effect_handler_mismatch_e0762.stderr</code>.</p>
+<pre class="diag">Error: Jet.ContextFieldTypeMismatch: `Clock` needs a handler implementing `Clock`, got `NotAClock`
+  --&gt; Tests/UI/context_effect_handler_mismatch_e0762.jet:12:14
     |
-  3 |     #Context(allocator: 42) { print(&quot;should not reach&quot;) }
-    |              ^^^^^^^^^^^^^
- Why: The `allocator` field takes an `Arena`, `Bump`, `Pool`, or `Fixed` value, or a value whose type implements `mem.Allocator`
- Fix: Pass an allocator, e.g. `mem.Arena.new()`
+ 12 |     #Context(Clock: NotAClock{value: 1}) {
+    |              ^^^^^^^^^^^^^^^^^^^^^^^^^^
+ Why: Installing an `#Effect` provider in `#Context(Clock: ...)` requires a value whose type implements `Clock`
+ Fix: Implement `Clock` for ``NotAClock`` or pass a type that implements `Clock`
 More: jet-lang.dev/e/Jet.ContextFieldTypeMismatch
 </pre>
 <p><a href="../index.html">Back to all error codes</a></p>

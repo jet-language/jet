@@ -11290,17 +11290,17 @@ CrossedArgumentNames: struct {
     impl Diagnostic {
         code: "E0773",
         safety_class: .Opinion,
-        safety_reason: "Passing an argument named like a different same-typed parameter would typecheck and run, and Jet refuses it so swapped arguments fail at check time instead of silently running in the wrong order.",
-        meaning: "Crossed positional argument names at a call site",
+        safety_reason: "Passing two or more positional arguments in a crossed name cycle across same-typed parameters would typecheck and run, and Jet refuses it so swapped or rotated arguments fail at check time instead of silently running in the wrong order.",
+        meaning: "Crossed positional argument names form a swap or rotation cycle at a call site",
         no_fix: .Ambiguous,
         fix_next: "Swap the crossed arguments to match the declaration order, or pass them with explicit labels.",
 
         what: fn(self) -> String {
-            "A positional argument is named like a different parameter of the same type"
+            "Two or more positional arguments form a crossed name cycle across same-typed parameters"
         }
 
         why: fn(self) -> String {
-            "Passing a variable by position when its name matches another parameter of the same type usually means the arguments were swapped"
+            "Passing variables by position when their names permute across same-typed parameters usually means the arguments were swapped or rotated"
         }
 
         fix: fn(self) -> String {

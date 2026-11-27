@@ -15,7 +15,7 @@ call_mark_diag_find: fn(diagnostics: [Diagnostic], code: String) -> [Int] {
 }
 
 #Test("call_mark_diag_slice_edit_targets_base") {
-    source: "#Policy(writes: .Explicit)\nsort_part: fn(xs: ^[Int]) {{ xs[0] = 9 }}\nrun: fn() {{\n    ^xs: [Int]{{1, 2, 3}}\n    sort_part(xs[0..2])\n}}\n"
+    source: "sort_part: fn(xs: ^[Int]) {{ xs[0] = 9 }}\nrun: fn() {{\n    ^xs: [Int]{{1, 2, 3}}\n    sort_part(xs[0..2])\n}}\n"
     diagnostics: core_failure_record_diagnostics(source, "user/slice_edit")
     marks: call_mark_diag_find(diagnostics, "E0228")
     assert_eq(marks.len(), 1)
@@ -29,7 +29,7 @@ call_mark_diag_find: fn(diagnostics: [Diagnostic], code: String) -> [Int] {
 }
 
 #Test("call_mark_diag_pipe_head_write_names_diamond") {
-    source: "#Policy(writes: .Explicit)\nmake: fn() -> [Int] {{ [Int]{{1}} }}\ngrow: fn(xs: ^[Int]) {{ xs[0] = 2 }}\nrun: fn() {{\n    _: make() |> grow(<>)\n}}\n"
+    source: "make: fn() -> [Int] {{ [Int]{{1}} }}\ngrow: fn(xs: ^[Int]) {{ xs[0] = 2 }}\nrun: fn() {{\n    _: make() |> grow(<>)\n}}\n"
     diagnostics: core_failure_record_diagnostics(source, "user/pipe_write")
     writes: call_mark_diag_find(diagnostics, "E0205")
     assert(writes.len() >= 1)
@@ -42,7 +42,7 @@ call_mark_diag_find: fn(diagnostics: [Diagnostic], code: String) -> [Int] {
 }
 
 #Test("call_mark_diag_take_extra_mark_is_truthful") {
-    source: "#Policy(writes: .Explicit)\nHolder: struct {{ buf: [Int] }}\nseal: fn(buf: ^^[Int]) -> Int {{ buf.len() }}\ntake_n: fn(n: ^^Int) -> Int {{ n }}\nrun: fn() {{\n    ^st: Holder{{buf: [Int]{{1}}}}\n    _: seal(^^st.buf)\n    n: 3\n    _: take_n(^^n)\n}}\n"
+    source: "Holder: struct {{ buf: [Int] }}\nseal: fn(buf: ^^[Int]) -> Int {{ buf.len() }}\ntake_n: fn(n: ^^Int) -> Int {{ n }}\nrun: fn() {{\n    ^st: Holder{{buf: [Int]{{1}}}}\n    _: seal(^^st.buf)\n    n: 3\n    _: take_n(^^n)\n}}\n"
     diagnostics: core_failure_record_diagnostics(source, "user/take_extra")
     marks: call_mark_diag_find(diagnostics, "E0228")
     assert_eq(marks.len(), 2)
