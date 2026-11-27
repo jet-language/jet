@@ -119,6 +119,14 @@ A violation stops the affected work until fixed at the root.
   IDs or ratification history in source, registries, or code comments.
 - **I8 — One mechanism.** One canonical semantic mechanism per meaning; keep the
   beginner surface small and safe, with expert controls explicit and opt-in.
+  - **1-in, 1-out (or collapse):** Every new user-facing concept, marker,
+    keyword, or surface mechanism must either collapse/delete an existing
+    mechanism or prove why library code cannot express it without regressing
+    safety or clarity.
+  - **Pairwise orthogonality gate:** Features must compose under uniform laws.
+    If two features require a compiler special case to interact, treat that as
+    a design defect in one of the features—fix or unify the features rather
+    than documenting another special case.
 - **I9 — One meaning across tiers.** Every language feature and Core API has one
   executable meaning across O0 (`jet run`, `jet dev`, comptime), O1, O2
   (`jet build`), and web where applicable—implemented once in the shared
