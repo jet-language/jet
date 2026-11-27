@@ -2,8 +2,8 @@
   "meta": {
     "version": 4,
     "project": "Jet",
-    "nextNum": 7051,
-    "rev": 115068,
+    "nextNum": 7052,
+    "rev": 115075,
     "ui": {
       "toggled": [
         "dec-group:syntax",
@@ -63126,20 +63126,20 @@
         {
           "n": 1,
           "text": "A1: Ship ratified #CatchAll (D-GUARD-LINT1=A): register CatchAll in Markers.jet, accept else -> { ... } #CatchAll on closed-set enum matches in Coverage.jet, keep single-case checks free, show covered cases in JetLSP hover, with UI snapshots and O0/O1/O2 golden.",
-          "status": "open",
-          "metBy": null,
+          "status": "met",
+          "metBy": "Orchestrator",
           "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-11-27T15:12:56.592Z"
+          "evidence": "dev 64b7848f7dc (batch91-s4 S3==S4 exact match 1f7cdd2d): prefix #CatchAll registered in Markers.jet, Coverage.jet, Formatter, LSP hover (CatchAllHover.jet); Examples/Basics/CatchAll.jet O0/O1/O2 PASS; Tests/UI/catch_all_marker.jet PASS.",
+          "at": "2026-11-27T18:07:49.919Z"
         },
         {
           "n": 2,
           "text": "B12: Route string interpolation hole expressions through the standard expression/demand/lowering pipeline so Complex and precise expressions inside \"{...}\" never ICE (exit 101) across O0/O1/O2.",
-          "status": "open",
-          "metBy": null,
+          "status": "met",
+          "metBy": "Orchestrator",
           "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-11-27T15:12:57.387Z"
+          "evidence": "dev 64b7848f7dc (batch91-s4): CoreReach.jet recurses into STRING_PART_INTERPOLATION; Tests/Cases/Math/interpolation_complex_quaternion.case PASS O0/O1/O2.",
+          "at": "2026-11-27T18:07:50.765Z"
         },
         {
           "n": 3,
@@ -63183,7 +63183,7 @@
       "parentId": null,
       "needsAcceptance": false,
       "created": "2026-11-27T15:12:55.804Z",
-      "updated": "2026-11-27T15:13:39.372Z",
+      "updated": "2026-11-27T18:07:50.765Z",
       "updatedBy": "Orchestrator",
       "criteriaLastN": 6
     },
@@ -63766,6 +63766,71 @@
       "updated": "2026-11-27T17:45:15.251Z",
       "updatedBy": "Orchestrator",
       "criteriaLastN": 3
+    },
+    {
+      "id": "c0dnr7mn",
+      "num": 7051,
+      "title": "Authoring friction P0: Section C (C18-A Type{expr} ascription, C19 named enum patterns, C22 From numeric default ranking, C24 generic closure inference, C25 hints)",
+      "body": "Owner-approved Section C P0 items from Docs/Research/jet-authoring-friction-2026-11-27.md: C18-A (generalize Type{expr} as universal expected-type ascription for task{}, Ok/Err, None, closures, empty lists without new binding syntax), C19 (named-field enum destructuring .Click{x, y} and .Click{x, ..} matching named construction 1-to-1), C22 (prefer canonical Float over F32/F16 and Int over I64/I32 when resolving From overloads on untyped literals), C24 (propagate generic receiver element/value types into closure parameters on methods like List<T>.sort_by), and C25 (parser recovery hint for Name<T>: struct/fn showing Name: struct<T>/fn<T>, plus copy-pasteable call-site fix-it for * keyword-only labels in E0104/E0769).",
+      "kind": "task",
+      "track": "epoch",
+      "epoch": "G1",
+      "milestoneId": null,
+      "phase": "ready",
+      "priority": "P0",
+      "plan": null,
+      "checkSteps": null,
+      "probe": null,
+      "visualMedia": [],
+      "blockedBy": [],
+      "assignee": null,
+      "log": [],
+      "criteria": [
+        {
+          "n": 1,
+          "text": "C18-A: Universal Type{expr} expected-type ascription works for Task<T E!>{ task { ... } }, (T E!){ Ok(...) }, T?{ None }, closures, and empty containers across O0/O1/O2",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-11-27T18:07:13.800Z"
+        },
+        {
+          "n": 2,
+          "text": "C19: Named-field enum payload variants support named destructuring patterns (.Click{x, y}, .Click{x: cx, ..}) matching named construction 1-to-1 across O0/O1/O2 and formatter",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-11-27T18:07:14.591Z"
+        },
+        {
+          "n": 3,
+          "text": "C22 & C24: Resolve untyped numeric literals in From overloads by preferring canonical Float/Int (no AmbiguousCall on F16{1.5}); propagate generic receiver types (List<T>.sort_by, Map, Iter) into closure parameters across O0/O1/O2",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-11-27T18:07:15.438Z"
+        },
+        {
+          "n": 4,
+          "text": "C25: Emit tailored parser recovery hint for Name<T>: struct/fn suggesting Name: struct<T>/fn<T>, and copy-pasteable call-site label fix-it for * keyword-only params in E0104/E0769 (pinned by UI snapshots)",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-11-27T18:07:16.270Z"
+        }
+      ],
+      "refs": [],
+      "tags": [],
+      "parentId": null,
+      "needsAcceptance": false,
+      "created": "2026-11-27T18:07:13.006Z",
+      "updated": "2026-11-27T18:07:16.270Z",
+      "updatedBy": "Orchestrator",
+      "criteriaLastN": 4
     }
   ],
   "decisions": [
@@ -122835,6 +122900,55 @@
     }
   ],
   "events": [
+    {
+      "at": "2026-11-27T18:07:50.765Z",
+      "by": "Orchestrator",
+      "action": "card.criteria-meet",
+      "ref": "c0enq2sb",
+      "note": "#2"
+    },
+    {
+      "at": "2026-11-27T18:07:49.919Z",
+      "by": "Orchestrator",
+      "action": "card.criteria-meet",
+      "ref": "c0enq2sb",
+      "note": "#1"
+    },
+    {
+      "at": "2026-11-27T18:07:16.270Z",
+      "by": "Orchestrator",
+      "action": "card.criteria-add",
+      "ref": "c0dnr7mn",
+      "note": "#4 C25: Emit tailored parser recovery hint for Name<T>: struct/"
+    },
+    {
+      "at": "2026-11-27T18:07:15.438Z",
+      "by": "Orchestrator",
+      "action": "card.criteria-add",
+      "ref": "c0dnr7mn",
+      "note": "#3 C22 & C24: Resolve untyped numeric literals in From overload"
+    },
+    {
+      "at": "2026-11-27T18:07:14.591Z",
+      "by": "Orchestrator",
+      "action": "card.criteria-add",
+      "ref": "c0dnr7mn",
+      "note": "#2 C19: Named-field enum payload variants support named destruc"
+    },
+    {
+      "at": "2026-11-27T18:07:13.800Z",
+      "by": "Orchestrator",
+      "action": "card.criteria-add",
+      "ref": "c0dnr7mn",
+      "note": "#1 C18-A: Universal Type{expr} expected-type ascription works f"
+    },
+    {
+      "at": "2026-11-27T18:07:13.006Z",
+      "by": "Orchestrator",
+      "action": "card.add",
+      "ref": "c0dnr7mn",
+      "note": "Authoring friction P0: Section C (C18-A Type{expr} ascription, C19 named enum patterns, C22 From numeric default ranking, C24 generic closure inference, C25 hints)"
+    },
     {
       "at": "2026-11-27T17:45:15.251Z",
       "by": "Orchestrator",
