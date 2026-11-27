@@ -84328,6 +84328,696 @@
       "outcome": "A",
       "ratifiedAt": "2026-11-22",
       "retiredAt": "2026-11-27T01:36:21.292Z"
+    },
+    {
+      "id": "D-BUILD-TOOLCHAIN1",
+      "cardId": "c0rc40yf",
+      "group": "build",
+      "title": "In a cross build, which machine do build-time Core calls act on?",
+      "situation": "Build code runs on the build machine, but the program it builds may run somewhere else. Today build code can only read the target, through $build.os, and nothing names the build machine. Core is also inconsistent. Most per-OS Core code asks the running machine, but one Core helper folds $build.os, so during a Windows build on Linux it would use Windows path rules on a Linux disk. We recommend one rule: Core calls act on the machine running them, $build always names the target, and $build.host names the build machine.",
+      "gist": "When build code cross-compiles, do its Core calls act on the build machine or the target?",
+      "lesson": "Build code runs on your machine, while the program it builds may run on another. A file read in build code can only read your disk. The question is whether Core calls in build code follow your machine, and how build code names each machine. Reading a fact never changes its meaning: $build.os always names the target.",
+      "explainer": "Beginner path: a normal build on one machine changes nothing. The question matters only when you build a program for another operating system.\n\nIf you build a Windows program on Linux, a preparation step that lists a directory must answer for one machine. Jet must say which one, every time, so the build is repeatable.",
+      "story": "Theo builds a Windows installer on a Linux laptop. His build code lists the assets folder and checks that every file exists. The listing must use Linux path rules, because it reads his Linux disk. The installer itself still uses Windows rules.",
+      "inWild": "Cargo build scripts: cfg!(target_os) inside build.rs describes the build machine, and the target comes from CARGO_CFG_TARGET_OS. Cargo's docs warn about mixing them up. Source: https://doc.rust-lang.org/cargo/reference/environment-variables.html#environment-variables-cargo-sets-for-build-scripts\n\nZig: build.zig is compiled for the build machine; b.graph.host names it, and the target is a separate value. Source: https://ziglang.org/learn/build-system/",
+      "detail": "WHAT EXISTS TODAY\n\nFacts are served by Compiler/JetSema/Source/Sema/Expressions/FactReads.jet:641-649. They are $package.name and version, $build.os and profile, the stamps and $build.cpu.cache_line. There is no host fact. Docs/spec/syntax-decisions.md:5268 says $build.os is the --target OS, or the host OS when no target is given.\n\nBuild code: Docs/spec/spec.md:4888-4935. jet build runs fn build(b: Build) natively at O0 on the build machine, and the spec example uses the FS and Exec effects directly.\n\nCore already asks the running machine in most places. Core/Sys/Sys.jet:897 and Core/Ui/Host.jet:205 pick PathPlatform from core.files.__path_windows(). Core/Files/Files.jet:1105-1109 list_dir calls the runtime's __list_dir_raw, which can only read the disk it runs on.\n\nThe one outlier: Core/Service/Service.jet:1455-1465 StatePathPlatform.windows() folds $build.os. In a Linux-to-Windows cross build, a Service state path computed during build code would use Windows rules on the Linux disk.\n\nCARD\n\nTower card c0rc40yf (Host facts for prep and build-time code) asks for host OS and architecture facts beside $build. It also asks for one stated rule for per-OS Core calls during preparation. Host reads must enter the cache key, and a policy must be able to reject them.\n\nRelated rulings: D-BUILD-FACT3=A puts build facts under $build. D-JAI-CONFIG1=A records every host read in the build record and cache key. D-HOST-CAPS1=A says target hardware facts follow the selected target, never the build machine.\n\nHOW A'S DOWNSIDES ARE DESIGNED AWAY\n\n1. A Core call in build code answers for the build machine. Nothing that ships depends on that answer. Shipped names and paths come from b.add_executable, b.add_install and b.action outputs, which apply $build.os rules themselves. Build code that prints or branches on a target fact reads $build.os.\n\n2. Builds reading the build machine. Every option has this, because build actions run on the build machine under all three. A records each $build.host read and host-touching Core call in the build record and cache key (D-JAI-CONFIG1=A). Equal inputs give equal outputs, and a package policy can deny host reads with a registered diagnostic.\n\nNo loss remains. Any output call that lacks a target rule today gains one as work owed under A.\n\nWORK OWED UNDER A\n\nAdd $build.host.os and $build.host.arch to FactReads.jet and the syntax registry. Change Service.jet:1459 to ask the running machine, like Sys.jet:897. Add a cross-build golden example that prints both facts.\n\nWHY NOT B OR C\n\nB makes build code describe a machine it is not running on. A file listing cannot read the target's disk, so B must ban direct file and process calls in build code. Every read then becomes a declared action. C makes common calls in every cross build carry a side argument, which is noise when only one answer is possible.",
+      "options": [
+        {
+          "key": "A",
+          "name": "Core calls act on the machine running them",
+          "detail": "A Core call in build code acts on the build machine, the only one it can touch. $build.os always names the target. Build code reads the build machine through $build.host.os and $build.host.arch, and each read goes into the cache key. Everything that ships goes through Build calls such as b.add_executable and b.add_install, which apply the target's rules themselves.",
+          "technical": "Add $build.host.os and $build.host.arch fact reads. Core per-OS code asks the running machine, as Sys.jet:897 already does; Service.jet:1459 moves to that form. Host reads join the build record, and a package policy can deny them. Build outputs (b.add_executable, b.add_install and b.action outputs) take target-relative paths and apply $build.os rules, such as the .exe suffix, with no host call.",
+          "code": "fn build(b: Build) -[Exec, FS]> {\n    files :: files.list_dir(\"assets\")   // reads this Linux disk\n    print($build.os)                   // Windows: the target\n    print($build.host.os)              // Linux: this machine\n}"
+        },
+        {
+          "key": "B",
+          "name": "Everything in build code answers for the target",
+          "detail": "Pure Core calls in build code answer as the target would. Because build code cannot touch the target's disk, direct file and process calls in build code are refused, and each such step becomes a declared action.",
+          "technical": "Build code loses the FS and Exec effects. Reads move to b.action steps, which run on the build machine. No host fact is added.",
+          "code": "fn build(b: Build) {\n    files :: files.list_dir(\"assets\")   // error: build code can't read files\n    b.action(\"list\", [\"assets\"], [\"build/assets.txt\"], [\"ls\", \"assets\"], [\"Exec\"])\n}"
+        },
+        {
+          "key": "C",
+          "name": "Refuse calls that do not name a side",
+          "detail": "In a cross build, a per-OS Core call in build code is a compile error unless it names the machine it means.",
+          "technical": "The checker rejects per-OS Core calls in build code under cross-compilation unless a .Host or .Target argument is given. Adds a side argument to those Core calls.",
+          "code": "fn build(b: Build) -[Exec, FS]> {\n    files :: files.list_dir(\"assets\", .Host)   // side required\n}"
+        }
+      ],
+      "comparisons": [
+        {
+          "lang": "Cargo",
+          "note": "In build.rs, cfg!(target_os) describes the build machine. The target comes from CARGO_CFG_TARGET_OS. Source: https://doc.rust-lang.org/cargo/reference/environment-variables.html",
+          "code": "let target = std::env::var(\"CARGO_CFG_TARGET_OS\").unwrap();\nlet host_is_linux = cfg!(target_os = \"linux\");"
+        },
+        {
+          "lang": "Zig",
+          "note": "build.zig runs on the build machine. b.graph.host names it, and the target is chosen separately. Source: https://ziglang.org/learn/build-system/",
+          "code": "const target = b.standardTargetOptions(.{});\nconst host = b.graph.host;"
+        }
+      ],
+      "rec": "A",
+      "recommendation": {
+        "rec": "A",
+        "why": "A states one rule: a call acts on the machine running it. It is the only answer a file read can give. $build keeps one meaning, the target, and $build.host names the build machine.",
+        "gains": [
+          "Build code reads its own disk with the right path rules.",
+          "$build.os means the target everywhere.",
+          "Host reads are recorded, so the cache stays correct.",
+          "Shipped files get the target's names and paths from the Build API."
+        ],
+        "losses": [],
+        "whyNot": [
+          {
+            "key": "B",
+            "reason": "B makes build code describe a machine it cannot touch, so every file read must become a declared action."
+          },
+          {
+            "key": "C",
+            "reason": "C adds a side argument to common calls in every cross build, though only one answer is possible."
+          }
+        ],
+        "tradeoff": "A acts on the running machine, and the Build API applies the target's rules to everything that ships."
+      },
+      "hybrid": null,
+      "ballotMode": "short",
+      "shortAuthorizedBy": null,
+      "ballotProcessVersion": 5,
+      "reviewPasses": null,
+      "checkInstructions": null,
+      "surface": {
+        "gist": "When build code cross-compiles, do its Core calls act on the build machine or the target?",
+        "lesson": "Build code runs on your machine, while the program it builds may run on another. A file read in build code can only read your disk. The question is which machine Core calls follow, and how build code names each one.",
+        "trio": {
+          "current": {
+            "note": "Build code can read only the target. Nothing names the build machine.",
+            "code": "fn build(b: Build) -[Exec, FS]> {\n    print($build.os)       // Windows: the target\n    print($build.host.os)  // error: no such fact\n}"
+          },
+          "wild": {
+            "lang": "Zig",
+            "note": "build.zig runs on the build machine and names both machines. Source: ziglang.org/learn/build-system",
+            "code": "const target = b.standardTargetOptions(.{});\nconst host = b.graph.host;"
+          }
+        },
+        "options": [
+          {
+            "key": "A",
+            "name": "Act on the running machine",
+            "gist": "Core calls act on the build machine; $build.host names it.",
+            "gains": [
+              "File reads use this disk's rules.",
+              "$build.os always means the target.",
+              "Shipped files follow the target's rules via the Build API."
+            ],
+            "losses": [],
+            "proposed": {
+              "code": "fn build(b: Build) -[Exec, FS]> {\n    files :: files.list_dir(\"assets\")  // this Linux disk\n    print($build.os)                  // Windows\n    print($build.host.os)             // Linux\n}"
+            }
+          },
+          {
+            "key": "B",
+            "name": "Answer for the target",
+            "gist": "Build code answers as the target would and cannot read files.",
+            "gains": [
+              "Every call in build code means the target."
+            ],
+            "losses": [
+              "Every file read becomes a declared action."
+            ],
+            "proposed": {
+              "code": "fn build(b: Build) {\n    files.list_dir(\"assets\")  // error: build code can't read files\n}"
+            }
+          },
+          {
+            "key": "C",
+            "name": "Name the side",
+            "gist": "A cross-build call must say which machine it means.",
+            "gains": [
+              "Every call states its machine."
+            ],
+            "losses": [
+              "Common calls carry an extra argument."
+            ],
+            "proposed": {
+              "code": "fn build(b: Build) -[Exec, FS]> {\n    files.list_dir(\"assets\", .Host)  // side required\n}"
+            }
+          }
+        ],
+        "recommendation": {
+          "rec": "A",
+          "why": "A states one rule: a call acts on the machine running it, the only answer a file read can give. $build keeps one meaning.",
+          "gains": [
+            "Build code reads its own disk correctly.",
+            "$build.os means the target everywhere."
+          ],
+          "losses": [],
+          "whyNot": [
+            {
+              "key": "B",
+              "reason": "B describes a machine build code cannot touch, so file reads must become actions."
+            },
+            {
+              "key": "C",
+              "reason": "C adds a side argument where only one answer is possible."
+            }
+          ],
+          "tradeoff": "A follows the running machine; the Build API applies target rules to shipped files."
+        }
+      },
+      "draft": false,
+      "status": "ratified",
+      "created": "2026-10-23T01:40:09.064Z",
+      "outcome": "A",
+      "ratifiedAt": "2026-11-06",
+      "retiredAt": "2026-11-27T11:37:36.443Z"
+    },
+    {
+      "id": "D-BUILD-TARGETFACTS1",
+      "cardId": "c0rc40yf",
+      "group": "build",
+      "title": "How build code gives each output its own setting values, and what the two cache-line facts mean",
+      "situation": "A setting is a typed value a package declares, such as `fast_math: Bool = true`, that code reads while building. Today a setting can differ per profile in package.jet. But one `fn build` that makes an Arm and an x86 program from the same source cannot give the two programs different values. The hardware facts also blur two meanings. `#build.target.layout.cache_line` is the target triple's baseline, 128 bytes on Apple Arm. `#build.cpu.cache_line` should be the selected CPU's line, but it is a fixed 64 because no CPU can be selected yet. Game and embedded authors tune per machine, and today they split one build into several runs. You are asked how build code sets a setting for one output, and what the two cache-line facts mean. We recommend a labeled `options:` value for settings, and two fact families: the triple's baseline, and the selected CPU, which defaults to that baseline.",
+      "gist": "How does one build give each output its own setting values, and what do the target and CPU cache-line facts mean?",
+      "lesson": "An output is one thing a build makes, such as a program for Linux on x86 or the same program for Arm. A setting is a typed value the package declares and code reads while building as `#build.settings.name`. A target fact, read as `#build.target.…`, is what every machine of the output's triple guarantees. A CPU fact, read as `#build.cpu.…`, describes the one CPU chosen for the output. This choice decides where build code writes a per-output setting value and what the CPU facts answer.",
+      "explainer": "Think of a bakery that bakes one recipe for two ovens. The recipe says how much sugar to use. Each oven model has a size on its label, and the oven you bought may be bigger. Today the baker changes the sugar only by printing a new recipe book, and a second size note always says the same small number. Under the recommendation each oven's order slip carries its own sugar amount. The label keeps the model's size, and the second note holds your oven's size, starting from the label.",
+      "story": "Mira ships a game for x86 desktops and Apple Arm laptops from one `fn build`. The laptop build needs `max_particles: 2000` and the desktop `8000`, and her pool allocator aligns to the cache line. Today she keeps two profiles, runs `jet build` twice, and her alignment reads `#build.cpu.cache_line`, which is 64 even on Apple's chips, whose line is 128.",
+      "inWild": "// Zig: build.zig gives each artifact its own options module.\nconst opts = b.addOptions();\nopts.addOption(u32, \"max_particles\", 2000);\nhandheld.root_module.addOptions(\"config\", opts);\n// In code: const config = @import(\"config\"); std.atomic.cache_line follows the selected CPU.",
+      "detail": "Current settings. Package.jet declares settings, as in `settings: { tls: Bool = true }`. Profiles override them, as in `build: { release: Build{ settings: { tls: false } } }`. Code reads `#build.settings.tls`, folded at build time (D-CONF-MODULE1=A, Examples/Modules/Packages/TypedSettings). An undeclared read is E0302 (sema_fact_build_setting_undeclared in Compiler/JetSema/Source/Sema/Expressions/FactReads.jet).\n\nCurrent outputs. `fn build` registers outputs with `b.add_executable(name, sources, actions, deps, probes, toolchain, signing)`, all positional (Compiler/JetBuildSession/Source/Declarations.jet). D-TARGET-ONE1=A and D-BUILD-CORE1=A ratified a labeled `options:` argument holding a `BuildOptions` value on every `b.add_*` call. It is ratified but not built. The slate card that ratified it, #5069, is closed, and no open card builds it. Under A, B and C, #5007 c7 builds `options:` first, and #5006 c1 reuses it.\n\nCurrent target facts (sema_fact_build_value in FactReads.jet). `#build.target.layout.pointer_bits`, `.word_bits` and `.cache_line` come from the triple's layout table. Its cache line is 128 on `aarch64-apple-*` and 64 elsewhere (Compiler/JetFoundation/Source/Target/Layout.jet). `#build.target.cpu_features` lists the features every CPU of the triple has. `#build.cpu.cache_line` is the selected CPU's line (D-CACHE-CONTROL1=A). With no CPU selection it answers a constant 64, which is wrong on Apple Arm. It has 37 uses in 15 files.\n\nSettings scope. An output's `options:` settings set the root package's declared settings only, the package whose `fn build` runs. A dependency keeps the values its own profile and the root's dependency entry give it, the same for every output. So a dependency library compiles once and is shared. Setting values join the instance fingerprint (D-CONF-MODULE1=A), so outputs with equal values share one compiled record.\n\nShared library. A root-package library that two outputs build with different values becomes two instances, one per distinct value set. The cost is one more compile of that library per extra value set. A setting may change a public type, such as an array length. That is sound, because each output links exactly one instance, so the two instances never meet in one program.\n\nFeature list type. `cpu_features` stays `[String]`. Its names are the code generator's, an open set that differs per architecture and grows with each backend release. A typed set would need a closed enum per architecture, regenerated with the backend, while `contains(\"avx2\")` already folds while building. A typed feature set belongs with CPU dispatch, D-CPU-DISPATCH1.\n\nOut of scope. Host facts such as `#build.host.os` belong to D-JAI-CONFIG1=A. Which machine answers a per-OS Core call during preparation is D-BUILD-TOOLCHAIN1=A. Hardware requirements stay D-HOST-CAPS1. The card's draft wording used byte names such as `pointer_size`; the bit names are in use, and no option renames them.\n\nEdge cases under A. An undeclared key in an output's `options:` settings is a registered error at the value. So is a value of the wrong type, and its message names the declared type (card c9). An unset key takes the profile's value, then the default. An output with no toolchain reads the build machine's facts, as today.",
+      "options": [
+        {
+          "key": "A",
+          "name": "Per-output `options:` settings; the triple's baseline and the selected CPU as two fact families",
+          "detail": "Build code gives an output its own setting values in a labeled `options:` value on `b.add_executable` and the other `b.add_*` calls. Only the keys it names change; the others keep the profile's value. Each output's code reads its own value through `#build.settings.name`, folded while building, on every tier.\n\nThe facts keep two families with distinct meanings. `#build.target.*` is the triple's guaranteed baseline. `#build.cpu.cache_line` and a new `#build.cpu.features` describe the selected CPU, which defaults to that baseline until CPU selection exists. On Apple Arm `#build.cpu.cache_line` becomes 128, the chip's real line, with no rename.",
+          "technical": "`BuildOptions` gains no field, because `settings:` is already a profile field. `options: .{ settings: .{ max_particles: 2000 } }` layers the named keys over the selected profile's settings, for that output only. In D-SETTING-ORDER1's order, output options sit between the profile and entry-code pins. Keys and values are checked against the root package's declared settings while `fn build` runs.\n\n`#build.cpu.cache_line` answers the output triple's layout cache line instead of a constant. `#build.cpu.features` answers `#build.target.cpu_features` until a CPU can be selected, which gives a future `--cpu` flag its home. Building `options:` itself is part of this work (#5007 c7).",
+          "code": "// package.jet declares the setting once.\n// settings: { max_particles: Int = 8000 }\n\nbuild: fn(b: Build) {\n    mac: b.toolchain(\"laptop\", \"aarch64-apple-darwin\")\n    _: b.add_executable(\"game\", [\"run.jet\"])\n    _: b.add_executable(\"game_laptop\", [\"run.jet\"], toolchain: mac, options: .{ settings: .{ max_particles: 2000 } })\n}\n\n#Layout(c, align(#build.cpu.cache_line))\nPool: struct { used: Int }\n\nrun: fn() {\n    print(\"particles: {#build.settings.max_particles}\")\n    print(\"cache line: {#build.cpu.cache_line}\")\n}\n// game prints 8000 and 64; game_laptop prints 2000 and 128."
+        },
+        {
+          "key": "B",
+          "name": "Per-output `options:` settings; one merged cache-line fact",
+          "detail": "Settings work as in A. The facts merge: `#build.cpu.cache_line` is removed, and its 37 uses in 15 files move to `#build.target.layout.cache_line` in one change, with no retired spelling kept. One name per fact is simpler today. But a future CPU flag has no fact to answer, and every aligned type on Apple Arm moves from 64 to 128 bytes in the same change.",
+          "technical": "Same settings layer as A. The merge is one cutover: the spelling leaves the syntax registry, and every caller is rewritten in the same commit. `#build.target.layout.cache_line` keeps answering the triple's value.",
+          "code": "// package.jet declares the setting once.\n// settings: { max_particles: Int = 8000 }\n\nbuild: fn(b: Build) {\n    mac: b.toolchain(\"laptop\", \"aarch64-apple-darwin\")\n    _: b.add_executable(\"game_laptop\", [\"run.jet\"], toolchain: mac, options: .{ settings: .{ max_particles: 2000 } })\n}\n\n#Layout(c, align(#build.target.layout.cache_line))\nPool: struct { used: Int }\n\nrun: fn() {\n    print(\"particles: {#build.settings.max_particles}\")\n}"
+        },
+        {
+          "key": "C",
+          "name": "A setter method on the output; facts as in A",
+          "detail": "Build code calls a method on the output after adding it: `laptop.set(\"max_particles\", 2000)`. The facts are as in A. It reads like a configuration script, but it is a second way to change an output beside `options:`, and the key is a string the editor cannot complete.",
+          "technical": "`Output.set(key: String, value: Dyn)` checks the key against the declared settings while `fn build` runs. The call order matters: a `set` after the plan is sealed is an error. `options:` keeps its other fields, so an output's values come from two places.",
+          "code": "// package.jet declares the setting once.\n// settings: { max_particles: Int = 8000 }\n\nbuild: fn(b: Build) {\n    mac: b.toolchain(\"laptop\", \"aarch64-apple-darwin\")\n    laptop: b.add_executable(\"game_laptop\", [\"run.jet\"], toolchain: mac)\n    laptop.set(\"max_particles\", 2000)\n}\n\n#Layout(c, align(#build.cpu.cache_line))\nPool: struct { used: Int }"
+        },
+        {
+          "key": "D",
+          "name": "Keep today",
+          "detail": "One build gives every output the same setting values; a per-output value needs a separate `jet build --profile=…` run. Both cache-line facts stay, and `#build.cpu.cache_line` keeps answering 64 on every target, which is wrong on Apple Arm.",
+          "technical": "No change. Card criteria c7 to c9 stay open.",
+          "code": "// package.jet:\n// settings: { max_particles: Int = 8000 }\n// build: { laptop: .{ settings: { max_particles: 2000 } } }\n// Two runs: jet build, then jet build --profile=laptop --target=aarch64-apple-darwin\n\nbuild: fn(b: Build) {\n    _: b.add_executable(\"game\", [\"run.jet\"])\n}\n\n#Layout(c, align(#build.cpu.cache_line))\nPool: struct { used: Int }"
+        }
+      ],
+      "comparisons": [
+        {
+          "lang": "Zig",
+          "note": "Each artifact gets its own options module from build.zig; code imports it. `std.atomic.cache_line` follows the selected CPU, and the target's `builtin` module gives the baseline.",
+          "code": "const opts = b.addOptions();\nopts.addOption(u32, \"max_particles\", 2000);\nhandheld.root_module.addOptions(\"config\", opts);"
+        },
+        {
+          "lang": "Rust",
+          "note": "Cargo has no per-artifact feature values in one build; a cross build is a separate `--target` run. `target_feature` follows `-C target-cpu`, which defaults to the triple's baseline.",
+          "code": "#[cfg(target_feature = \"avx2\")]\nconst LANES: usize = 8;"
+        },
+        {
+          "lang": "Jai",
+          "note": "Each workspace has its own Build_Options, set from the build program; code reads `#run` constants per workspace.",
+          "code": "w := compiler_create_workspace(\"laptop\");\nopts := get_build_options(w);\nopts.cpu_target = .ARM64;\nset_build_options(opts, w);"
+        }
+      ],
+      "rec": "A",
+      "recommendation": {
+        "why": "A puts a per-output setting in the labeled `options:` value D-TARGET-ONE1 already ratified for every output. It keeps the triple's baseline and the selected CPU apart, as D-CACHE-CONTROL1 defined them, and fixes the Apple Arm value with no rename.",
+        "gains": [
+          "One build makes outputs with different setting values, folded while building on every tier.",
+          "`#build.cpu.cache_line` gives the right value on Apple Arm, and a future CPU flag has a home.",
+          "No setter method and no rename of a fact in use."
+        ],
+        "losses": [
+          {
+            "loss": "`options:` on `b.add_*` is ratified but unbuilt, so A builds it first.",
+            "mitigation": "#5006 needs the same argument for several configurations, so the work serves both cards."
+          },
+          {
+            "loss": "A root-package library built with two value sets compiles twice.",
+            "mitigation": "Outputs with equal values share one record, and dependencies never vary per output."
+          },
+          {
+            "loss": "On Apple Arm, types aligned to `#build.cpu.cache_line` grow from 64 to 128 bytes.",
+            "mitigation": "128 is that chip's real line, so the padding finally prevents false sharing there."
+          }
+        ],
+        "whyNot": [
+          {
+            "key": "B",
+            "reason": "One name now, but the 64-to-128 change still happens, and a future CPU flag loses its fact."
+          },
+          {
+            "key": "C",
+            "reason": "A second way to change an output, with string keys the editor cannot complete."
+          },
+          {
+            "key": "D",
+            "reason": "Per-output values need separate runs, and the CPU cache line stays wrong on Apple Arm."
+          }
+        ],
+        "tradeoff": "Two cache-line facts stay, each with one meaning: the triple's baseline and the chosen CPU. Build authors write settings inside `options:`, the one place an output's changes live."
+      },
+      "hybrid": null,
+      "ballotMode": "full",
+      "shortAuthorizedBy": null,
+      "ballotProcessVersion": 5,
+      "reviewPasses": {
+        "adversarial": "Author model family: Claude. Adversarial model family: Claude. Fresh agent: Main. The review refuted merging the two cache-line facts, the retired spelling, and the unstated cost of the unbuilt `options:`. This draft keeps both fact families, states the settings scope and its compile cost, and names #5007 c7 as the builder of `options:`."
+      },
+      "checkInstructions": "Check settings in Examples/Modules/Packages/TypedSettings (package.jet, run.jet) and E0302 in Compiler/JetSema/Source/Sema/Expressions/FactReads.jet (sema_fact_build_setting_undeclared, sema_fact_build_value). Check `b.add_executable`'s positional arguments in Compiler/JetBuildSession/Source/Declarations.jet.\n\nCheck the triple cache line and features in Compiler/JetFoundation/Source/Target/Layout.jet (jet_target_layout_cache_line). Check `#build.cpu.cache_line` in Examples/Memory/Allocation/CacheLinePadding.jet and D-CACHE-CONTROL1 in Docs/Research/2026-10-30-cache-control-and-visibility.md.\n\nCheck `options:` in the ratified D-TARGET-ONE1, D-BUILD-CORE1, D-ENTRY-NAMES1 and D-SETTING-ORDER1. The review is Docs/Audits/2026-11-23-d-build-targetfacts1-review.md.",
+      "surface": {
+        "gist": "How does one build give each output its own setting values, and what do the CPU facts answer?",
+        "lesson": "An output is one thing a build makes, such as the same game for a desktop and for a laptop. A setting is a typed value the package declares, read while building. A target fact is what the output's triple guarantees; a CPU fact describes the chosen CPU. This picks where build code writes a per-output value and what the CPU facts answer.",
+        "trio": {
+          "current": {
+            "note": "Today every output of one build gets the same setting values, and the CPU cache-line fact is always 64.",
+            "code": "build: fn(b: Build) {\n    _: b.add_executable(\"game\", [\"run.jet\"])\n}\n// A second value needs a second run with another profile.\n#Layout(c, align(#build.cpu.cache_line))  // 64 even on Apple Arm\nPool: struct { used: Int }"
+          },
+          "wild": {
+            "lang": "Zig",
+            "note": "Zig gives each artifact its own options from the build script.",
+            "code": "const opts = b.addOptions();\nopts.addOption(u32, \"max_particles\", 2000);\nhandheld.root_module.addOptions(\"config\", opts);"
+          }
+        },
+        "options": [
+          {
+            "key": "A",
+            "name": "Settings in options, two fact families",
+            "gist": "An output's `options:` names its own setting values; CPU facts default to the triple's.",
+            "gains": [
+              "One build, different values per output.",
+              "Right cache line on Apple Arm."
+            ],
+            "losses": [
+              "`options:` must be built first."
+            ],
+            "proposed": {
+              "code": "build: fn(b: Build) {\n    mac: b.toolchain(\"laptop\", \"aarch64-apple-darwin\")\n    _: b.add_executable(\"game_laptop\", [\"run.jet\"], toolchain: mac, options: .{ settings: .{ max_particles: 2000 } })\n}\n\nrun: fn() {\n    print(\"cache line: {#build.cpu.cache_line}\")  // 128\n}"
+            }
+          },
+          {
+            "key": "B",
+            "name": "Settings in options, merged facts",
+            "gist": "Settings as in A; the CPU cache-line fact is removed.",
+            "gains": [
+              "One name per fact today."
+            ],
+            "losses": [
+              "No fact for a future CPU flag.",
+              "Aligned types grow on Apple Arm."
+            ],
+            "proposed": {
+              "code": "#Layout(c, align(#build.target.layout.cache_line))\nPool: struct { used: Int }"
+            }
+          },
+          {
+            "key": "C",
+            "name": "Setter method",
+            "gist": "A method on the output sets one value by name; facts as in A.",
+            "gains": [
+              "Reads like a configuration script."
+            ],
+            "losses": [
+              "A second way to change an output.",
+              "Keys are strings the editor cannot complete."
+            ],
+            "proposed": {
+              "code": "build: fn(b: Build) {\n    mac: b.toolchain(\"laptop\", \"aarch64-apple-darwin\")\n    laptop: b.add_executable(\"game_laptop\", [\"run.jet\"], toolchain: mac)\n    laptop.set(\"max_particles\", 2000)\n}"
+            }
+          },
+          {
+            "key": "D",
+            "name": "Keep today",
+            "gist": "No per-output values; the CPU cache line stays 64.",
+            "gains": [
+              "No work now."
+            ],
+            "losses": [
+              "A second value needs a second run.",
+              "Wrong cache line on Apple Arm."
+            ],
+            "proposed": {
+              "code": "build: fn(b: Build) {\n    _: b.add_executable(\"game\", [\"run.jet\"])\n}\n// jet build --profile=laptop --target=aarch64-apple-darwin\n#Layout(c, align(#build.cpu.cache_line))\nPool: struct { used: Int }"
+            }
+          }
+        ],
+        "recommendation": {
+          "rec": "A",
+          "why": "A puts per-output values in the `options:` value already ratified for every output, and keeps the triple's and the CPU's facts apart.",
+          "gains": [
+            "Different values per output in one build.",
+            "Right CPU cache line on Apple Arm.",
+            "No setter and no renames."
+          ],
+          "losses": [
+            {
+              "loss": "`options:` must be built first.",
+              "mitigation": "#5006 needs the same argument."
+            }
+          ],
+          "whyNot": [
+            {
+              "key": "B",
+              "reason": "Same growth on Apple Arm, and no fact for a CPU flag."
+            },
+            {
+              "key": "C",
+              "reason": "Two ways to change an output, with string keys."
+            },
+            {
+              "key": "D",
+              "reason": "Separate runs, and a wrong cache line on Apple Arm."
+            }
+          ],
+          "tradeoff": "Two cache-line facts, each with one meaning."
+        }
+      },
+      "draftedBy": "Orchestrator",
+      "reviewedBy": "Main",
+      "draft": false,
+      "status": "ratified",
+      "created": "2026-11-23T21:28:00.578Z",
+      "outcome": "A",
+      "ratifiedAt": "2026-11-24",
+      "retiredAt": "2026-11-27T11:37:36.443Z"
+    },
+    {
+      "id": "D-DEBUG-PREP1",
+      "cardId": "c0rc40yf",
+      "group": "tooling",
+      "title": "How you stop at a breakpoint in code that runs while Jet builds",
+      "situation": "Some Jet code runs while the program is being built: prep blocks, the prep fn they call, marker bodies and `fn build`. None of it can be debugged today. `jet debug` runs the whole build first, in a separate process, and then debugs the finished program. A breakpoint on a prep block's line is refused as `No code on`. Prep code and `fn build` run as machine code in helper processes under a step limit. Marker bodies are expanded inside the compiler itself. The ratified D-PREP-FUEL1 counts steps, but the code times them, so a pause would spend them.",
+      "gist": "How do you ask Jet to stop at a breakpoint inside prep code, a marker body or `fn build` while it builds, and what does a stop show?",
+      "lesson": "Build-time code is Jet code the compiler runs while it builds: prep blocks, the prep fn they call, marker bodies and `fn build`. Each call runs under a step limit, 10,000,000 steps unless `#StepLimit(n)` sets another, so a runaway loop can't stall the build. A step is one evaluated expression or statement. A breakpoint pauses the code so you can read its local values and call stack.",
+      "explainer": "Think of a bakery whose ovens count the turns of each mixer instead of watching a clock. Today you can only inspect a cake after it leaves the oven. The recommendation lets you open the oven door halfway through and use the same tools you use on finished cakes. While the door is open no mixer turns, so the cake gets exactly the same number of turns.",
+      "story": "Ana's prep block fills a lookup table by calling a prep fn, and one entry comes out wrong. She runs `jet debug --break tables.jet:12`, but the build already ran before the session started, and the line never stops. She ends up printing every entry and building again.",
+      "inWild": "// Gradle: -Dorg.gradle.debug=true makes the build wait for a debugger on port 5005.\n// Rust: build.rs is built as a program, so a debugger can run it again by itself.\n// Roslyn: a source generator is debugged by driving it from a unit test.\n// Zig: comptime has @compileLog printing, and its limit counts backward branches.",
+      "detail": "Build-time code today. Each batch of compile-time items is compiled to x86-64 at O0 and loaded into a long-lived child of the compiler (Compiler/JetEval/Source/IR/Native.jet:1-21). `fn build`, `fn dev` and `jet eval` run in a second child. Marker bodies never reach either child. The compiler expands them itself, through the template engine derives use (JetSema Registration/UserTemplates.jet:702-716, Derives.jet:2100-2129).\n\nThe step limit. D-PREP-FUEL1 defines a step as one evaluated expression or statement, counted, never wall time. The native child times it instead: 2000 steps per millisecond of the compiler's wait (Native.jet:14-15, 102-104; SessionHost.jet:285-309, 391-393). That gap is a defect on its own card. This ballot only needs a pause never to spend steps.\n\nWhere a count can go. Every loop turn and every recursive entry in a batch already starts with a poll of one runtime word (JetIR Build.jet:3824-3858, X64Patch.jet:2867-2978). Jet's own plugin translator already counts fuel at each function entry and loop head (JetPlugin Translate.jet:9-10, 416-431).\n\nThe debugger today. `jet debug` runs `jet build -O0 --dead-code=keep` as a separate process, then traces the finished program (Debug.jet:333-350). Breakpoints resolve against that program's line table only, and a line with no code is left out (JetDebug Native.jet:708-746, 2671-2687). Batches carry no line table, only each function's range for `perf` (Native.jet:184-192, 585-613).",
+      "options": [
+        {
+          "key": "A",
+          "name": "`jet debug --build` with counted steps",
+          "detail": "`jet debug --build [<file.jet>]` runs the same build `jet build` runs, with the same flags, behind the usual `(Jet)` console. A breakpoint in build-time code waits for its code and stops there with locals, call stack and the steps the call has used. The pause happens during that build, started from `jet debug` rather than typed as `jet build`.\n\nSteps are counted, as D-PREP-FUEL1 says. A paused call runs no code, so it spends no steps by construction. The count at any stop is the same with or without the debugger, on every machine. `--dap` works with `--build`, so editors get the same stops.",
+          "technical": "The session runs the build in its own process. Both build-time children are its children, and marker bodies expand on its own threads, so the template engine can stop at a breakpoint directly. A marker body has no step limit, because its only loop walks a known list.\n\nEach batch gets a line table and the places of its locals, carried by the listing already sent for `perf`. A breakpoint waits by file and line and is placed when its batch loads.\n\nEach straight-line block adds its statement count to a word in the child. The limit is checked at the poll each loop turn and recursive entry already makes. Calls the debugger makes at a stop save and restore that word. Refused system calls arrive as a signal (ComptimeWire.jet:185, 268), which the session passes back unchanged.",
+          "code": "$ jet debug --build\n(Jet) break tables.jet:12\nBreakpoint 1 at tables.jet:12, placed when its code loads\n(Jet) run\nStopped at tables.jet:12 in squares (build time)\n  i = 7\n  table = [0, 1, 4, 9, 16, 25, 36]\n  #0 squares tables.jet:12\n  #1 SQUARES tables.jet:20 (prep)\n  steps: 1,204 of 10,000,000\n(Jet) continue"
+        },
+        {
+          "key": "B",
+          "name": "`jet debug --build` with steps measured as processor time",
+          "detail": "As A, but a step stays a slice of time, now the child's processor time instead of the compiler's wall-clock wait. A stopped child uses no processor time, so a pause spends nothing. The count still differs from machine to machine, so D-PREP-FUEL1 would have to be amended first. It reads \"during `jet build`\" as A does.",
+          "technical": "No counter in build-time code. The compiler reads the child's processor clock each time its wait for a reply ends, and kills the child past the limit. That the clock can be read from the compiler is unprobed.",
+          "code": "  steps: 2,400 of 10,000,000 (measured as time)"
+        },
+        {
+          "key": "C",
+          "name": "`jet build --break=<place>`: the build stops and opens the console",
+          "detail": "`jet build` takes `--break=<file:line|function>`, repeatable. The build runs as usual until build-time code reaches a breakpoint, then opens the `(Jet)` console there. This is the literal reading of \"during `jet build`\". The stop display and counted steps are as in A.",
+          "technical": "The same compiler work as A, started from `jet build`'s argument parser. `jet build` gains an interactive mode and needs `jet debug`'s other flags, such as `--do`, `--stdin` and `--dap`, forwarded.",
+          "code": "$ jet build --break=tables.jet:12\nStopped at tables.jet:12 in squares (build time)\n  i = 7\n  steps: 1,204 of 10,000,000\n(Jet) continue"
+        },
+        {
+          "key": "D",
+          "name": "Editor only: build-time stops through the debug adapter",
+          "detail": "Build-time stops are reachable only through the editor adapter. Breakpoints set in the editor stop build-time code with locals, stack and the steps used in the Variables view. The pause happens during a build the editor starts, and there is no console form.",
+          "technical": "The same compiler work as A without the console commands. Tests drive it through the adapter's case form.",
+          "code": "// .vscode/launch.json\n{ \"type\": \"jet\", \"request\": \"launch\", \"build\": true }"
+        },
+        {
+          "key": "E",
+          "name": "An interpreter for debugged builds",
+          "detail": "When debugged, build-time code runs in an interpreter instead of as machine code. Stepping moves by Jet expression, and the count is exact. The pause happens during a build, but not in the code a plain build runs.",
+          "technical": "A second engine for all build-time Jet, whose results must equal the machine code's. The comptime child design review already rejected a second engine for drift and speed (Docs/Audits/2026-11-23-comptime-child-design.md:36).",
+          "code": "$ jet debug --build\nStopped at tables.jet:12 in squares\n  steps: 1,204 of 10,000,000"
+        },
+        {
+          "key": "F",
+          "name": "Run one build-time call again outside the build: `jet debug --prep <place>`",
+          "detail": "The build records each build-time call's arguments and the compiler's answers to it. `jet debug --prep tables.jet:20` runs that one call again in a fresh child under today's debugger. This is how Rust's build scripts and Roslyn's generators are debugged. Nothing pauses during any build.",
+          "technical": "The build writes a small record per call, and the debugger runs the batch from it. Nothing traces a running build. `fn build` needs its build services answered from the record, and a marker body has no call to rerun.",
+          "code": "$ jet debug --prep tables.jet:20\nStopped at tables.jet:12 in squares (rerun of SQUARES)\n  i = 7"
+        }
+      ],
+      "comparisons": [
+        {
+          "lang": "Gradle",
+          "note": "Setting `org.gradle.debug` to true makes the build wait for a remote debugger on port 5005. Breakpoints in build logic then stop inside the running build.",
+          "code": "./gradlew help -Dorg.gradle.debug=true"
+        },
+        {
+          "lang": "Rust",
+          "note": "A build script is built as an ordinary program, which a debugger can run again by itself. Procedural macros run inside the compiler, and an endless loop in one hangs it.",
+          "code": "rust-gdb target/debug/build/app-*/build-script-build"
+        },
+        {
+          "lang": "C#",
+          "note": "Roslyn's cookbook debugs a source generator by driving it from a unit test with a generator driver. It runs outside the real build.",
+          "code": "CSharpGeneratorDriver.Create(generator).RunGeneratorsAndUpdateCompilation(input, out var output, out var diagnostics);"
+        },
+        {
+          "lang": "Zig",
+          "note": "`@compileLog` prints values at compile time and fails the build on purpose. `@setEvalBranchQuota` raises a limit counted in backward branches, not time.",
+          "code": "@setEvalBranchQuota(5000);\n@compileLog(table[7]);"
+        },
+        {
+          "lang": "Wasmtime",
+          "note": "`consume_fuel` instruments compiled code to count work deterministically. Its docs call that somewhat expensive and offer a cheaper time-based interrupt instead.",
+          "code": "config.consume_fuel(true);"
+        },
+        {
+          "lang": "Nim",
+          "note": "Macros are inspected with `dumpTree`, `treeRepr` and `expandMacros`. The compile-time VM's limit counts loop iterations.",
+          "code": "nim c --maxLoopIterationsVM:100000000 app.nim"
+        }
+      ],
+      "rec": "A",
+      "recommendation": {
+        "why": "Build-time code is ordinary O0 Jet, so it should stop under the console and adapter people already use, as Gradle's build logic does. Counted steps keep D-PREP-FUEL1, and a pause spends none by construction.",
+        "gains": [
+          "A breakpoint in a prep block, a prep fn, a marker body or `fn build` stops with locals and a call stack.",
+          "A stop shows an exact step count, the same on every machine and with or without the debugger.",
+          "The same console commands and editor adapter work for build-time code, and `jet build` stays non-interactive."
+        ],
+        "losses": [
+          {
+            "loss": "Build-time loops run slower: a probe measured at most 0.6 ns more per loop turn.",
+            "mitigation": "The count rides the poll each turn already makes, and real build-time code is measured before cutover."
+          },
+          {
+            "loss": "Prep work above ten million counted steps fails until it carries `#StepLimit(n)`.",
+            "mitigation": "A count-only pass over the repository's builds lists those bindings before the limit is enforced."
+          },
+          {
+            "loss": "Breakpoints in build-time code wait for code that loads later.",
+            "mitigation": "A breakpoint is placed when its batch loads, and one never placed is named when the build ends."
+          },
+          {
+            "loss": "A stop holds the whole build until you continue.",
+            "mitigation": "Only `jet debug --build` stops, and a plain `jet build` never waits for a person."
+          },
+          {
+            "loss": "Batches need line tables and local places, and marker bodies need a stop hook.",
+            "mitigation": "The `perf` listing carries the tables, and the hook is a call, because the build runs in the session."
+          }
+        ],
+        "whyNot": [
+          {
+            "key": "B",
+            "reason": "Processor time still differs between machines, so it breaks ratified D-PREP-FUEL1 unless the owner amends it."
+          },
+          {
+            "key": "C",
+            "reason": "It adds an interactive mode to `jet build`, which scripts and CI call, and duplicates `jet debug`'s flags."
+          },
+          {
+            "key": "D",
+            "reason": "Terminal users and case tests lose the console form every other debugger feature has."
+          },
+          {
+            "key": "E",
+            "reason": "A second engine must match the machine code forever, and a debugged build would not run the code a plain build runs."
+          },
+          {
+            "key": "F",
+            "reason": "It reruns a call after the build instead of pausing during it, and marker bodies have no call to rerun."
+          }
+        ],
+        "tradeoff": "A keeps one debugger, one engine and D-PREP-FUEL1's counted steps, at the price of a counter in every build-time loop."
+      },
+      "hybrid": null,
+      "ballotMode": "full",
+      "shortAuthorizedBy": null,
+      "ballotProcessVersion": 5,
+      "reviewPasses": {
+        "adversarial": "Author model family: Claude. Adversarial model family: Claude. Fresh agent: DerivReadReview. The review found that pauses would spend timed steps, that marker bodies run in the compiler rather than a child, and that breakpoints can't wait for code. This draft runs the build in the session with counted steps, keeping D-PREP-FUEL1, after probing a counter's cost."
+      },
+      "checkInstructions": "Check build-time execution in Compiler/JetEval/Source/IR/Native.jet (header, JET_EVAL_NATIVE_FUEL_PER_MS, the batch listing) and the timed limit in Compiler/JetBackend/Source/Image/SessionHost.jet. Check marker bodies in JetSema Registration/UserTemplates.jet and Derives.jet sema_derive_expand_rule_body.\n\nCheck loop polls in JetIR Build.jet ir_loop_check and X64Patch.jet patch_emit_armed_poll, and the plugin fuel counter in JetPlugin Translate.jet. Check breakpoints in Compiler/JetDebug/Source/Native.jet break_at and run_to. Check D-PREP-FUEL1 and card #5007 c10 and c11.",
+      "surface": {
+        "gist": "How do you stop at a breakpoint in prep code, a marker body or `fn build` while Jet builds?",
+        "lesson": "Build-time code is Jet code the compiler runs while it builds, such as prep blocks and `fn build`. Each call has a step limit, counted in statements, so a runaway loop can't stall the build. A breakpoint pauses code to show its locals and call stack.",
+        "trio": {
+          "current": {
+            "note": "Today `jet debug` builds first, then debugs the finished program, which holds no code for a prep line.",
+            "code": "$ jet debug tables.jet --break tables.jet:20\nNo code on tables.jet:20"
+          },
+          "wild": {
+            "lang": "Gradle",
+            "note": "Gradle makes the running build wait for a debugger.",
+            "code": "./gradlew help -Dorg.gradle.debug=true"
+          }
+        },
+        "options": [
+          {
+            "key": "A",
+            "name": "`jet debug --build`, counted steps",
+            "gist": "The usual console runs the build and stops in build-time code.",
+            "gains": [
+              "Same console and editor adapter as programs.",
+              "Exact step count, same with or without the debugger."
+            ],
+            "losses": [
+              "A counter in every build-time loop."
+            ],
+            "proposed": {
+              "code": "$ jet debug --build\n(Jet) break tables.jet:12\n(Jet) run\nStopped at tables.jet:12 in squares (build time)\n  i = 7\n  #1 SQUARES tables.jet:20 (prep)\n  steps: 1,204 of 10,000,000"
+            }
+          },
+          {
+            "key": "B",
+            "name": "As A, steps as processor time",
+            "gist": "No counter; a stopped child uses no processor time.",
+            "gains": [
+              "No added work in build-time code."
+            ],
+            "losses": [
+              "Needs ratified D-PREP-FUEL1 amended."
+            ],
+            "proposed": {
+              "code": "  steps: 2,400 of 10,000,000 (measured as time)"
+            }
+          },
+          {
+            "key": "C",
+            "name": "`jet build --break=<place>`",
+            "gist": "The build itself takes breakpoints and opens the console.",
+            "gains": [
+              "Stops inside the command people already run."
+            ],
+            "losses": [
+              "`jet build` can wait for a person."
+            ],
+            "proposed": {
+              "code": "$ jet build --break=tables.jet:12"
+            }
+          },
+          {
+            "key": "D",
+            "name": "Editor only",
+            "gist": "Build-time stops only through the editor's debug adapter.",
+            "gains": [
+              "Less console work."
+            ],
+            "losses": [
+              "No terminal form and no console tests."
+            ],
+            "proposed": {
+              "code": "{ \"type\": \"jet\", \"request\": \"launch\", \"build\": true }"
+            }
+          },
+          {
+            "key": "E",
+            "name": "Interpreter when debugging",
+            "gist": "Debugged builds run build-time code in an interpreter.",
+            "gains": [
+              "Steps by expression."
+            ],
+            "losses": [
+              "A second engine that must always match."
+            ],
+            "proposed": {
+              "code": "$ jet debug --build"
+            }
+          },
+          {
+            "key": "F",
+            "name": "Rerun one call: `jet debug --prep`",
+            "gist": "The build records each call; the debugger reruns one alone.",
+            "gains": [
+              "No traced build."
+            ],
+            "losses": [
+              "Stops after the build, not during it."
+            ],
+            "proposed": {
+              "code": "$ jet debug --prep tables.jet:20"
+            }
+          }
+        ],
+        "recommendation": {
+          "rec": "A",
+          "why": "Build-time code is ordinary Jet, so it should stop under the console and adapter people know. Counted steps keep D-PREP-FUEL1, and pauses spend none.",
+          "gains": [
+            "Breakpoints stop in prep code, marker bodies and `fn build`.",
+            "Exact step counts on every machine.",
+            "`jet build` stays non-interactive."
+          ],
+          "losses": [
+            {
+              "loss": "Build-time loops run up to 0.6 ns slower per turn.",
+              "mitigation": "The count rides an existing poll; real builds are measured before cutover."
+            },
+            {
+              "loss": "Some prep work may need `#StepLimit(n)`.",
+              "mitigation": "A count-only pass lists those bindings first."
+            },
+            {
+              "loss": "A stop holds the whole build.",
+              "mitigation": "Only `jet debug --build` stops; plain `jet build` never waits."
+            }
+          ],
+          "whyNot": [
+            {
+              "key": "B",
+              "reason": "Breaks ratified D-PREP-FUEL1."
+            },
+            {
+              "key": "C",
+              "reason": "`jet build` should never wait for a person."
+            },
+            {
+              "key": "D",
+              "reason": "No console form or console tests."
+            },
+            {
+              "key": "E",
+              "reason": "A second engine to keep equal."
+            },
+            {
+              "key": "F",
+              "reason": "Reruns after the build instead of pausing during it."
+            }
+          ],
+          "tradeoff": "One debugger, one engine and counted steps, for a counter in each build-time loop."
+        }
+      },
+      "draftedBy": "Orchestrator",
+      "reviewedBy": "DerivReadReview",
+      "draft": false,
+      "status": "ratified",
+      "created": "2026-11-23T23:28:23.717Z",
+      "outcome": "A",
+      "ratifiedAt": "2026-11-24",
+      "retiredAt": "2026-11-27T11:37:36.443Z"
     }
   ]
 }
