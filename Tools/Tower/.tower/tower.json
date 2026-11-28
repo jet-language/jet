@@ -3,7 +3,7 @@
     "version": 4,
     "project": "Jet",
     "nextNum": 7071,
-    "rev": 115488,
+    "rev": 115500,
     "ui": {
       "toggled": [
         "dec-group:syntax",
@@ -64142,8 +64142,8 @@
       "parentId": null,
       "needsAcceptance": false,
       "created": "2026-11-27T18:34:41.611Z",
-      "updated": "2026-11-28T02:14:44.444Z",
-      "updatedBy": "Orchestrator",
+      "updated": "2026-11-28T11:18:34.926Z",
+      "updatedBy": "owner",
       "criteriaLastN": 3
     },
     {
@@ -64305,7 +64305,13 @@
       "visualMedia": [],
       "blockedBy": [],
       "assignee": null,
-      "log": [],
+      "log": [
+        {
+          "at": "2026-11-28",
+          "by": "Orchestrator",
+          "text": "Landed on dev 404d4f67cf1: release keeps warnings advisory; only --deny-warnings fails on warnings (owner instruction: keep warnings and errors separate; release does not treat warnings as errors unless the warnings-as-errors flag is passed). Proof: dev compiler rebuilt from the tree; cases build_deny_warnings_fails_and_release_keeps_warnings, unused_imports_warn_and_fix_prunes, check_deny_warnings_fails_on_warning PASS. Side effect: the O2 golden failures caused by release-denied warnings (FloatComparison, RedundantFinalReturn, BranchArmTable, RawMultilineHtml) no longer fail; Quaternion, DSLRuntimeHole, LineFields, TaskDomainError failures predate it. Full suite started on this compiler."
+        }
+      ],
       "criteria": [
         {
           "n": 1,
@@ -64340,7 +64346,7 @@
       "parentId": null,
       "needsAcceptance": false,
       "created": "2026-11-27T18:59:20.698Z",
-      "updated": "2026-11-28T11:12:08.987Z",
+      "updated": "2026-11-28T11:32:42.957Z",
       "updatedBy": "Orchestrator",
       "criteriaLastN": 3
     },
@@ -64677,7 +64683,7 @@
       "parentId": null,
       "needsAcceptance": false,
       "created": "2026-11-27T21:28:05.024Z",
-      "updated": "2026-11-28T04:33:48.678Z",
+      "updated": "2026-11-28T11:33:55.119Z",
       "updatedBy": "Orchestrator",
       "criteriaLastN": 4
     },
@@ -64742,7 +64748,7 @@
       "parentId": null,
       "needsAcceptance": false,
       "created": "2026-11-27T21:28:06.305Z",
-      "updated": "2026-11-28T04:32:36.745Z",
+      "updated": "2026-11-28T11:33:53.874Z",
       "updatedBy": "Orchestrator",
       "criteriaLastN": 4
     },
@@ -64816,7 +64822,7 @@
       "parentId": null,
       "needsAcceptance": false,
       "created": "2026-11-27T21:28:07.686Z",
-      "updated": "2026-11-28T04:33:52.330Z",
+      "updated": "2026-11-28T11:33:56.414Z",
       "updatedBy": "Orchestrator",
       "criteriaLastN": 5
     },
@@ -64892,7 +64898,7 @@
       "parentId": null,
       "needsAcceptance": false,
       "created": "2026-11-27T21:28:08.583Z",
-      "updated": "2026-11-28T04:33:49.524Z",
+      "updated": "2026-11-28T11:33:59.893Z",
       "updatedBy": "Orchestrator",
       "criteriaLastN": 4
     },
@@ -64957,7 +64963,7 @@
       "parentId": null,
       "needsAcceptance": false,
       "created": "2026-11-27T21:28:09.469Z",
-      "updated": "2026-11-28T04:33:15.035Z",
+      "updated": "2026-11-28T11:33:57.599Z",
       "updatedBy": "Orchestrator",
       "criteriaLastN": 4
     },
@@ -65019,7 +65025,7 @@
       "parentId": null,
       "needsAcceptance": false,
       "created": "2026-11-27T21:28:10.503Z",
-      "updated": "2026-11-28T04:33:29.542Z",
+      "updated": "2026-11-28T11:32:33.505Z",
       "updatedBy": "Orchestrator",
       "criteriaLastN": 3
     },
@@ -122461,8 +122467,10 @@
       "draftedBy": "Orchestrator",
       "reviewedBy": "BallotReview1",
       "draft": false,
-      "status": "open",
-      "created": "2026-11-28T01:57:54.954Z"
+      "status": "ratified",
+      "created": "2026-11-28T01:57:54.954Z",
+      "outcome": "A",
+      "ratifiedAt": "2026-11-28"
     },
     {
       "id": "D-CLI-OPTVALUE-SPLIT1",
@@ -122762,14 +122770,14 @@
         {
           "key": "A",
           "name": "Split the tiers",
-          "detail": "Treat unused local variables and silent shadowing as tidy errors in check/build. Treat unused imports and unused private functions as warnings locally. Run/dev/test keep their quick-loop tidy behavior. Warnings can still fail deny-warnings or release policy; warning does not mean ignored everywhere.",
+          "detail": "Treat unused local variables and silent shadowing as tidy errors in check/build. Treat unused imports and unused private functions as warnings locally. Run/dev/test keep their quick-loop tidy behavior. Warnings fail a command only when --deny-warnings is passed; release builds keep them advisory.",
           "technical": "Preserve the existing diagnostic identities and one registry-driven command gate. Do not implement a second lint engine or a formatter-specific cleanup pass. Between CLI commands, fmt changes layout and fix applies registered cleanup edits.\n\nSafe cleanup must preserve initializer side effects and valid syntax in grouped imports and local functions. Do not blindly delete an unused binding whose initializer has effects; use the registered safe edit or intentional underscore form. Public APIs are not removed just because no local call is visible.\n\nTest all four findings under check/build/run/dev/test, deny-warnings and release, plus fix idempotence, grouped imports, effectful initializers, and formatter non-pruning. Refresh generated severity docs and snapshots from the registry rather than hand-maintaining a second table.",
           "code": "use core.text // warning\npriv helper: fn() {} // warning\nrun: fn() {\n    total: 0 // tidy check error\n    print(\"ran\")\n}"
         },
         {
           "key": "B",
           "name": "Warn on all four",
-          "detail": "Make all four diagnostics ordinary local warnings, retaining release or explicit warning-denial promotion. This favors uninterrupted refactoring and consistent local severity. It also permits accidental shadowing to pass a normal check.",
+          "detail": "Make all four diagnostics ordinary local warnings, promoted to failures only by an explicit --deny-warnings. This favors uninterrupted refactoring and consistent local severity. It also permits accidental shadowing to pass a normal check.",
           "technical": "Move all four rows into the warning behavior consistently. Preserve diagnostic identities and shared fix edits. Fmt remains layout-only; changing severity does not justify pruning code during formatting.",
           "code": "use core.text // warning\npriv helper: fn() {} // warning\nrun: fn() {\n    total: 0 // warning\n    print(\"ran\")\n}"
         },
@@ -124110,8 +124118,11 @@
       "draftedBy": "Orchestrator",
       "reviewedBy": "BallotReview3",
       "draft": false,
-      "status": "open",
-      "created": "2026-11-28T04:00:07.765Z"
+      "status": "ratified",
+      "created": "2026-11-28T04:00:07.765Z",
+      "outcome": "A",
+      "comment": "4C moved #Close to the C binder, which emits impl Close. Applied on the owner's instruction 2026-11-28: 'If I decided in chat, then use my decision from chat even if it reverses the recommended option you made on these ballots.' Source: owner's Antigravity chat of 2026-11-27.",
+      "ratifiedAt": "2026-11-28"
     },
     {
       "id": "D-DEFER-SPELL1",
@@ -124757,8 +124768,11 @@
       "draftedBy": "Orchestrator",
       "reviewedBy": "BallotReview3",
       "draft": false,
-      "status": "open",
-      "created": "2026-11-28T04:00:17.898Z"
+      "status": "ratified",
+      "created": "2026-11-28T04:00:17.898Z",
+      "outcome": "A",
+      "comment": "Cell becomes the thread-confined form of Shared. Applied on the owner's instruction 2026-11-28: 'If I decided in chat, then use my decision from chat even if it reverses the recommended option you made on these ballots.' Source: owner's Antigravity chat of 2026-11-27.",
+      "ratifiedAt": "2026-11-28"
     },
     {
       "id": "D-EFFECT-PARAM1",
@@ -125871,6 +125885,12 @@
           "name": "Spell out euclidean",
           "detail": "Rename both methods in place to div_euclidean and rem_euclidean. Preserve signed results, failure behavior and operator semantics; migrate only resolved builtin references.",
           "code": "// proposed\nr: a.rem_euclidean(b)"
+        },
+        {
+          "key": "C",
+          "name": "Descriptive names, same results",
+          "detail": "Owner chat ruling: the euclid name does not say what the methods do, and / and /% stay. Rename div_euclid/rem_euclid in place to div_nonneg/rem_nonneg: the remainder is never negative. Every result, failure and operator (/, /%, %, %%) is unchanged; a golden shows -7 by -2 in every mode on O0/O1/O2.",
+          "code": "// proposed\nq: (-7).div_nonneg(-2) // 4\nr: (-7).rem_nonneg(-2) // 1"
         }
       ],
       "comparisons": [
@@ -125896,6 +125916,10 @@
           {
             "key": "B",
             "reason": "B is honest and preserves semantics, but a longer spelling offers limited benefit."
+          },
+          {
+            "key": "C",
+            "reason": "Drafted before the owner's chat ruling was applied; the audit preferred no rename."
           }
         ],
         "tradeoff": "A concise mathematical name needs a short explanation."
@@ -125949,6 +125973,21 @@
             "proposed": {
               "code": "// proposed\nr: a.rem_euclidean(b)"
             }
+          },
+          {
+            "key": "C",
+            "name": "Descriptive names, same results",
+            "gist": "Rename to div_nonneg and rem_nonneg; results unchanged.",
+            "gains": [
+              "The name says the remainder is never negative.",
+              "No arithmetic change; / and /% stay."
+            ],
+            "losses": [
+              "A source migration of the existing callers."
+            ],
+            "proposed": {
+              "code": "// proposed\nq: (-7).div_nonneg(-2) // 4\nr: (-7).rem_nonneg(-2) // 1"
+            }
           }
         ],
         "recommendation": {
@@ -125967,6 +126006,10 @@
             {
               "key": "B",
               "reason": "B is honest and preserves semantics, but a longer spelling offers limited benefit."
+            },
+            {
+              "key": "C",
+              "reason": "Drafted before the owner's chat ruling was applied; the audit preferred no rename."
             }
           ],
           "tradeoff": "A concise mathematical name needs a short explanation."
@@ -126119,8 +126162,11 @@
       "draftedBy": "Orchestrator",
       "reviewedBy": "BallotReview3",
       "draft": false,
-      "status": "open",
-      "created": "2026-11-28T04:00:42.688Z"
+      "status": "ratified",
+      "created": "2026-11-28T04:00:42.688Z",
+      "outcome": "A",
+      "comment": "Item 12: two method sites; free Type.method: fn is deleted. Applied on the owner's instruction 2026-11-28: 'If I decided in chat, then use my decision from chat even if it reverses the recommended option you made on these ballots.' Source: owner's Antigravity chat of 2026-11-27.",
+      "ratifiedAt": "2026-11-28"
     },
     {
       "id": "D-INBODY-OPTOUT1",
@@ -128057,8 +128103,11 @@
       "draftedBy": "Orchestrator",
       "reviewedBy": "BallotReview4",
       "draft": false,
-      "status": "open",
-      "created": "2026-11-28T04:32:18.885Z"
+      "status": "ratified",
+      "created": "2026-11-28T04:32:18.885Z",
+      "outcome": "A",
+      "comment": "Item 3 was .new as an ordinary static method with no compiler magic. Applied on the owner's instruction 2026-11-28: 'If I decided in chat, then use my decision from chat even if it reverses the recommended option you made on these ballots.' Source: owner's Antigravity chat of 2026-11-27.",
+      "ratifiedAt": "2026-11-28"
     },
     {
       "id": "D-OVERFLOW-BLOCK1",
@@ -128649,8 +128698,11 @@
       "draftedBy": "Orchestrator",
       "reviewedBy": "BallotReview4",
       "draft": false,
-      "status": "open",
-      "created": "2026-11-28T04:32:29.505Z"
+      "status": "ratified",
+      "created": "2026-11-28T04:32:29.505Z",
+      "outcome": "A",
+      "comment": "Applied on the owner's instruction 2026-11-28: 'If I decided in chat, then use my decision from chat even if it reverses the recommended option you made on these ballots.' Source: owner's Antigravity chat of 2026-11-27.",
+      "ratifiedAt": "2026-11-28"
     },
     {
       "id": "D-CLOSURE-WRITE-ACCESS1",
@@ -129870,8 +129922,11 @@
       "draftedBy": "Orchestrator",
       "reviewedBy": "BallotReview4",
       "draft": false,
-      "status": "open",
-      "created": "2026-11-28T04:32:54.396Z"
+      "status": "ratified",
+      "created": "2026-11-28T04:32:54.396Z",
+      "outcome": "A",
+      "comment": "The approved effects proposal made State.Read/Context.Read explicit. Applied on the owner's instruction 2026-11-28: 'If I decided in chat, then use my decision from chat even if it reverses the recommended option you made on these ballots.' Source: owner's Antigravity chat of 2026-11-27.",
+      "ratifiedAt": "2026-11-28"
     },
     {
       "id": "D-EVENT-MODULE1",
@@ -130980,6 +131035,12 @@
           "name": "Explicit versioned conversions",
           "detail": "Retain ordinary type checking; remove automatic published-schema migration checks and implement historical version dispatch and conversion explicitly.",
           "code": "// old/new types plus explicit conversions and version dispatch"
+        },
+        {
+          "key": "C",
+          "name": "Migration library DSL",
+          "detail": "Owner chat ruling (tier 3): migrations move out of the compiler grammar into a Migration DSL value built on the unified DSL trait. The DSL keeps today's snapshot checks and diagnostics, and the words rename/add/remove/change become ordinary identifiers. The DSL trait gains whatever the audit found missing (checks against snapshot-only field names); any word the build cannot free stays reserved and is reported.",
+          "code": "user_record: Migration<UserRecord>{\n    rename name -> display_name\n    add verified: Bool = false\n}"
         }
       ],
       "comparisons": [
@@ -131006,6 +131067,10 @@
           {
             "key": "B",
             "reason": "B makes authors write version dispatch by hand and drops the one history description other features rely on."
+          },
+          {
+            "key": "C",
+            "reason": "The audit found the unified DSL trait cannot yet check snapshot-only field names, so C needs that capability built first."
           }
         ],
         "tradeoff": "Automatic checking versus explicit version maintenance."
@@ -131058,6 +131123,20 @@
             "proposed": {
               "code": "// ordinary historical/current record types and explicit conversion"
             }
+          },
+          {
+            "key": "C",
+            "name": "Migration library DSL",
+            "gist": "Write migrations as a library DSL value with the same snapshot checks.",
+            "gains": [
+              "No migration grammar or reserved verbs in the core language."
+            ],
+            "losses": [
+              "The DSL trait must grow snapshot-aware field checking first."
+            ],
+            "proposed": {
+              "code": "user_record: Migration<UserRecord>{\n    rename name -> display_name\n    add verified: Bool = false\n}"
+            }
           }
         ],
         "recommendation": {
@@ -131076,6 +131155,10 @@
             {
               "key": "B",
               "reason": "B is viable, but authors assume responsibility for version dispatch and historical coverage."
+            },
+            {
+              "key": "C",
+              "reason": "The audit found the unified DSL trait cannot yet check snapshot-only field names, so C needs that capability built first."
             }
           ],
           "tradeoff": "A small grammar buys automatic history checks."
@@ -131118,6 +131201,12 @@
           "name": "Write endpoint types directly",
           "detail": "Delete the shorthand; migrate its declarations to ordinary SingleUse typestate endpoints without adding a macro or session-list language.",
           "code": "// equivalent endpoint and state types are written directly"
+        },
+        {
+          "key": "C",
+          "name": "Protocol library DSL",
+          "detail": "Owner chat ruling (tier 3): protocol/client/server move out of the compiler grammar into a Protocol DSL on the unified DSL trait. It generates the same checked typestate endpoints and reports errors at the failing declaration or message. The DSL trait gains the item-generating step the audit found missing.",
+          "code": "payment: Protocol{\n    client -> server: Hello(version: Int)\n    server -> client: Ack(session: Int)\n}"
         }
       ],
       "comparisons": [
@@ -131143,6 +131232,10 @@
           {
             "key": "B",
             "reason": "B adds no mechanism, but authors repeat every message on both endpoints and keep them in step by hand."
+          },
+          {
+            "key": "C",
+            "reason": "The audit found the unified DSL trait has no item-generating step yet, so C needs it built first."
           }
         ],
         "tradeoff": "Convenience versus a smaller grammar."
@@ -131195,6 +131288,20 @@
             "proposed": {
               "code": "// write the existing SingleUse endpoint/state declarations directly"
             }
+          },
+          {
+            "key": "C",
+            "name": "Protocol library DSL",
+            "gist": "Write protocols as a library DSL that generates the same typestate endpoints.",
+            "gains": [
+              "No protocol grammar or reserved words in the core language."
+            ],
+            "losses": [
+              "The DSL trait must grow item generation first."
+            ],
+            "proposed": {
+              "code": "payment: Protocol{\n    client -> server: Hello(version: Int)\n    server -> client: Ack(session: Int)\n}"
+            }
           }
         ],
         "recommendation": {
@@ -131213,6 +131320,10 @@
             {
               "key": "B",
               "reason": "B is viable and simpler in core, but repeats endpoint/state declarations."
+            },
+            {
+              "key": "C",
+              "reason": "The audit found the unified DSL trait has no item-generating step yet, so C needs it built first."
             }
           ],
           "tradeoff": "One declaration form saves repeated endpoint code."
@@ -133910,6 +134021,90 @@
     }
   ],
   "events": [
+    {
+      "at": "2026-11-28T11:33:59.893Z",
+      "by": "Orchestrator",
+      "action": "decision.ratify",
+      "ref": "D-CONTEXT-READ2",
+      "note": "A (by Orchestrator, quoting owner: \"If we have effect inference then im ok with these changes.\")"
+    },
+    {
+      "at": "2026-11-28T11:33:58.752Z",
+      "by": "Orchestrator",
+      "action": "decision.ratify",
+      "ref": "D-CELL-LOCAL1",
+      "note": "A (by Orchestrator, quoting owner: \"The interior mutability is fine.\")"
+    },
+    {
+      "at": "2026-11-28T11:33:57.599Z",
+      "by": "Orchestrator",
+      "action": "decision.ratify",
+      "ref": "D-FREE-METHOD-DROP1",
+      "note": "A (by Orchestrator, quoting owner: \"good with 12.\")"
+    },
+    {
+      "at": "2026-11-28T11:33:56.414Z",
+      "by": "Orchestrator",
+      "action": "decision.ratify",
+      "ref": "D-CLOSE-MARKER1",
+      "note": "A (by Orchestrator, quoting owner: \"I guess im ok with 4C.\")"
+    },
+    {
+      "at": "2026-11-28T11:33:55.119Z",
+      "by": "Orchestrator",
+      "action": "decision.ratify",
+      "ref": "D-NEW-RETURN1",
+      "note": "A (by Orchestrator, quoting owner: \"Ok fine with 1. 2 seems good. 3 good.\")"
+    },
+    {
+      "at": "2026-11-28T11:33:53.874Z",
+      "by": "Orchestrator",
+      "action": "decision.ratify",
+      "ref": "D-TYPE-ONE1",
+      "note": "A (by Orchestrator, quoting owner: \"Im ok unifying typeid and type.\")"
+    },
+    {
+      "at": "2026-11-28T11:32:42.957Z",
+      "by": "Orchestrator",
+      "action": "decision.update",
+      "ref": "D-LINT-TIERS1",
+      "note": ""
+    },
+    {
+      "at": "2026-11-28T11:32:33.505Z",
+      "by": "Orchestrator",
+      "action": "decision.update",
+      "ref": "D-PROTOCOL-HOME1",
+      "note": ""
+    },
+    {
+      "at": "2026-11-28T11:32:32.480Z",
+      "by": "Orchestrator",
+      "action": "decision.update",
+      "ref": "D-MIGRATION-SHAPE1",
+      "note": ""
+    },
+    {
+      "at": "2026-11-28T11:32:31.593Z",
+      "by": "Orchestrator",
+      "action": "decision.update",
+      "ref": "D-EUCLID-NAMES1",
+      "note": ""
+    },
+    {
+      "at": "2026-11-28T11:31:50.715Z",
+      "by": "Orchestrator",
+      "action": "card.update",
+      "ref": "c07z82uc",
+      "note": "logEntry"
+    },
+    {
+      "at": "2026-11-28T11:18:34.926Z",
+      "by": "owner",
+      "action": "decision.ratify",
+      "ref": "D-FN-TYPE-NOFAIL1",
+      "note": "A"
+    },
     {
       "at": "2026-11-28T11:17:27.432Z",
       "by": "Orchestrator",
