@@ -3,7 +3,7 @@
     "version": 4,
     "project": "Jet",
     "nextNum": 7071,
-    "rev": 115450,
+    "rev": 115457,
     "ui": {
       "toggled": [
         "dec-group:syntax",
@@ -64163,6 +64163,11 @@
         {
           "at": "2026-11-28",
           "by": "Orchestrator",
+          "text": "Found during ballot review: Tools/Agent/CoreSurfaceLedger.jet:1806 lists reactive Effect methods as Subscription methods. Fix it as part of deriving the Core surface from source."
+        },
+        {
+          "at": "2026-11-28",
+          "by": "Orchestrator",
           "text": "Found during ballot review: Core/Tasks/Tasks.jet:299 declares timeout with a plain body (wait for core.tasks.after(delay, 0), then return), but the compiler treats task.timeout as an intrinsic deadline (Examples/Concurrency/TaskTimeoutDeadline.jet prints deadline installed, then exits 70 with DeadlineExceeded inside sleep). The Core source does not say what runs; the Intrinsics.rows cutover should make the source match or mark it as compiler-provided."
         }
       ],
@@ -64209,7 +64214,7 @@
       "parentId": null,
       "needsAcceptance": false,
       "created": "2026-11-27T18:58:34.535Z",
-      "updated": "2026-11-28T03:07:34.865Z",
+      "updated": "2026-11-28T04:33:54.294Z",
       "updatedBy": "Orchestrator",
       "criteriaLastN": 4
     },
@@ -64461,7 +64466,13 @@
       "visualMedia": [],
       "blockedBy": [],
       "assignee": null,
-      "log": [],
+      "log": [
+        {
+          "at": "2026-11-28",
+          "by": "Orchestrator",
+          "text": "Spec contradiction found during ballot review: spec.md line 1597 and line 3210 disagree on #FX caps on traits. The ballot D-DYN-CEILING1 depends on this; whichever way it is ratified, the losing spec text must change."
+        }
+      ],
       "criteria": [
         {
           "n": 1,
@@ -64505,7 +64516,7 @@
       "parentId": null,
       "needsAcceptance": false,
       "created": "2026-11-27T20:04:52.447Z",
-      "updated": "2026-11-28T04:32:15.445Z",
+      "updated": "2026-11-28T04:33:53.420Z",
       "updatedBy": "Orchestrator",
       "criteriaLastN": 4
     },
@@ -64527,6 +64538,11 @@
       "blockedBy": [],
       "assignee": null,
       "log": [
+        {
+          "at": "2026-11-28",
+          "by": "Orchestrator",
+          "text": "Owner attention (found during ballot review): this card's text calls deleting #Overflow owner-ratified, but the ratified wrap ruling D-FIXED-WRAP1=A keeps it, and the reviewed ballot D-OVERFLOW-BLOCK1 now puts the question to you. Only the owner can reword the criterion."
+        },
         {
           "at": "2026-11-28",
           "by": "Orchestrator",
@@ -64581,7 +64597,7 @@
       "parentId": null,
       "needsAcceptance": false,
       "created": "2026-11-27T21:28:05.024Z",
-      "updated": "2026-11-28T04:32:23.244Z",
+      "updated": "2026-11-28T04:33:48.678Z",
       "updatedBy": "Orchestrator",
       "criteriaLastN": 4
     },
@@ -64695,6 +64711,24 @@
           "verifiedBy": null,
           "evidence": "",
           "at": "2026-11-27T21:28:35.697Z"
+        },
+        {
+          "n": 4,
+          "text": "A panic inside a plain defer while another panic is already unwinding keeps the original panic in the report (both are shown, as rollback hooks already do), on O0, O1 and O2, with a case; today the original panic disappears",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-11-28T04:33:50.981Z"
+        },
+        {
+          "n": 5,
+          "text": "The ratified on_rollback opt-out (spec.md 2894-2896) is implemented with a golden, or the spec text is changed through an owner ballot; Core/Mem/Scope.jet stops documenting the retired scope.guard",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-11-28T04:33:52.330Z"
         }
       ],
       "refs": [],
@@ -64702,9 +64736,9 @@
       "parentId": null,
       "needsAcceptance": false,
       "created": "2026-11-27T21:28:07.686Z",
-      "updated": "2026-11-28T04:32:51.026Z",
+      "updated": "2026-11-28T04:33:52.330Z",
       "updatedBy": "Orchestrator",
-      "criteriaLastN": 3
+      "criteriaLastN": 5
     },
     {
       "id": "c0mvk3ul",
@@ -64724,6 +64758,11 @@
       "blockedBy": [],
       "assignee": null,
       "log": [
+        {
+          "at": "2026-11-28",
+          "by": "Orchestrator",
+          "text": "Owner attention (found during ballot review): the card says 'Owner-ratified Tier 2 collapses', but no ratified decision backs that; its Context.Read item conflicts with D-CONTEXT-EFFECT1=F. The reviewed ballots D-CONTEXT-READ2, D-STATE-EFFECT1, D-AMBIENT-SET1 and the rest now put each collapse to you. Only the owner can reword the criteria."
+        },
         {
           "at": "2026-11-28",
           "by": "Orchestrator",
@@ -64773,7 +64812,7 @@
       "parentId": null,
       "needsAcceptance": false,
       "created": "2026-11-27T21:28:08.583Z",
-      "updated": "2026-11-28T04:33:34.941Z",
+      "updated": "2026-11-28T04:33:49.524Z",
       "updatedBy": "Orchestrator",
       "criteriaLastN": 4
     },
@@ -123994,7 +124033,7 @@
       "explainer": "",
       "story": "Pat writes cleanup inside a nested loop and wants it to run when the outer loop's pass ends.",
       "inWild": "defer f.close();\nerrdefer rollback();",
-      "detail": "Compiler/JetIR/Source/BuildTransact.jet, ir_defer:252-262, stores a deferred body and reads visible locals at exit. A baseline deferred a local, changed it from 1 to 2, and printed 2. This older executable does not establish that proposed #Defer works in newer dev.\n\nEvery option introduces #Defer with defaults when=.Always and scope=.Block. For ordinary block/function targets, Ok means normal departure, including return, break and skip; Err means failure or stop. Transaction targets use their own commit/rollback outcome. Registration is conditional on reaching the marker. Ratify with the capture-law and cleanup-order ballots. Capture A transfers inner owned locals at block end, B rejects early-dying captures, and C snapshots them at registration. Never suggest moving registration without proving equivalent control flow and capture facts.\n\nRatify with transaction targeting. This ballot selects no loop targets (A), .Loop(label) (B), or bare lexical loop labels (C). Its companion independently selects .Transact (A), .Transact(name) with retained names (B), or contextual .Block (C). Thus fixed-menu A permits named transactions if the companion chooses them. Loop-label C does not add transaction names. Labels and names must resolve to enclosing lexical targets, never runtime strings. The parameterized descriptors are proposed, not current syntax.\n\nCleanup-order A migrates hooks into unified lexical ordering, with checked fixes or author-reviewed reorders. Cleanup-order B retains the old hook API and its after-cleanup phase, regardless of this ballot's label answer. No combination may silently delete that phase while claiming compatibility. The separate scope-guard ballot decides whether the movable inferred carrier remains.\n\nZig errdefer is current-block error-return cleanup. It does not prove outer-loop targeting unnecessary.",
+      "detail": "Compiler/JetIR/Source/BuildTransact.jet, ir_defer:252-262, stores a deferred body and reads visible locals at exit. A baseline deferred a local, changed it from 1 to 2, and printed 2. This older executable does not establish that proposed #Defer works in newer dev.\n\nEvery option introduces #Defer with defaults when=.Always and scope=.Block. For ordinary block/function targets, Ok means normal departure, including return, break and skip; Err means failure or stop. Transaction targets use their own commit/rollback outcome. Registration is conditional on reaching the marker. Ratify with the capture-law and cleanup-order ballots. Capture A transfers inner owned locals at block end, B rejects early-dying captures, and C snapshots them at registration. Never suggest moving registration without proving equivalent control flow and capture facts.\n\nRatify with transaction targeting. This ballot selects no loop targets (A), .Loop(label) (B), or bare lexical loop labels (C). Its companion independently selects .Transact (A), .Transact(name) with retained names (B), or contextual .Block (C). Thus fixed-menu A permits named transactions if the companion chooses them. Loop-label C does not add transaction names. Labels and names must resolve to enclosing lexical targets, never runtime strings. The parameterized descriptors are proposed, not current syntax.\n\nCleanup-order A migrates hooks into unified lexical ordering, with checked fixes or author-reviewed reorders. Cleanup-order B retains the old hook API and its after-cleanup phase, regardless of this ballot's label answer. No combination may silently delete that phase while claiming compatibility. The movable scope.guard carrier is already retired by a ratified ruling, so no option here keeps it.\n\nZig errdefer is current-block error-return cleanup. It does not prove outer-loop targeting unnecessary.",
       "options": [
         {
           "key": "A",
@@ -133391,6 +133430,55 @@
     }
   ],
   "events": [
+    {
+      "at": "2026-11-28T04:33:54.294Z",
+      "by": "Orchestrator",
+      "action": "card.update",
+      "ref": "c00j49ue",
+      "note": "logEntry"
+    },
+    {
+      "at": "2026-11-28T04:33:53.420Z",
+      "by": "Orchestrator",
+      "action": "card.update",
+      "ref": "c0fwmv7h",
+      "note": "logEntry"
+    },
+    {
+      "at": "2026-11-28T04:33:52.330Z",
+      "by": "Orchestrator",
+      "action": "card.criteria-add",
+      "ref": "c08123r9",
+      "note": "#5 The ratified on_rollback opt-out (spec.md 2894-2896) is impl"
+    },
+    {
+      "at": "2026-11-28T04:33:50.981Z",
+      "by": "Orchestrator",
+      "action": "card.criteria-add",
+      "ref": "c08123r9",
+      "note": "#4 A panic inside a plain defer while another panic is already "
+    },
+    {
+      "at": "2026-11-28T04:33:49.524Z",
+      "by": "Orchestrator",
+      "action": "card.update",
+      "ref": "c0mvk3ul",
+      "note": "logEntry"
+    },
+    {
+      "at": "2026-11-28T04:33:48.678Z",
+      "by": "Orchestrator",
+      "action": "card.update",
+      "ref": "c000ls9h",
+      "note": "logEntry"
+    },
+    {
+      "at": "2026-11-28T04:33:36.167Z",
+      "by": "Orchestrator",
+      "action": "decision.update",
+      "ref": "D-DEFER-SPELL1",
+      "note": ""
+    },
     {
       "at": "2026-11-28T04:33:34.941Z",
       "by": "Orchestrator",
