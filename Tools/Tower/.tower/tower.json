@@ -3,7 +3,7 @@
     "version": 4,
     "project": "Jet",
     "nextNum": 7071,
-    "rev": 115325,
+    "rev": 115350,
     "ui": {
       "toggled": [
         "dec-group:syntax",
@@ -64773,7 +64773,7 @@
       "parentId": null,
       "needsAcceptance": false,
       "created": "2026-11-27T21:28:08.583Z",
-      "updated": "2026-11-28T04:00:28.179Z",
+      "updated": "2026-11-28T04:00:30.364Z",
       "updatedBy": "Orchestrator",
       "criteriaLastN": 4
     },
@@ -64838,7 +64838,7 @@
       "parentId": null,
       "needsAcceptance": false,
       "created": "2026-11-27T21:28:09.469Z",
-      "updated": "2026-11-27T22:15:00.873Z",
+      "updated": "2026-11-28T04:00:47.479Z",
       "updatedBy": "Orchestrator",
       "criteriaLastN": 4
     },
@@ -64900,8 +64900,8 @@
       "parentId": null,
       "needsAcceptance": false,
       "created": "2026-11-27T21:28:10.503Z",
-      "updated": "2026-11-28T03:10:04.523Z",
-      "updatedBy": "Orchestrator",
+      "updated": "2026-11-28T04:00:52.451Z",
+      "updatedBy": "BallotReview3",
       "criteriaLastN": 3
     },
     {
@@ -125287,10 +125287,1113 @@
         }
       ],
       "draftedBy": "Orchestrator",
-      "reviewedBy": null,
-      "draft": true,
+      "reviewedBy": "BallotReview3",
+      "draft": false,
       "status": "open",
       "created": "2026-11-28T04:00:28.179Z"
+    },
+    {
+      "id": "D-AUTODERIVE-POLICY1",
+      "cardId": "c01iyhud",
+      "group": "language",
+      "title": "The package policy deny: [auto_derive] stays as the way to make derives opt-in",
+      "situation": "",
+      "gist": "Should a package retain the policy that makes automatic derives opt-in?",
+      "lesson": "A package default and a per-type choice can feed one derive selector. The policy disables implicit derivation; explicit type requests may still enable it, and manual implementations win. A retains this default. B removes it and asks every type to opt out individually.",
+      "explainer": "",
+      "story": "Rae wants new package types to have no generated codec until their authors request one.",
+      "inWild": "#[derive(Debug, Clone)]\nstruct Key { value: i32 }",
+      "detail": "Docs/Spec/spec.md:1256-1264 and 1295-1304 defines field eligibility, package defaults, signed type requests and manual-implementation precedence. Compiler/JetSema/Source/Sema/Registration/Derives.jet reads owned_trait_requested(...) before auto_derive_default. The AutoDerivePolicy/GenericDenyListRefusesAutoDerive fixture exercises explicit requests and a manual Debug implementation under the package default.\n\nThe old usage and line-count claims were not established and are removed. This is not a security guarantee about arbitrary handwritten codecs. Under A, package policy sets the default for the existing derive selector; it is not a second derive implementation or a ban on explicit requests. Keep local opt-in, local opt-out, field eligibility and manual precedence consistent. Under B, migration must materialize the effective refusals for every affected type, including generated types, but that cannot preserve the default for future unmarked types.",
+      "options": [
+        {
+          "key": "A",
+          "name": "Keep the package default",
+          "detail": "Keep the package default as an input to the single derive selector; explicit type choices and manual implementations retain precedence.",
+          "code": "policy: { lints: { deny: [auto_derive] } }"
+        },
+        {
+          "key": "B",
+          "name": "Only per-type choices",
+          "detail": "Delete the package setting, migrate current effective refusals to per-type markers and accept that future unmarked types use implicit derivation.",
+          "code": "#[!Debug, !Codable]\nKey: struct { value: Int }"
+        }
+      ],
+      "comparisons": [
+        {
+          "lang": "Rust",
+          "note": "The derive attribute invokes macros explicitly on structs, enums or unions; this comparison concerns the default, not whether Rust can have other blanket impls. https://doc.rust-lang.org/reference/attributes/derive.html",
+          "code": "#[derive(Debug, Clone)]\nstruct Key { value: i32 }"
+        }
+      ],
+      "rec": "A",
+      "recommendation": {
+        "why": "A package-wide opt-in default protects future types, not just existing ones.",
+        "gains": [
+          "One derive selector with a configurable default."
+        ],
+        "losses": [
+          {
+            "loss": "Derive eligibility depends on package context.",
+            "mitigation": "Show the effective default and explicit override in diagnostics and editor information."
+          }
+        ],
+        "whyNot": [
+          {
+            "key": "B",
+            "reason": "B is locally explicit, but cannot express that future types should start opted out."
+          }
+        ],
+        "tradeoff": "A contextual default avoids repeated refusals."
+      },
+      "hybrid": null,
+      "ballotMode": "short",
+      "shortAuthorizedBy": null,
+      "ballotProcessVersion": 5,
+      "reviewPasses": null,
+      "checkInstructions": null,
+      "surface": {
+        "gist": "Should a package retain the policy that makes automatic derives opt-in?",
+        "lesson": "A package default and a per-type choice can feed one derive selector. The policy disables implicit derivation; explicit type requests may still enable it, and manual implementations win. A retains this default. B removes it and asks every type to opt out individually.",
+        "trio": {
+          "current": {
+            "note": "A package can disable implicit derivation.",
+            "code": "policy: { lints: { deny: [auto_derive] } }"
+          },
+          "wild": {
+            "lang": "Rust",
+            "note": "Rust's derive attribute explicitly invokes derive macros on a data type.",
+            "code": "#[derive(Debug, Clone)]\nstruct Key { value: i32 }"
+          }
+        },
+        "options": [
+          {
+            "key": "A",
+            "name": "Keep the package default",
+            "gist": "Retain deny auto_derive as the default input to the same per-trait derive selector.",
+            "gains": [
+              "New types remain opt-in within the package."
+            ],
+            "losses": [
+              "Readers must check package defaults."
+            ],
+            "proposed": {
+              "code": "policy: { lints: { deny: [auto_derive] } }"
+            }
+          },
+          {
+            "key": "B",
+            "name": "Only per-type choices",
+            "gist": "Remove the policy and require explicit per-type refusals.",
+            "gains": [
+              "The choice is visible on each type."
+            ],
+            "losses": [
+              "New unmarked types use implicit derivation."
+            ],
+            "proposed": {
+              "code": "#[!Debug, !Codable]\nKey: struct { value: Int }"
+            }
+          }
+        ],
+        "recommendation": {
+          "rec": "A",
+          "why": "A package-wide opt-in default protects future types, not just existing ones.",
+          "gains": [
+            "One derive selector with a configurable default."
+          ],
+          "losses": [
+            {
+              "loss": "Derive eligibility depends on package context.",
+              "mitigation": "Show the effective default and explicit override in diagnostics and editor information."
+            }
+          ],
+          "whyNot": [
+            {
+              "key": "B",
+              "reason": "B is locally explicit, but cannot express that future types should start opted out."
+            }
+          ],
+          "tradeoff": "A contextual default avoids repeated refusals."
+        }
+      },
+      "reports": [
+        {
+          "title": "Traits, markers, modules and units pre-build review",
+          "path": "Docs/Audits/2026-11-27-traits-markers-modules-units-review.md",
+          "note": "Part 2, attack 2, and owner ballot 4."
+        }
+      ],
+      "draftedBy": "Orchestrator",
+      "reviewedBy": "BallotReview3",
+      "draft": false,
+      "status": "open",
+      "created": "2026-11-28T04:00:31.236Z"
+    },
+    {
+      "id": "D-DESCRIBE-KEEP1",
+      "cardId": "c01iyhud",
+      "group": "library",
+      "title": "Describe stays as the one error trait with caller-safe and operator text",
+      "situation": "",
+      "gist": "Should Describe retain separate caller and operator text contracts?",
+      "lesson": "Describe separates public error text from operator detail. That is an audience contract, not a compiler proof that arbitrary text contains no secrets. A keeps it. B moves the same redaction duty onto error Display and reserves Debug for detail. Both require boundary and leakage tests.",
+      "explainer": "",
+      "story": "Lin wants a file error to expose a generic caller message while retaining the path only in operator detail.",
+      "inWild": "// trait Error: Debug + Display",
+      "detail": "Core/Prelude/Prelude.jet, Describe, declares public and detail returning String Never!. Docs/Spec/spec.md:2320-2345 assigns caller-safe text and conservative Err defaults. Compiler/JetSema/Source/Sema/FailureLaw.jet, sema_error_implements_describe and sema_error_source_reaches_err, consults Describe for #Error lifting. It was false to say that the compiler does not know this trait.\n\nNeither trait membership nor derivation proves arbitrary strings secret-free. A preserves the explicit audience contract and existing consumers, not a guarantee of no leaks. B is a real alternative if all error formatting, auto-lift, framework boundaries and custom cause rendering migrate together. It must preserve curated text and forbid an unsuitable structural fallback at public boundaries. Derived formatting leaks only if it includes sensitive data and is exposed; it does not inevitably leak. Keep this audience contract separate from the ballot on whether ordinary Display derives.",
+      "options": [
+        {
+          "key": "A",
+          "name": "Keep Describe",
+          "detail": "Retain the audience contract and every compiler/library consumer. Add explicit redaction tests rather than claim static secrecy.",
+          "code": "// public(): curated caller text\n// detail(): operator context"
+        },
+        {
+          "key": "B",
+          "name": "Move the contract to error Display",
+          "detail": "Migrate public text to error Display and operator detail to Debug, preserving redaction, causes and lifting. Require explicit suitable error formatting where derivation would expose data.",
+          "code": "// error Display: curated caller text\n// error Debug: operator context"
+        }
+      ],
+      "comparisons": [
+        {
+          "lang": "Rust",
+          "note": "Rust Error requires Debug and Display and exposes source chains. Its own example formats a path; it does not prescribe caller-safe redaction. https://doc.rust-lang.org/std/error/trait.Error.html",
+          "code": "// trait Error: Debug + Display"
+        }
+      ],
+      "rec": "A",
+      "recommendation": {
+        "why": "The audience distinction deserves an explicit contract separate from ordinary value formatting.",
+        "gains": [
+          "Clear boundary intent."
+        ],
+        "losses": [
+          {
+            "loss": "Implementing public() does not prove secrecy.",
+            "mitigation": "Test hostile paths, messages and causes at external boundaries; review custom implementations and keep conservative defaults."
+          }
+        ],
+        "whyNot": [
+          {
+            "key": "B",
+            "reason": "B can preserve the law, but couples redaction to a trait also used for ordinary text and structural derivation."
+          }
+        ],
+        "tradeoff": "One audience-specific trait avoids overloading formatting."
+      },
+      "hybrid": null,
+      "ballotMode": "short",
+      "shortAuthorizedBy": null,
+      "ballotProcessVersion": 5,
+      "reviewPasses": null,
+      "checkInstructions": null,
+      "surface": {
+        "gist": "Should Describe retain separate caller and operator text contracts?",
+        "lesson": "Describe separates public error text from operator detail. That is an audience contract, not a compiler proof that arbitrary text contains no secrets. A keeps it. B moves the same redaction duty onto error Display and reserves Debug for detail. Both require boundary and leakage tests.",
+        "trio": {
+          "current": {
+            "note": "Describe declares two infallible text methods.",
+            "code": "Describe: trait {\n    public: fn(self) -> String Never!,\n    detail: fn(self) -> String Never!,\n}"
+          },
+          "wild": {
+            "lang": "Rust",
+            "note": "Rust Error requires Debug and Display; its contract does not promise caller-safe redaction.",
+            "code": "// trait Error: Debug + Display"
+          }
+        },
+        "options": [
+          {
+            "key": "A",
+            "name": "Keep Describe",
+            "gist": "Keep the audience-specific trait and existing boundary selection.",
+            "gains": [
+              "Caller safety is named independently of formatting."
+            ],
+            "losses": [
+              "Error authors have another trait to understand."
+            ],
+            "proposed": {
+              "code": "// public(): curated caller text\n// detail(): operator context"
+            }
+          },
+          {
+            "key": "B",
+            "name": "Move the contract to error Display",
+            "gist": "Require caller-safe Display on errors and operator detail through Debug; migrate every consumer.",
+            "gains": [
+              "Fewer error text traits."
+            ],
+            "losses": [
+              "General formatting now carries an error-specific redaction duty."
+            ],
+            "proposed": {
+              "code": "// error Display: curated caller text\n// error Debug: operator context"
+            }
+          }
+        ],
+        "recommendation": {
+          "rec": "A",
+          "why": "The audience distinction deserves an explicit contract separate from ordinary value formatting.",
+          "gains": [
+            "Clear boundary intent."
+          ],
+          "losses": [
+            {
+              "loss": "Implementing public() does not prove secrecy.",
+              "mitigation": "Test hostile paths, messages and causes at external boundaries; review custom implementations and keep conservative defaults."
+            }
+          ],
+          "whyNot": [
+            {
+              "key": "B",
+              "reason": "B can preserve the law, but couples redaction to a trait also used for ordinary text and structural derivation."
+            }
+          ],
+          "tradeoff": "One audience-specific trait avoids overloading formatting."
+        }
+      },
+      "reports": [
+        {
+          "title": "Traits, markers, modules and units pre-build review",
+          "path": "Docs/Audits/2026-11-27-traits-markers-modules-units-review.md",
+          "note": "Part 1, attack 2, and owner ballot 1."
+        }
+      ],
+      "draftedBy": "Orchestrator",
+      "reviewedBy": "BallotReview3",
+      "draft": false,
+      "status": "open",
+      "created": "2026-11-28T04:00:33.845Z"
+    },
+    {
+      "id": "D-DISPLAY-DERIVE1",
+      "cardId": "c01iyhud",
+      "group": "language",
+      "title": "Display takes Printable's structural derive contract during the cutover",
+      "situation": "",
+      "gist": "Should Display inherit Printable's structural derive behavior?",
+      "lesson": "Printable currently derives for qualifying types; not every value qualifies. A moves that role to Display while preserving custom output and policy. B requires an explicit Display implementation for ordinary interpolation. Neither choice makes a Debug replacement automatically safe for public text.",
+      "explainer": "",
+      "story": "Ben wants his Point log output preserved, including custom formatting chosen by its author.",
+      "inWild": "#[derive(Debug)]\nstruct Point { x: i32, y: i32 }\n// println!(\"{p:?}\");",
+      "detail": "Compiler/Prelude/Traits.jet, Printable, Display and Debug, separates structural auto-derivation from Display's current requirements. Docs/Spec/spec.md:1256-1264 defines eligibility, package defaults, signed requests and manual precedence. These rules do not promise that every value can interpolate. The former universal compatibility and unverified line-count claims are removed.\n\nA moves the structural contract and bundle behavior, not merely the name: preserve field eligibility, package opt-in defaults, per-type refusals and explicit implementations. Migrate manual Printable renderers without replacing their output with a derived representation. If a type already has both custom Printable and Display behavior, resolve the intended ordinary text explicitly. Preserve bytes for unchanged interpolation, including selectors and distinct-type bundles. No universal automatic rewrite is promised.\n\nUnder B an implementation may be handwritten or supplied by a suitable library mechanism; the standard need not derive it. Offer Debug only in developer-output contexts after review, never as a blind fix at public boundaries. Describe's audience law remains independent.",
+      "options": [
+        {
+          "key": "A",
+          "name": "Move the derive contract",
+          "detail": "Move Printable's structural derivation and bundles to Display, migrate policy and signed requests, preserve manual output precedence, and remove obsolete callers without an alias.",
+          "code": "// proposed: qualifying Point gets derived Display\nprint(\"at {p}\")"
+        },
+        {
+          "key": "B",
+          "name": "Require explicit Display",
+          "detail": "Require explicit Display for ordinary interpolation. Keep Debug selection for deliberate developer text; do not blindly change output or redact by assertion.",
+          "code": "// in developer-only output, after review:\nprint(\"at {p:Debug}\")"
+        }
+      ],
+      "comparisons": [
+        {
+          "lang": "Rust",
+          "note": "Rust's standard Display is for user-facing output and cannot be derived; this does not mean all implementations must be handwritten without third-party macros. https://doc.rust-lang.org/std/fmt/trait.Display.html",
+          "code": "#[derive(Debug)]\nstruct Point { x: i32, y: i32 }\n// println!(\"{p:?}\");"
+        }
+      ],
+      "rec": "A",
+      "recommendation": {
+        "why": "Preserve the existing structural interpolation role rather than force an unrelated output redesign.",
+        "gains": [
+          "One ordinary interpolation trait."
+        ],
+        "losses": [
+          {
+            "loss": "The cutover is more than renaming one trait.",
+            "mitigation": "Migrate custom Printable output, bundles and policy together; require byte-for-byte output tests and review conflicts with existing Display impls."
+          }
+        ],
+        "whyNot": [
+          {
+            "key": "B",
+            "reason": "B offers a useful stricter distinction but makes existing structural interpolation require deliberate edits."
+          }
+        ],
+        "tradeoff": "Continuity retains structural text as ordinary output."
+      },
+      "hybrid": null,
+      "ballotMode": "short",
+      "shortAuthorizedBy": null,
+      "ballotProcessVersion": 5,
+      "reviewPasses": null,
+      "checkInstructions": null,
+      "surface": {
+        "gist": "Should Display inherit Printable's structural derive behavior?",
+        "lesson": "Printable currently derives for qualifying types; not every value qualifies. A moves that role to Display while preserving custom output and policy. B requires an explicit Display implementation for ordinary interpolation. Neither choice makes a Debug replacement automatically safe for public text.",
+        "trio": {
+          "current": {
+            "note": "Qualifying structs can interpolate through derived Printable.",
+            "code": "Point: struct { x: Int, y: Int }\n// in run:\np: Point{x: 1, y: 2}\nprint(\"at {p}\")"
+          },
+          "wild": {
+            "lang": "Rust",
+            "note": "Rust's standard Display cannot be derived; Debug can be requested explicitly.",
+            "code": "#[derive(Debug)]\nstruct Point { x: i32, y: i32 }\n// println!(\"{p:?}\");"
+          }
+        },
+        "options": [
+          {
+            "key": "A",
+            "name": "Move the derive contract",
+            "gist": "Display takes structural derivation, with manual output and opt-out behavior preserved.",
+            "gains": [
+              "Qualifying interpolation can retain its output."
+            ],
+            "losses": [
+              "Structural user text can expose internal fields."
+            ],
+            "proposed": {
+              "code": "// proposed: qualifying Point gets derived Display\nprint(\"at {p}\")"
+            }
+          },
+          {
+            "key": "B",
+            "name": "Require explicit Display",
+            "gist": "No structural Display derivation; authors choose user-facing output explicitly.",
+            "gains": [
+              "A sharper user/developer text distinction."
+            ],
+            "losses": [
+              "Plain-struct interpolation may require edits."
+            ],
+            "proposed": {
+              "code": "// in developer-only output, after review:\nprint(\"at {p:Debug}\")"
+            }
+          }
+        ],
+        "recommendation": {
+          "rec": "A",
+          "why": "Preserve the existing structural interpolation role rather than force an unrelated output redesign.",
+          "gains": [
+            "One ordinary interpolation trait."
+          ],
+          "losses": [
+            {
+              "loss": "The cutover is more than renaming one trait.",
+              "mitigation": "Migrate custom Printable output, bundles and policy together; require byte-for-byte output tests and review conflicts with existing Display impls."
+            }
+          ],
+          "whyNot": [
+            {
+              "key": "B",
+              "reason": "B offers a useful stricter distinction but makes existing structural interpolation require deliberate edits."
+            }
+          ],
+          "tradeoff": "Continuity retains structural text as ordinary output."
+        }
+      },
+      "reports": [
+        {
+          "title": "Traits, markers, modules and units pre-build review",
+          "path": "Docs/Audits/2026-11-27-traits-markers-modules-units-review.md",
+          "note": "Part 1, attacks 3 and 5, and owner ballot 2."
+        }
+      ],
+      "draftedBy": "Orchestrator",
+      "reviewedBy": "BallotReview3",
+      "draft": false,
+      "status": "open",
+      "created": "2026-11-28T04:00:36.735Z"
+    },
+    {
+      "id": "D-EUCLID-NAMES1",
+      "cardId": "c01iyhud",
+      "group": "library",
+      "title": "Keep div_euclid and rem_euclid, or expand their names without changing arithmetic",
+      "situation": "",
+      "gist": "Should the Euclidean methods keep their short names or use the full word euclidean?",
+      "lesson": "This is a naming choice, not a new division mode. Euclidean remainder is non-negative. Floor and truncating arithmetic already have distinct meanings, and renaming cannot silently substitute either. The existing remainder operators, including %%, are settled and stay unchanged under both options.",
+      "explainer": "",
+      "story": "Uma needs bucket remainders that stay non-negative even with a negative divisor.",
+      "inWild": "let r = (-7i64).rem_euclid(2); // 1",
+      "detail": "Compiler/JetFoundation/Data/Syntax/Spellings.jet records div_euclid and rem_euclid; MathLayout.jet records floor /%, divisor-sign % and dividend-sign %%. The baseline ran (-7).div_euclid(-2), (-7).rem_euclid(-2) and -7 %% -2, returning 4, 1 and -1 respectively.\n\nA rename does not itself change arithmetic. The former B wrongly equated renaming with deleting Euclidean semantics and treated a misleading floor/truncate label as the only alternative. B now offers a semantics-preserving full-word name. For -7 and -2, floor and truncating quotient are both 3 with remainder -1, unlike Euclidean quotient 4 and remainder 1. For divisor +2, floor and Euclidean coincide while truncation differs.\n\nBoth options preserve overflow and division-by-zero behavior and all signed cases. The already-settled %% operator is background, not a new gate. If B wins, migrate resolved builtin calls only and remove the old spelling rather than add aliases.",
+      "options": [
+        {
+          "key": "A",
+          "name": "Keep the short names",
+          "detail": "Keep the current Euclidean API and all arithmetic; add clear signed examples without reopening the remainder operators.",
+          "code": "r: a.rem_euclid(b)"
+        },
+        {
+          "key": "B",
+          "name": "Spell out euclidean",
+          "detail": "Rename both methods in place to div_euclidean and rem_euclidean. Preserve signed results, failure behavior and operator semantics; migrate only resolved builtin references.",
+          "code": "// proposed\nr: a.rem_euclidean(b)"
+        }
+      ],
+      "comparisons": [
+        {
+          "lang": "Rust",
+          "note": "The i64 API documents rem_euclid as the least non-negative remainder. This comparison is about naming, not identical division operators. https://doc.rust-lang.org/std/primitive.i64.html#method.rem_euclid",
+          "code": "let r = (-7i64).rem_euclid(2); // 1"
+        }
+      ],
+      "rec": "A",
+      "recommendation": {
+        "why": "The short names already identify the correct operation and match a familiar API.",
+        "gains": [
+          "No semantic or spelling migration."
+        ],
+        "losses": [
+          {
+            "loss": "Euclid is not self-explanatory to every reader.",
+            "mitigation": "Document signed examples and contrast non-negative remainder with divisor-sign and dividend-sign remainders."
+          }
+        ],
+        "whyNot": [
+          {
+            "key": "B",
+            "reason": "B is honest and preserves semantics, but a longer spelling offers limited benefit."
+          }
+        ],
+        "tradeoff": "A concise mathematical name needs a short explanation."
+      },
+      "hybrid": null,
+      "ballotMode": "short",
+      "shortAuthorizedBy": null,
+      "ballotProcessVersion": 5,
+      "reviewPasses": null,
+      "checkInstructions": null,
+      "surface": {
+        "gist": "Should the Euclidean methods keep their short names or use the full word euclidean?",
+        "lesson": "This is a naming choice, not a new division mode. Euclidean remainder is non-negative. Floor and truncating arithmetic already have distinct meanings, and renaming cannot silently substitute either. The existing remainder operators, including %%, are settled and stay unchanged under both options.",
+        "trio": {
+          "current": {
+            "note": "The baseline gives quotient 4 and remainder 1 for Euclidean division of -7 by -2.",
+            "code": "(-7).div_euclid(-2) // 4\n(-7).rem_euclid(-2) // 1\n-7 %% -2 // -1"
+          },
+          "wild": {
+            "lang": "Rust",
+            "note": "Rust uses rem_euclid for a non-negative Euclidean remainder.",
+            "code": "let r = (-7i64).rem_euclid(2); // 1"
+          }
+        },
+        "options": [
+          {
+            "key": "A",
+            "name": "Keep the short names",
+            "gist": "Keep div_euclid and rem_euclid, with their existing arithmetic.",
+            "gains": [
+              "No call-site rename.",
+              "Matches Rust terminology."
+            ],
+            "losses": [
+              "Readers must know the abbreviated term."
+            ],
+            "proposed": {
+              "code": "r: a.rem_euclid(b)"
+            }
+          },
+          {
+            "key": "B",
+            "name": "Spell out euclidean",
+            "gist": "Rename to div_euclidean and rem_euclidean; preserve every result and error.",
+            "gains": [
+              "The mathematical term is written in full."
+            ],
+            "losses": [
+              "Longer calls and a source migration."
+            ],
+            "proposed": {
+              "code": "// proposed\nr: a.rem_euclidean(b)"
+            }
+          }
+        ],
+        "recommendation": {
+          "rec": "A",
+          "why": "The short names already identify the correct operation and match a familiar API.",
+          "gains": [
+            "No semantic or spelling migration."
+          ],
+          "losses": [
+            {
+              "loss": "Euclid is not self-explanatory to every reader.",
+              "mitigation": "Document signed examples and contrast non-negative remainder with divisor-sign and dividend-sign remainders."
+            }
+          ],
+          "whyNot": [
+            {
+              "key": "B",
+              "reason": "B is honest and preserves semantics, but a longer spelling offers limited benefit."
+            }
+          ],
+          "tradeoff": "A concise mathematical name needs a short explanation."
+        }
+      },
+      "reports": [
+        {
+          "title": "Traits, markers, modules and units pre-build review",
+          "path": "Docs/Audits/2026-11-27-traits-markers-modules-units-review.md",
+          "note": "Part 3, division method names, and owner ballot 6."
+        }
+      ],
+      "draftedBy": "Orchestrator",
+      "reviewedBy": "BallotReview3",
+      "draft": false,
+      "status": "open",
+      "created": "2026-11-28T04:00:39.455Z"
+    },
+    {
+      "id": "D-FREE-METHOD-DROP1",
+      "cardId": "c01iyhud",
+      "group": "language",
+      "title": "Remove free Type.method declarations in favor of the existing owner placement rules",
+      "situation": "",
+      "gist": "Should free Type.method declarations be removed in favor of owner bodies and supported impl blocks?",
+      "lesson": "Jet accepts a method declared as Point.x_value outside its type. A removes this extra declaration form. Same-file methods normally move into the owner body; existing external, conditional and generated impl cases remain. B keeps the concise out-of-line form. This is not a rule that every method must live in an impl block.",
+      "explainer": "",
+      "story": "Noor wants method placement to follow one owner-placement policy rather than a second one-off declaration syntax.",
+      "inWild": "func (p Point) XValue() int { return p.x }",
+      "detail": "The baseline compiled Point.x_value: fn(self) -> Int { self.x } and printed 3. Tests/UI/external_method_duplicate.jet contains this form. Compiler/JetParser/Source/Parser/ImplPlacement.jet implements the L0535 style placement rule, not the free-declaration parse rule: same-file inherent methods normally belong inside their type. Its documented exceptions include external owners, conditional, targeted and generated impl cases.\n\nA follows those existing destinations instead of recommending an impl block that immediately violates the same-file style rule. Preserve visibility, generic constraints, overload identity, markers, comments and name resolution during migration. A targeted retirement diagnostic and checked edit are proposed work, not claimed to exist today. Unverified claims that only tests use the form and that exactly eleven edits suffice are removed. B preserves ordinary placement and coherence checks; keeping the spelling is not permission to bypass ownership rules.",
+      "options": [
+        {
+          "key": "A",
+          "name": "Remove free declarations",
+          "detail": "Remove Type.method declarations, add a targeted retirement diagnostic and migrate each method to its legal owner-body or supported impl destination.",
+          "code": "Point: struct {\n    x: Int,\n    x_value: fn(self) -> Int { self.x }\n}"
+        },
+        {
+          "key": "B",
+          "name": "Keep free declarations",
+          "detail": "Retain the checked declaration form without introducing another meaning or relaxing coherence and placement constraints.",
+          "code": "Point.x_value: fn(self) -> Int { self.x }"
+        }
+      ],
+      "comparisons": [
+        {
+          "lang": "Go",
+          "note": "The Go specification defines MethodDecl with a receiver parameter before the name; this is a contrasting placement choice, not proof that either Jet spelling is required. https://go.dev/ref/spec#Method_declarations",
+          "code": "func (p Point) XValue() int { return p.x }"
+        }
+      ],
+      "rec": "A",
+      "recommendation": {
+        "why": "The existing owner and impl placement rules can express these methods without an extra free form.",
+        "gains": [
+          "A smaller declaration grammar."
+        ],
+        "losses": [
+          {
+            "loss": "Relocation can affect comments, markers and name resolution.",
+            "mitigation": "Offer an edit only when owner, scope and metadata preservation are proven; otherwise show the correct destination for manual migration."
+          }
+        ],
+        "whyNot": [
+          {
+            "key": "B",
+            "reason": "B is concise but adds another way to declare methods already expressible elsewhere."
+          }
+        ],
+        "tradeoff": "Less syntax costs a checked relocation."
+      },
+      "hybrid": null,
+      "ballotMode": "short",
+      "shortAuthorizedBy": null,
+      "ballotProcessVersion": 5,
+      "reviewPasses": null,
+      "checkInstructions": null,
+      "surface": {
+        "gist": "Should free Type.method declarations be removed in favor of owner bodies and supported impl blocks?",
+        "lesson": "Jet accepts a method declared as Point.x_value outside its type. A removes this extra declaration form. Same-file methods normally move into the owner body; existing external, conditional and generated impl cases remain. B keeps the concise out-of-line form. This is not a rule that every method must live in an impl block.",
+        "trio": {
+          "current": {
+            "note": "The baseline accepts and runs a free method.",
+            "code": "Point.x_value: fn(self) -> Int { self.x }"
+          },
+          "wild": {
+            "lang": "Go",
+            "note": "Go declares methods with an explicit receiver outside the type declaration.",
+            "code": "func (p Point) XValue() int { return p.x }"
+          }
+        },
+        "options": [
+          {
+            "key": "A",
+            "name": "Remove free declarations",
+            "gist": "Use an owner body where placement rules require it; retain supported impl cases.",
+            "gains": [
+              "Fewer declaration forms."
+            ],
+            "losses": [
+              "Existing free declarations need relocation."
+            ],
+            "proposed": {
+              "code": "Point: struct {\n    x: Int,\n    x_value: fn(self) -> Int { self.x }\n}"
+            }
+          },
+          {
+            "key": "B",
+            "name": "Keep free declarations",
+            "gist": "Keep Type.method as another checked out-of-line declaration form.",
+            "gains": [
+              "Concise individual method declarations."
+            ],
+            "losses": [
+              "Another form for parsers, tools and readers."
+            ],
+            "proposed": {
+              "code": "Point.x_value: fn(self) -> Int { self.x }"
+            }
+          }
+        ],
+        "recommendation": {
+          "rec": "A",
+          "why": "The existing owner and impl placement rules can express these methods without an extra free form.",
+          "gains": [
+            "A smaller declaration grammar."
+          ],
+          "losses": [
+            {
+              "loss": "Relocation can affect comments, markers and name resolution.",
+              "mitigation": "Offer an edit only when owner, scope and metadata preservation are proven; otherwise show the correct destination for manual migration."
+            }
+          ],
+          "whyNot": [
+            {
+              "key": "B",
+              "reason": "B is concise but adds another way to declare methods already expressible elsewhere."
+            }
+          ],
+          "tradeoff": "Less syntax costs a checked relocation."
+        }
+      },
+      "reports": [
+        {
+          "title": "Traits, markers, modules and units pre-build review",
+          "path": "Docs/Audits/2026-11-27-traits-markers-modules-units-review.md",
+          "note": "Part 3, method sites."
+        }
+      ],
+      "draftedBy": "Orchestrator",
+      "reviewedBy": "BallotReview3",
+      "draft": false,
+      "status": "open",
+      "created": "2026-11-28T04:00:42.688Z"
+    },
+    {
+      "id": "D-INBODY-OPTOUT1",
+      "cardId": "c01iyhud",
+      "group": "syntax",
+      "title": "Inside a body, #X: false stays as the line form of #!X",
+      "situation": "A derived trait can be disabled above a type or inside its body. Above, `#!Debug` opts out; inside, the same opt-out is written `#Debug: false`. We recommend keeping that positional form instead of adding bare signed lines inside bodies. The choice concerns spelling only: neither form permits arbitrary markers to be negated.",
+      "gist": "Inside a body, should an opt-out stay `#Debug: false`, or become a bare `#!Debug` line?",
+      "lesson": "For structurally derived traits, `#!X` above a type and `#X: false` inside it set the same opt-out. Other markers cannot be negated. A keeps the regular `#X: value` body-line shape. B uses one opt-out spelling at both positions. Both are credible choices; parser work alone does not decide between them.",
+      "explainer": "",
+      "story": "Ana keeps her markers inside a struct body and needs to turn off the derived `Debug` for one type.",
+      "inWild": "mod parser {\n    #![allow(dead_code)]\n}",
+      "detail": "Compiler/JetParser/Source/Parser/Declarations/InBodyMarkers.jet, parser_parse_inbody_marker:102-138, maps false to Marker.negated and refuses non-auto-derived marker names with E0931. The original draft wrongly implied arbitrary markers could opt out and that every other value raised E0943. Names, strings, numbers and parenthesized argument lists are also valid; parser_report_inbody_parentheses emits E0943 for the unparenthesized complex forms.\n\nCompiler/JetParser/Tests/Parser/Declarations.jet, marker_lines_inside_a_body_are_the_markers_above_it:730-768, compares the resulting marker lists. On the older a0.0.46-dev executable baseline, a Token with `#Debug: false` and a raw String field ran and printed that field, secret. That probe proves acceptance, not the absence of every generated Debug method; the parser mapping establishes the shared representation. Dev source is newer than that baseline.\n\nA preserves one marker representation with positional syntax. B replaces the false line only for derived-trait opt-outs, leaving other marker values unchanged. Neither choice changes package-wide auto-derive policy.",
+      "options": [
+        {
+          "key": "A",
+          "name": "Keep #X: false in bodies",
+          "detail": "Keep today's grammar. The docs state `#X: false` as the in-body position of `#!X`, not a second opt-out.",
+          "code": "Token: struct {\n    #Debug: false\n    raw: String\n}"
+        },
+        {
+          "key": "B",
+          "name": "Bare #!X line",
+          "detail": "Teach the parser a value-less `#!X` marker line in bodies, and make `#X: false` an error with a fix.",
+          "code": "Token: struct {\n    #!Debug\n    raw: String\n}"
+        }
+      ],
+      "comparisons": [
+        {
+          "lang": "Rust",
+          "note": "Rust permits inner attributes in modules, functions, impls and external blocks, not arbitrary item bodies such as structs. This is a positional analogy only. https://doc.rust-lang.org/reference/attributes.html",
+          "code": "mod parser {\n    #![allow(dead_code)]\n}"
+        }
+      ],
+      "rec": "A",
+      "recommendation": {
+        "why": "`#X: false` is the same opt-out written where every line is `#X: value`. Keeping it honours the card's promise to keep in-body markers with zero new syntax.",
+        "gains": [
+          "No grammar change.",
+          "One shape for in-body lines."
+        ],
+        "losses": [
+          {
+            "loss": "The opt-out looks different above and inside a body.",
+            "mitigation": "Hover on either form names the other, and the spec states them as one rule."
+          }
+        ],
+        "whyNot": [
+          {
+            "key": "B",
+            "reason": "B gives a uniform opt-out spelling, but adds a distinct in-body line form."
+          }
+        ],
+        "tradeoff": "Two positional spellings avoid a new line form."
+      },
+      "hybrid": null,
+      "ballotMode": "full",
+      "shortAuthorizedBy": null,
+      "ballotProcessVersion": 5,
+      "reviewPasses": {
+        "adversarial": "Author model family: Claude. Adversarial model family: GPT. Fresh agent: BallotReview3. Verified marker parsing and its paired test, executed the in-body false probe and checked Rust's permitted inner-attribute sites. A remains recommended without pretending B lacks a readability benefit."
+      },
+      "checkInstructions": null,
+      "surface": {
+        "gist": "Inside a body, should an opt-out stay `#Debug: false`, or become a bare `#!Debug` line?",
+        "lesson": "For structurally derived traits, `#!X` above a type and `#X: false` inside it set the same opt-out. Other markers cannot be negated. A keeps the regular `#X: value` body-line shape. B uses one opt-out spelling at both positions. Both are credible choices; parser work alone does not decide between them.",
+        "trio": {
+          "current": {
+            "note": "Today an in-body line writes the opt-out with `false`.",
+            "code": "Token: struct {\n    #Debug: false\n    raw: String\n}"
+          },
+          "wild": {
+            "lang": "Rust",
+            "note": "Rust has outer and inner attributes; the shown module permits an inner attribute. Struct bodies do not generally permit inner attributes.",
+            "code": "mod parser {\n    #![allow(dead_code)]\n}"
+          }
+        },
+        "options": [
+          {
+            "key": "A",
+            "name": "Keep #X: false in bodies",
+            "gist": "`#X: false` stays as the in-body line form of `#!X`.",
+            "gains": [
+              "No new syntax.",
+              "Every in-body line keeps one shape."
+            ],
+            "losses": [
+              "Two spellings by position."
+            ],
+            "proposed": {
+              "code": "Token: struct {\n    #Debug: false\n    raw: String\n}"
+            }
+          },
+          {
+            "key": "B",
+            "name": "Bare #!X line",
+            "gist": "A bare `#!X` line inside the body replaces `#X: false`.",
+            "gains": [
+              "One opt-out spelling everywhere."
+            ],
+            "losses": [
+              "A new line form for the parser.",
+              "In-body lines lose one shape."
+            ],
+            "proposed": {
+              "code": "Token: struct {\n    #!Debug\n    raw: String\n}"
+            }
+          }
+        ],
+        "recommendation": {
+          "rec": "A",
+          "why": "`#X: false` is the same opt-out written where every line is `#X: value`. Keeping it honours the card's promise to keep in-body markers with zero new syntax.",
+          "gains": [
+            "No grammar change.",
+            "One shape for in-body lines."
+          ],
+          "losses": [
+            {
+              "loss": "The opt-out looks different above and inside a body.",
+              "mitigation": "Hover on either form names the other, and the spec states them as one rule."
+            }
+          ],
+          "whyNot": [
+            {
+              "key": "B",
+              "reason": "B gives a uniform opt-out spelling, but adds a distinct in-body line form."
+            }
+          ],
+          "tradeoff": "Two positional spellings avoid a new line form."
+        }
+      },
+      "reports": [
+        {
+          "title": "Traits, markers, modules and units pre-build review",
+          "path": "Docs/Audits/2026-11-27-traits-markers-modules-units-review.md",
+          "note": "Part 2, attack 1, and owner ballot 3."
+        }
+      ],
+      "draftedBy": "Orchestrator",
+      "reviewedBy": "BallotReview3",
+      "draft": false,
+      "status": "open",
+      "created": "2026-11-28T04:00:45.562Z"
+    },
+    {
+      "id": "D-PYTHON-MODE1",
+      "cardId": "c0im9zg7",
+      "group": "ffi",
+      "title": "Does opt-in in-process Python embedding count as Unsafe reachability?",
+      "situation": "",
+      "gist": "Should checked in-process Python embedding count as Unsafe reachability?",
+      "lesson": "Worker-default and opt-in embedding are already settled. The new question is narrower: must even a checked embedding wrapper expose Unsafe reachability? A changes that boundary. B keeps checked wrappers safe and reserves Unsafe for raw access. Neither changes host modes or makes Unsafe positively grantable.",
+      "explainer": "",
+      "story": "Leo accepts checked Python values but wants the decision to load a native extension into his server to be explicit.",
+      "inWild": "// Python<'py> witnesses interpreter attachment, not process isolation.",
+      "detail": "The ratified Python binder choice fixes worker-default and opt-in embedding. Its checked-wrapper rule needs Unsafe only for raw symbol access outside binding. A explicitly amends that boundary; it is not a fresh vote on hosting. Compiler/JetFoundation/Source/Policy/Authority.jet, authority_is_deny_only, makes Unsafe deny-only. A therefore exposes Unsafe reachability to denial, not a positive grant. Checked calls retain their value and lifetime contracts; no embedding marker is added.\n\nJetpack/PackageModel/Source/Foreign/Binders/Python.jet, pkg_python_bind and its parser, implements scalar worker binding. Docs/Spec/spec.md:5884-5906 records worker provenance and failure handling. Those sources do not establish an implemented embedding mode, blanket crash immunity or relative speed.\n\nInterpreter attachment, reference ownership and thread safety remain required under both choices; Unsafe does not excuse a broken wrapper. Free-threaded CPython must not be described as always having a GIL. Neither choice relaxes the existing performance acceptance criteria or introduces a worker exemption.",
+      "options": [
+        {
+          "key": "A",
+          "name": "Expose Unsafe reachability",
+          "detail": "Amend the checked-wrapper rule only at selection of embedding: contribute Unsafe so denial rejects it. Keep deny-only authority, worker-default, opt-in hosting and checked handle contracts.",
+          "code": "// proposed: embedding selection contributes Unsafe; worker calls do not."
+        },
+        {
+          "key": "B",
+          "name": "Keep checked embedding safe",
+          "detail": "Retain the existing boundary: a sound checked embedding wrapper is safe; raw access and unchecked internals require Unsafe. Document that sound wrapping is not process isolation.",
+          "code": "// checked wrapper remains safe; its raw internals require Unsafe."
+        }
+      ],
+      "comparisons": [
+        {
+          "lang": "Rust",
+          "note": "PyO3 documents Python<'py> as proof of thread attachment and distinguishes GIL and free-threaded builds. This supports B's checked-wrapper model, not process isolation. https://pyo3.rs/v0.27.0/python-from-rust",
+          "code": "// Python<'py> witnesses attachment."
+        }
+      ],
+      "rec": "A",
+      "recommendation": {
+        "why": "Expose the choice to run native extensions in the host process to deny-Unsafe policy.",
+        "gains": [
+          "One visible embedding trust boundary."
+        ],
+        "losses": [
+          {
+            "loss": "This tightens a previously safe checked-wrapper boundary.",
+            "mitigation": "Expose reachability at embedding selection, not a new marker on every call; preserve deny-only authority."
+          }
+        ],
+        "whyNot": [
+          {
+            "key": "B",
+            "reason": "B fairly separates sound wrapping from isolation, but deny-Unsafe cannot reject checked embedding."
+          }
+        ],
+        "tradeoff": "Visible trust changes the checked-wrapper boundary."
+      },
+      "hybrid": null,
+      "ballotMode": "short",
+      "shortAuthorizedBy": null,
+      "ballotProcessVersion": 5,
+      "reviewPasses": null,
+      "checkInstructions": null,
+      "surface": {
+        "gist": "Should checked in-process Python embedding count as Unsafe reachability?",
+        "lesson": "Worker-default and opt-in embedding are already settled. The new question is narrower: must even a checked embedding wrapper expose Unsafe reachability? A changes that boundary. B keeps checked wrappers safe and reserves Unsafe for raw access. Neither changes host modes or makes Unsafe positively grantable.",
+        "trio": {
+          "current": {
+            "note": "The settled design treats checked binder wrappers as safe; raw access is unsafe.",
+            "code": "// settled: worker default; checked embedding is an opt-in mode."
+          },
+          "wild": {
+            "lang": "Rust",
+            "note": "PyO3 uses a Python token to prove interpreter attachment, including free-threaded builds.",
+            "code": "// Python<'py> witnesses attachment; it is not a crash sandbox."
+          }
+        },
+        "options": [
+          {
+            "key": "A",
+            "name": "Expose Unsafe reachability",
+            "gist": "Amend the checked-wrapper boundary: selecting in-process embedding contributes Unsafe.",
+            "gains": [
+              "A deny-Unsafe policy can reject embedding."
+            ],
+            "losses": [
+              "Checked embedding no longer hides Unsafe reachability."
+            ],
+            "proposed": {
+              "code": "// proposed: embedding selection contributes Unsafe; worker calls do not."
+            }
+          },
+          {
+            "key": "B",
+            "name": "Keep checked embedding safe",
+            "gist": "Keep the settled safe-wrapper rule; only raw access contributes Unsafe.",
+            "gains": [
+              "Encapsulation can make checked interop safe to call."
+            ],
+            "losses": [
+              "Safe calls can still run native extensions in the host process."
+            ],
+            "proposed": {
+              "code": "// checked wrapper remains safe; its raw internals require Unsafe."
+            }
+          }
+        ],
+        "recommendation": {
+          "rec": "A",
+          "why": "Expose the choice to run native extensions in the host process to deny-Unsafe policy.",
+          "gains": [
+            "One visible embedding trust boundary."
+          ],
+          "losses": [
+            {
+              "loss": "This tightens a previously safe checked-wrapper boundary.",
+              "mitigation": "Expose reachability at embedding selection, not a new marker on every call; preserve deny-only authority."
+            }
+          ],
+          "whyNot": [
+            {
+              "key": "B",
+              "reason": "B fairly separates sound wrapping from isolation, but deny-Unsafe cannot reject checked embedding."
+            }
+          ],
+          "tradeoff": "Visible trust changes the checked-wrapper boundary."
+        }
+      },
+      "reports": [
+        {
+          "title": "DSL, library and FFI extraction pre-build review",
+          "path": "Docs/Audits/2026-11-27-dsl-library-ffi-extraction-review.md",
+          "note": "Section 1.4 and section 4.3, attack 4, and ballot B8."
+        }
+      ],
+      "draftedBy": "Orchestrator",
+      "reviewedBy": "BallotReview3",
+      "draft": false,
+      "status": "open",
+      "created": "2026-11-28T04:00:48.347Z"
+    },
+    {
+      "id": "D-STATE-TEACH1",
+      "cardId": "c0im9zg7",
+      "group": "language",
+      "title": "The retired #State marker keeps its teaching error E0175",
+      "situation": "",
+      "gist": "Should the retired State marker keep its targeted teaching diagnostic?",
+      "lesson": "Old State markers are rejected, not supported syntax. A keeps the targeted explanation and safe migration edits where available. B removes that special path and gives a generic marker error. A does not promise an automatic edit for every old declaration.",
+      "explainer": "",
+      "story": "Uri updates old typestate code and needs the compiler to distinguish safe edits from manual migration.",
+      "inWild": "// Rust 2021: &MyTrait must become &dyn MyTrait",
+      "detail": "Compiler/JetFoundation/Data/Syntax/EffectsSurface.jet records the retired State marker and E0175. Compiler/JetParser/Source/Parser/Declarations/StateMarkers.jet, parser_state_marker_migration and its edit builder, groups markers by owner. It declines automatic edits for unsupported shapes, including generic owners and comments it cannot preserve.\n\nThe baseline check and fix --dry-run on the retired Lamp fixture reported Jet.TypestateMarkerRetired and explained Owner.A/Owner.B plus owner transition lists. Applying the reported owner-level edit in scratch, then adding a field reader to avoid an unrelated unread-field diagnostic, produced a program that ran and printed 40. This verifies that edit shape, not every possible old declaration.\n\nA preserves that narrow behavior: an atomic owner-level rewrite when proven safe, otherwise a precise error with manual guidance. Do not remove lowercase state-list grammar or every internal constant containing State. The ballot concerns the retired capitalized marker diagnostic, not the supported typestate feature. B must keep rejection rather than silently accept or reinterpret old markers, and leave the retired diagnostic identity unused.",
+      "options": [
+        {
+          "key": "A",
+          "name": "Keep the teaching path",
+          "detail": "Keep recognition solely for the targeted error, safe owner-level edits and manual guidance when no safe edit exists.",
+          "code": "// reject #State; explain Owner.A, Owner.B and A -> B"
+        },
+        {
+          "key": "B",
+          "name": "Remove the special path",
+          "detail": "Remove only the retired marker diagnostic path, preserve supported state types and lists, and continue rejecting old markers through the normal diagnostic.",
+          "code": "// reject #State with the normal marker diagnostic"
+        }
+      ],
+      "comparisons": [
+        {
+          "lang": "Rust",
+          "note": "Rust 2021 requires dyn for trait objects; the edition guide documents cargo fix --edition for migration. The old try! example was not a valid universal error claim. https://doc.rust-lang.org/edition-guide/rust-2021/warnings-promoted-to-error.html",
+          "code": "// Rust 2021: &MyTrait must become &dyn MyTrait"
+        }
+      ],
+      "rec": "A",
+      "recommendation": {
+        "why": "Recognizing rejected old code can teach migration without retaining its old semantics.",
+        "gains": [
+          "Specific recovery guidance."
+        ],
+        "losses": [
+          {
+            "loss": "Some declarations cannot be rewritten safely.",
+            "mitigation": "Emit one owner-level edit only for supported shapes; otherwise give manual signature and state-list guidance."
+          }
+        ],
+        "whyNot": [
+          {
+            "key": "B",
+            "reason": "B removes a small diagnostic path at the cost of useful migration information."
+          }
+        ],
+        "tradeoff": "A retired parser path buys better errors."
+      },
+      "hybrid": null,
+      "ballotMode": "short",
+      "shortAuthorizedBy": null,
+      "ballotProcessVersion": 5,
+      "reviewPasses": null,
+      "checkInstructions": null,
+      "surface": {
+        "gist": "Should the retired State marker keep its targeted teaching diagnostic?",
+        "lesson": "Old State markers are rejected, not supported syntax. A keeps the targeted explanation and safe migration edits where available. B removes that special path and gives a generic marker error. A does not promise an automatic edit for every old declaration.",
+        "trio": {
+          "current": {
+            "note": "The baseline reports TypestateMarkerRetired on the retired marker.",
+            "code": "// old Lamp marker: #State(Off -> On)\n// diagnostic explains signature states and owner transitions"
+          },
+          "wild": {
+            "lang": "Rust",
+            "note": "Rust's edition guide documents targeted migration from bare trait objects to dyn.",
+            "code": "// Rust 2021: &MyTrait must become &dyn MyTrait"
+          }
+        },
+        "options": [
+          {
+            "key": "A",
+            "name": "Keep the teaching path",
+            "gist": "Keep the retired marker recognized only for a targeted error and safe migration.",
+            "gains": [
+              "Old code gets specific guidance."
+            ],
+            "losses": [
+              "A retired-name diagnostic path remains."
+            ],
+            "proposed": {
+              "code": "// reject #State; explain Owner.A, Owner.B and A -> B"
+            }
+          },
+          {
+            "key": "B",
+            "name": "Remove the special path",
+            "gist": "Retire the targeted diagnostic; old marker uses get the normal unknown-marker path.",
+            "gains": [
+              "Less retired-syntax handling."
+            ],
+            "losses": [
+              "Users must find the replacement separately."
+            ],
+            "proposed": {
+              "code": "// reject #State with the normal marker diagnostic"
+            }
+          }
+        ],
+        "recommendation": {
+          "rec": "A",
+          "why": "Recognizing rejected old code can teach migration without retaining its old semantics.",
+          "gains": [
+            "Specific recovery guidance."
+          ],
+          "losses": [
+            {
+              "loss": "Some declarations cannot be rewritten safely.",
+              "mitigation": "Emit one owner-level edit only for supported shapes; otherwise give manual signature and state-list guidance."
+            }
+          ],
+          "whyNot": [
+            {
+              "key": "B",
+              "reason": "B removes a small diagnostic path at the cost of useful migration information."
+            }
+          ],
+          "tradeoff": "A retired parser path buys better errors."
+        }
+      },
+      "reports": [
+        {
+          "title": "DSL, library and FFI extraction pre-build review",
+          "path": "Docs/Audits/2026-11-27-dsl-library-ffi-extraction-review.md",
+          "note": "Section 1.1, section 2.3 attack 4, and ballot B4."
+        }
+      ],
+      "draftedBy": "Orchestrator",
+      "reviewedBy": "BallotReview3",
+      "draft": true,
+      "status": "open",
+      "created": "2026-11-28T04:00:51.412Z"
     }
   ],
   "questions": [
@@ -127442,6 +128545,181 @@
     }
   ],
   "events": [
+    {
+      "at": "2026-11-28T04:00:52.451Z",
+      "by": "BallotReview3",
+      "action": "decision.review",
+      "ref": "D-STATE-TEACH1",
+      "note": "passed"
+    },
+    {
+      "at": "2026-11-28T04:00:51.412Z",
+      "by": "Orchestrator",
+      "action": "decision.add",
+      "ref": "D-STATE-TEACH1",
+      "note": "The retired #State marker keeps its teaching error E0175 (draft)"
+    },
+    {
+      "at": "2026-11-28T04:00:50.269Z",
+      "by": "Orchestrator",
+      "action": "decision.post",
+      "ref": "D-PYTHON-MODE1",
+      "note": "reviewed by BallotReview3"
+    },
+    {
+      "at": "2026-11-28T04:00:49.292Z",
+      "by": "BallotReview3",
+      "action": "decision.review",
+      "ref": "D-PYTHON-MODE1",
+      "note": "passed"
+    },
+    {
+      "at": "2026-11-28T04:00:48.347Z",
+      "by": "Orchestrator",
+      "action": "decision.add",
+      "ref": "D-PYTHON-MODE1",
+      "note": "Does opt-in in-process Python embedding count as Unsafe reachability? (draft)"
+    },
+    {
+      "at": "2026-11-28T04:00:47.479Z",
+      "by": "Orchestrator",
+      "action": "decision.post",
+      "ref": "D-INBODY-OPTOUT1",
+      "note": "reviewed by BallotReview3"
+    },
+    {
+      "at": "2026-11-28T04:00:46.455Z",
+      "by": "BallotReview3",
+      "action": "decision.review",
+      "ref": "D-INBODY-OPTOUT1",
+      "note": "passed"
+    },
+    {
+      "at": "2026-11-28T04:00:45.562Z",
+      "by": "Orchestrator",
+      "action": "decision.add",
+      "ref": "D-INBODY-OPTOUT1",
+      "note": "Inside a body, #X: false stays as the line form of #!X (draft)"
+    },
+    {
+      "at": "2026-11-28T04:00:44.636Z",
+      "by": "Orchestrator",
+      "action": "decision.post",
+      "ref": "D-FREE-METHOD-DROP1",
+      "note": "reviewed by BallotReview3"
+    },
+    {
+      "at": "2026-11-28T04:00:43.674Z",
+      "by": "BallotReview3",
+      "action": "decision.review",
+      "ref": "D-FREE-METHOD-DROP1",
+      "note": "passed"
+    },
+    {
+      "at": "2026-11-28T04:00:42.689Z",
+      "by": "Orchestrator",
+      "action": "decision.add",
+      "ref": "D-FREE-METHOD-DROP1",
+      "note": "Remove free Type.method declarations in favor of the existing owner placement rules (draft)"
+    },
+    {
+      "at": "2026-11-28T04:00:41.721Z",
+      "by": "Orchestrator",
+      "action": "decision.post",
+      "ref": "D-EUCLID-NAMES1",
+      "note": "reviewed by BallotReview3"
+    },
+    {
+      "at": "2026-11-28T04:00:40.316Z",
+      "by": "BallotReview3",
+      "action": "decision.review",
+      "ref": "D-EUCLID-NAMES1",
+      "note": "passed"
+    },
+    {
+      "at": "2026-11-28T04:00:39.455Z",
+      "by": "Orchestrator",
+      "action": "decision.add",
+      "ref": "D-EUCLID-NAMES1",
+      "note": "Keep div_euclid and rem_euclid, or expand their names without changing arithmetic (draft)"
+    },
+    {
+      "at": "2026-11-28T04:00:38.518Z",
+      "by": "Orchestrator",
+      "action": "decision.post",
+      "ref": "D-DISPLAY-DERIVE1",
+      "note": "reviewed by BallotReview3"
+    },
+    {
+      "at": "2026-11-28T04:00:37.635Z",
+      "by": "BallotReview3",
+      "action": "decision.review",
+      "ref": "D-DISPLAY-DERIVE1",
+      "note": "passed"
+    },
+    {
+      "at": "2026-11-28T04:00:36.735Z",
+      "by": "Orchestrator",
+      "action": "decision.add",
+      "ref": "D-DISPLAY-DERIVE1",
+      "note": "Display takes Printable's structural derive contract during the cutover (draft)"
+    },
+    {
+      "at": "2026-11-28T04:00:35.791Z",
+      "by": "Orchestrator",
+      "action": "decision.post",
+      "ref": "D-DESCRIBE-KEEP1",
+      "note": "reviewed by BallotReview3"
+    },
+    {
+      "at": "2026-11-28T04:00:34.842Z",
+      "by": "BallotReview3",
+      "action": "decision.review",
+      "ref": "D-DESCRIBE-KEEP1",
+      "note": "passed"
+    },
+    {
+      "at": "2026-11-28T04:00:33.845Z",
+      "by": "Orchestrator",
+      "action": "decision.add",
+      "ref": "D-DESCRIBE-KEEP1",
+      "note": "Describe stays as the one error trait with caller-safe and operator text (draft)"
+    },
+    {
+      "at": "2026-11-28T04:00:32.980Z",
+      "by": "Orchestrator",
+      "action": "decision.post",
+      "ref": "D-AUTODERIVE-POLICY1",
+      "note": "reviewed by BallotReview3"
+    },
+    {
+      "at": "2026-11-28T04:00:32.128Z",
+      "by": "BallotReview3",
+      "action": "decision.review",
+      "ref": "D-AUTODERIVE-POLICY1",
+      "note": "passed"
+    },
+    {
+      "at": "2026-11-28T04:00:31.236Z",
+      "by": "Orchestrator",
+      "action": "decision.add",
+      "ref": "D-AUTODERIVE-POLICY1",
+      "note": "The package policy deny: [auto_derive] stays as the way to make derives opt-in (draft)"
+    },
+    {
+      "at": "2026-11-28T04:00:30.364Z",
+      "by": "Orchestrator",
+      "action": "decision.post",
+      "ref": "D-PAR-FOLD1",
+      "note": "reviewed by BallotReview3"
+    },
+    {
+      "at": "2026-11-28T04:00:29.457Z",
+      "by": "BallotReview3",
+      "action": "decision.review",
+      "ref": "D-PAR-FOLD1",
+      "note": "passed"
+    },
     {
       "at": "2026-11-28T04:00:28.179Z",
       "by": "Orchestrator",
@@ -130854,713 +132132,6 @@
       "action": "card.criteria-reopen",
       "ref": "c01xuayj",
       "note": "#1: Audit Part A: CLI/Jobs/MCP opt-in helpers have 0 production callers, ErrReport untouched, Web 500 leak at Web.jet:3038 & unrecorded 500s, ~74/114 Core error types missing Describe, Notice.public leaks raw errors, review missing prior art & promised deletions (service_error_show, error_response), spec overclaims & incomplete HTTP 500 test."
-    },
-    {
-      "at": "2026-11-26T16:15:05.441Z",
-      "by": "Orchestrator",
-      "action": "card.update",
-      "ref": "c0oi3k2t",
-      "note": "phase,logEntry"
-    },
-    {
-      "at": "2026-11-26T16:15:03.904Z",
-      "by": "Orchestrator",
-      "action": "card.criteria-reopen",
-      "ref": "c0oi3k2t",
-      "note": "#4: Audit Part A: shipped swap-cycle-only narrowing unballoted vs approved any-crossed-arg rule, E0773 text disagrees, repo sweep missed Tests/Run/UI/Conformance/Cases & Tools/AgentEval/Gauntlet/Perf, 100% false-positive rate misstated as 0%, review lacked prior art and ballot/row for 205 FPs, copy_ratchet workaround & missing E0773 reference docs."
-    },
-    {
-      "at": "2026-11-26T16:15:03.083Z",
-      "by": "Orchestrator",
-      "action": "card.criteria-reopen",
-      "ref": "c0oi3k2t",
-      "note": "#3: Audit Part A: shipped swap-cycle-only narrowing unballoted vs approved any-crossed-arg rule, E0773 text disagrees, repo sweep missed Tests/Run/UI/Conformance/Cases & Tools/AgentEval/Gauntlet/Perf, 100% false-positive rate misstated as 0%, review lacked prior art and ballot/row for 205 FPs, copy_ratchet workaround & missing E0773 reference docs."
-    },
-    {
-      "at": "2026-11-26T16:15:02.244Z",
-      "by": "Orchestrator",
-      "action": "card.criteria-reopen",
-      "ref": "c0oi3k2t",
-      "note": "#2: Audit Part A: shipped swap-cycle-only narrowing unballoted vs approved any-crossed-arg rule, E0773 text disagrees, repo sweep missed Tests/Run/UI/Conformance/Cases & Tools/AgentEval/Gauntlet/Perf, 100% false-positive rate misstated as 0%, review lacked prior art and ballot/row for 205 FPs, copy_ratchet workaround & missing E0773 reference docs."
-    },
-    {
-      "at": "2026-11-26T16:15:01.425Z",
-      "by": "Orchestrator",
-      "action": "card.criteria-reopen",
-      "ref": "c0oi3k2t",
-      "note": "#1: Audit Part A: shipped swap-cycle-only narrowing unballoted vs approved any-crossed-arg rule, E0773 text disagrees, repo sweep missed Tests/Run/UI/Conformance/Cases & Tools/AgentEval/Gauntlet/Perf, 100% false-positive rate misstated as 0%, review lacked prior art and ballot/row for 205 FPs, copy_ratchet workaround & missing E0773 reference docs."
-    },
-    {
-      "at": "2026-11-26T16:15:00.619Z",
-      "by": "Orchestrator",
-      "action": "card.update",
-      "ref": "c0pej44b",
-      "note": "phase,logEntry"
-    },
-    {
-      "at": "2026-11-26T16:14:58.683Z",
-      "by": "Orchestrator",
-      "action": "card.criteria-reopen",
-      "ref": "c0pej44b",
-      "note": "#9: Audit Part A: hand-written parsers still kept beside grammars (DB/Engine/Parse, JSON, URL, Regex), missing grammar-vs-handwritten-parsers speed pair & evidence.json, missing gc2 docs + tree-sitter/Zed grammar, URL parse_recipe still ahead of grammar, G-P1 compile-speed unmeasured."
-    },
-    {
-      "at": "2026-11-26T16:14:57.840Z",
-      "by": "Orchestrator",
-      "action": "card.criteria-reopen",
-      "ref": "c0pej44b",
-      "note": "#8: Audit Part A: hand-written parsers still kept beside grammars (DB/Engine/Parse, JSON, URL, Regex), missing grammar-vs-handwritten-parsers speed pair & evidence.json, missing gc2 docs + tree-sitter/Zed grammar, URL parse_recipe still ahead of grammar, G-P1 compile-speed unmeasured."
-    },
-    {
-      "at": "2026-11-26T16:14:57.003Z",
-      "by": "Orchestrator",
-      "action": "card.criteria-reopen",
-      "ref": "c0pej44b",
-      "note": "#5: Audit Part A: hand-written parsers still kept beside grammars (DB/Engine/Parse, JSON, URL, Regex), missing grammar-vs-handwritten-parsers speed pair & evidence.json, missing gc2 docs + tree-sitter/Zed grammar, URL parse_recipe still ahead of grammar, G-P1 compile-speed unmeasured."
-    },
-    {
-      "at": "2026-11-26T16:14:56.177Z",
-      "by": "Orchestrator",
-      "action": "card.criteria-reopen",
-      "ref": "c0pej44b",
-      "note": "#4: Audit Part A: hand-written parsers still kept beside grammars (DB/Engine/Parse, JSON, URL, Regex), missing grammar-vs-handwritten-parsers speed pair & evidence.json, missing gc2 docs + tree-sitter/Zed grammar, URL parse_recipe still ahead of grammar, G-P1 compile-speed unmeasured."
-    },
-    {
-      "at": "2026-11-26T16:11:36.961Z",
-      "by": "Orchestrator",
-      "action": "card.criteria-meet",
-      "ref": "c0sdz4q0",
-      "note": "#2"
-    },
-    {
-      "at": "2026-11-26T16:11:36.119Z",
-      "by": "Orchestrator",
-      "action": "card.criteria-meet",
-      "ref": "c0sdz4q0",
-      "note": "#1"
-    },
-    {
-      "at": "2026-11-26T16:11:35.309Z",
-      "by": "Orchestrator",
-      "action": "card.update",
-      "ref": "c0ypa1af",
-      "note": "phase,logEntry"
-    },
-    {
-      "at": "2026-11-26T16:11:33.751Z",
-      "by": "Orchestrator",
-      "action": "card.criteria-meet",
-      "ref": "c0ypa1af",
-      "note": "#5"
-    },
-    {
-      "at": "2026-11-26T16:11:32.898Z",
-      "by": "Orchestrator",
-      "action": "card.criteria-meet",
-      "ref": "c0ypa1af",
-      "note": "#4"
-    },
-    {
-      "at": "2026-11-26T16:11:32.025Z",
-      "by": "Orchestrator",
-      "action": "card.criteria-meet",
-      "ref": "c0ypa1af",
-      "note": "#3"
-    },
-    {
-      "at": "2026-11-26T16:11:31.135Z",
-      "by": "Orchestrator",
-      "action": "card.criteria-meet",
-      "ref": "c0ypa1af",
-      "note": "#2"
-    },
-    {
-      "at": "2026-11-26T16:11:30.234Z",
-      "by": "Orchestrator",
-      "action": "card.criteria-meet",
-      "ref": "c0ypa1af",
-      "note": "#1"
-    },
-    {
-      "at": "2026-11-26T15:22:12.605Z",
-      "by": "Orchestrator",
-      "action": "card.update",
-      "ref": "c0mhrplj",
-      "note": "logEntry"
-    },
-    {
-      "at": "2026-11-26T15:22:11.081Z",
-      "by": "Orchestrator",
-      "action": "card.criteria-meet",
-      "ref": "c0mhrplj",
-      "note": "#2"
-    },
-    {
-      "at": "2026-11-26T14:29:05.571Z",
-      "by": "Orchestrator",
-      "action": "card.update",
-      "ref": "c0e6znz4",
-      "note": "logEntry"
-    },
-    {
-      "at": "2026-11-26T14:29:04.685Z",
-      "by": "Orchestrator",
-      "action": "card.update",
-      "ref": "c01xuayj",
-      "note": "phase,logEntry"
-    },
-    {
-      "at": "2026-11-26T14:29:02.186Z",
-      "by": "Orchestrator",
-      "action": "card.criteria-meet",
-      "ref": "c01xuayj",
-      "note": "#5"
-    },
-    {
-      "at": "2026-11-26T14:29:00.884Z",
-      "by": "Orchestrator",
-      "action": "card.criteria-meet",
-      "ref": "c01xuayj",
-      "note": "#4"
-    },
-    {
-      "at": "2026-11-26T14:28:59.574Z",
-      "by": "Orchestrator",
-      "action": "card.criteria-meet",
-      "ref": "c01xuayj",
-      "note": "#3"
-    },
-    {
-      "at": "2026-11-26T14:28:58.281Z",
-      "by": "Orchestrator",
-      "action": "card.criteria-meet",
-      "ref": "c01xuayj",
-      "note": "#2"
-    },
-    {
-      "at": "2026-11-26T14:28:56.919Z",
-      "by": "Orchestrator",
-      "action": "card.criteria-meet",
-      "ref": "c01xuayj",
-      "note": "#1"
-    },
-    {
-      "at": "2026-11-26T12:56:55.132Z",
-      "by": "owner",
-      "action": "done.clear",
-      "ref": null,
-      "note": "2026-11-26T12:56:55.132Z"
-    },
-    {
-      "at": "2026-11-26T12:56:18.284Z",
-      "by": "owner",
-      "action": "decision.ratify",
-      "ref": "D-EFFECT-CLASS1",
-      "note": "A"
-    },
-    {
-      "at": "2026-11-26T12:56:18.284Z",
-      "by": "owner",
-      "action": "decision.ratify",
-      "ref": "D-SERVICE-SHAPES1",
-      "note": "A"
-    },
-    {
-      "at": "2026-11-26T12:54:38.313Z",
-      "by": "owner",
-      "action": "decision.ratify",
-      "ref": "D-CORE-LASTROWS1",
-      "note": "A"
-    },
-    {
-      "at": "2026-11-26T12:54:38.313Z",
-      "by": "owner",
-      "action": "decision.ratify",
-      "ref": "D-PROCESS-BUILDER-RECEIVER1",
-      "note": "A"
-    },
-    {
-      "at": "2026-11-26T12:54:38.313Z",
-      "by": "owner",
-      "action": "decision.ratify",
-      "ref": "D-FALLIBLE-CLOSE1",
-      "note": "A"
-    },
-    {
-      "at": "2026-11-26T12:25:19.389Z",
-      "by": "Orchestrator",
-      "action": "card.update",
-      "ref": "c0mhrplj",
-      "note": "logEntry"
-    },
-    {
-      "at": "2026-11-26T12:25:18.543Z",
-      "by": "Orchestrator",
-      "action": "card.update",
-      "ref": "c0qnrbr0",
-      "note": "phase,logEntry"
-    },
-    {
-      "at": "2026-11-26T12:25:16.735Z",
-      "by": "Orchestrator",
-      "action": "card.criteria-meet",
-      "ref": "c0qnrbr0",
-      "note": "#1"
-    },
-    {
-      "at": "2026-11-26T12:25:15.719Z",
-      "by": "Orchestrator",
-      "action": "card.update",
-      "ref": "c0hgn7y3",
-      "note": "phase,logEntry"
-    },
-    {
-      "at": "2026-11-26T12:25:12.830Z",
-      "by": "Orchestrator",
-      "action": "card.criteria-meet",
-      "ref": "c0hgn7y3",
-      "note": "#6"
-    },
-    {
-      "at": "2026-11-26T12:25:11.607Z",
-      "by": "Orchestrator",
-      "action": "card.criteria-meet",
-      "ref": "c0hgn7y3",
-      "note": "#5"
-    },
-    {
-      "at": "2026-11-26T12:25:10.208Z",
-      "by": "Orchestrator",
-      "action": "card.criteria-meet",
-      "ref": "c0hgn7y3",
-      "note": "#4"
-    },
-    {
-      "at": "2026-11-26T12:25:08.794Z",
-      "by": "Orchestrator",
-      "action": "card.criteria-meet",
-      "ref": "c0hgn7y3",
-      "note": "#3"
-    },
-    {
-      "at": "2026-11-26T12:25:07.505Z",
-      "by": "Orchestrator",
-      "action": "card.criteria-meet",
-      "ref": "c0hgn7y3",
-      "note": "#2"
-    },
-    {
-      "at": "2026-11-26T12:25:06.630Z",
-      "by": "Orchestrator",
-      "action": "card.criteria-meet",
-      "ref": "c0hgn7y3",
-      "note": "#1"
-    },
-    {
-      "at": "2026-11-26T12:25:05.420Z",
-      "by": "Orchestrator",
-      "action": "card.update",
-      "ref": "c0ljw5xu",
-      "note": "phase,logEntry"
-    },
-    {
-      "at": "2026-11-26T12:25:03.439Z",
-      "by": "Orchestrator",
-      "action": "card.criteria-meet",
-      "ref": "c0ljw5xu",
-      "note": "#4"
-    },
-    {
-      "at": "2026-11-26T12:25:02.469Z",
-      "by": "Orchestrator",
-      "action": "card.criteria-meet",
-      "ref": "c0ljw5xu",
-      "note": "#3"
-    },
-    {
-      "at": "2026-11-26T12:25:01.137Z",
-      "by": "Orchestrator",
-      "action": "card.criteria-meet",
-      "ref": "c0ljw5xu",
-      "note": "#2"
-    },
-    {
-      "at": "2026-11-26T12:24:59.833Z",
-      "by": "Orchestrator",
-      "action": "card.criteria-meet",
-      "ref": "c0ljw5xu",
-      "note": "#1"
-    },
-    {
-      "at": "2026-11-26T10:56:06.325Z",
-      "by": "Orchestrator",
-      "action": "card.update",
-      "ref": "c0ljryls",
-      "note": "phase,logEntry"
-    },
-    {
-      "at": "2026-11-26T10:56:03.821Z",
-      "by": "Orchestrator",
-      "action": "card.criteria-meet",
-      "ref": "c0ljryls",
-      "note": "#5"
-    },
-    {
-      "at": "2026-11-26T10:56:02.367Z",
-      "by": "Orchestrator",
-      "action": "card.criteria-meet",
-      "ref": "c0ljryls",
-      "note": "#3"
-    },
-    {
-      "at": "2026-11-26T10:56:01.329Z",
-      "by": "Orchestrator",
-      "action": "card.criteria-meet",
-      "ref": "c0ljryls",
-      "note": "#2"
-    },
-    {
-      "at": "2026-11-26T10:56:00.405Z",
-      "by": "Orchestrator",
-      "action": "card.criteria-meet",
-      "ref": "c0ljryls",
-      "note": "#1"
-    },
-    {
-      "at": "2026-11-26T10:52:26.905Z",
-      "by": "Orchestrator",
-      "action": "briefing.post",
-      "ref": "briefing0z7e6ea",
-      "note": "All 12 open Tower ballots rewritten & re-engineered (downsides removed)"
-    },
-    {
-      "at": "2026-11-26T10:52:03.919Z",
-      "by": "Orchestrator",
-      "action": "decision.update",
-      "ref": "D-CORE-LASTROWS1",
-      "note": ""
-    },
-    {
-      "at": "2026-11-26T10:52:03.105Z",
-      "by": "Orchestrator",
-      "action": "decision.update",
-      "ref": "D-MEM-POOL-NAME1",
-      "note": ""
-    },
-    {
-      "at": "2026-11-26T10:52:02.298Z",
-      "by": "Orchestrator",
-      "action": "decision.update",
-      "ref": "D-SERVICE-SHAPES1",
-      "note": ""
-    },
-    {
-      "at": "2026-11-26T10:52:01.482Z",
-      "by": "Orchestrator",
-      "action": "decision.update",
-      "ref": "D-PROCESS-BUILDER-RECEIVER1",
-      "note": ""
-    },
-    {
-      "at": "2026-11-26T10:52:00.674Z",
-      "by": "Orchestrator",
-      "action": "decision.update",
-      "ref": "D-FALLIBLE-CLOSE1",
-      "note": ""
-    },
-    {
-      "at": "2026-11-26T10:51:59.876Z",
-      "by": "Orchestrator",
-      "action": "decision.update",
-      "ref": "D-PLACE-RETURN1",
-      "note": ""
-    },
-    {
-      "at": "2026-11-26T10:42:18.511Z",
-      "by": "Orchestrator",
-      "action": "decision.update",
-      "ref": "D-FAIL-VISIBLE2",
-      "note": ""
-    },
-    {
-      "at": "2026-11-26T10:42:17.589Z",
-      "by": "Orchestrator",
-      "action": "decision.update",
-      "ref": "D-YIELD-EMIT1",
-      "note": ""
-    },
-    {
-      "at": "2026-11-26T10:42:16.531Z",
-      "by": "Orchestrator",
-      "action": "decision.update",
-      "ref": "D-TASKS-SPAWN1",
-      "note": ""
-    },
-    {
-      "at": "2026-11-26T10:42:15.530Z",
-      "by": "Orchestrator",
-      "action": "decision.update",
-      "ref": "D-EFFECT-CLASS1",
-      "note": ""
-    },
-    {
-      "at": "2026-11-26T10:42:14.573Z",
-      "by": "Orchestrator",
-      "action": "decision.update",
-      "ref": "D-EFFECT-TRAIT1",
-      "note": ""
-    },
-    {
-      "at": "2026-11-26T10:42:13.610Z",
-      "by": "Orchestrator",
-      "action": "decision.update",
-      "ref": "D-HANDLE-NAV1",
-      "note": ""
-    },
-    {
-      "at": "2026-11-26T10:26:22.601Z",
-      "by": "Orchestrator",
-      "action": "card.criteria-meet",
-      "ref": "c0mhrplj",
-      "note": "#21"
-    },
-    {
-      "at": "2026-11-26T10:24:24.508Z",
-      "by": "owner",
-      "action": "done.clear",
-      "ref": null,
-      "note": "2026-11-26T10:24:24.508Z"
-    },
-    {
-      "at": "2026-11-26T10:20:59.034Z",
-      "by": "Orchestrator",
-      "action": "card.update",
-      "ref": "c054h5qp",
-      "note": "phase,logEntry"
-    },
-    {
-      "at": "2026-11-26T10:20:55.844Z",
-      "by": "Orchestrator",
-      "action": "card.criteria-meet",
-      "ref": "c054h5qp",
-      "note": "#4"
-    },
-    {
-      "at": "2026-11-26T10:20:54.173Z",
-      "by": "Orchestrator",
-      "action": "card.criteria-meet",
-      "ref": "c054h5qp",
-      "note": "#3"
-    },
-    {
-      "at": "2026-11-26T10:20:52.479Z",
-      "by": "Orchestrator",
-      "action": "card.criteria-meet",
-      "ref": "c054h5qp",
-      "note": "#2"
-    },
-    {
-      "at": "2026-11-26T10:20:50.649Z",
-      "by": "Orchestrator",
-      "action": "card.criteria-meet",
-      "ref": "c054h5qp",
-      "note": "#1"
-    },
-    {
-      "at": "2026-11-26T10:18:31.505Z",
-      "by": "owner",
-      "action": "decision.ratify",
-      "ref": "D-WATCH-FRESHNESS1",
-      "note": "A"
-    },
-    {
-      "at": "2026-11-26T10:12:28.853Z",
-      "by": "owner",
-      "action": "done.clear",
-      "ref": null,
-      "note": "2026-11-26T10:12:28.853Z"
-    },
-    {
-      "at": "2026-11-26T10:08:30.417Z",
-      "by": "Orchestrator",
-      "action": "card.update",
-      "ref": "c0kkogun",
-      "note": "phase,logEntry"
-    },
-    {
-      "at": "2026-11-26T10:08:27.972Z",
-      "by": "Orchestrator",
-      "action": "card.criteria-meet",
-      "ref": "c0kkogun",
-      "note": "#4"
-    },
-    {
-      "at": "2026-11-26T10:08:27.103Z",
-      "by": "Orchestrator",
-      "action": "card.criteria-meet",
-      "ref": "c0kkogun",
-      "note": "#2"
-    },
-    {
-      "at": "2026-11-26T10:08:26.247Z",
-      "by": "Orchestrator",
-      "action": "card.update",
-      "ref": "c0pi4dar",
-      "note": "phase,logEntry"
-    },
-    {
-      "at": "2026-11-26T10:08:24.586Z",
-      "by": "Orchestrator",
-      "action": "card.criteria-meet",
-      "ref": "c0pi4dar",
-      "note": "#4"
-    },
-    {
-      "at": "2026-11-26T10:08:23.665Z",
-      "by": "Orchestrator",
-      "action": "card.criteria-meet",
-      "ref": "c0pi4dar",
-      "note": "#3"
-    },
-    {
-      "at": "2026-11-26T10:08:22.715Z",
-      "by": "Orchestrator",
-      "action": "card.criteria-meet",
-      "ref": "c0pi4dar",
-      "note": "#2"
-    },
-    {
-      "at": "2026-11-26T10:08:21.723Z",
-      "by": "Orchestrator",
-      "action": "card.criteria-meet",
-      "ref": "c0pi4dar",
-      "note": "#1"
-    },
-    {
-      "at": "2026-11-26T09:55:56.564Z",
-      "by": "owner",
-      "action": "done.clear",
-      "ref": null,
-      "note": "2026-11-26T09:55:56.564Z"
-    },
-    {
-      "at": "2026-11-26T09:43:46.502Z",
-      "by": "Orchestrator",
-      "action": "card.update",
-      "ref": "c0s2gaqp",
-      "note": "logEntry"
-    },
-    {
-      "at": "2026-11-26T09:29:04.569Z",
-      "by": "Orchestrator",
-      "action": "card.update",
-      "ref": "c0kgt885",
-      "note": "phase,logEntry"
-    },
-    {
-      "at": "2026-11-26T09:29:03.099Z",
-      "by": "Orchestrator",
-      "action": "card.criteria-meet",
-      "ref": "c0kgt885",
-      "note": "#3"
-    },
-    {
-      "at": "2026-11-26T09:29:02.250Z",
-      "by": "Orchestrator",
-      "action": "card.criteria-meet",
-      "ref": "c0kgt885",
-      "note": "#2"
-    },
-    {
-      "at": "2026-11-26T09:29:01.395Z",
-      "by": "Orchestrator",
-      "action": "card.criteria-meet",
-      "ref": "c0kgt885",
-      "note": "#1"
-    },
-    {
-      "at": "2026-11-26T09:26:34.375Z",
-      "by": "Orchestrator",
-      "action": "card.update",
-      "ref": "c0oi3k2t",
-      "note": "phase,logEntry"
-    },
-    {
-      "at": "2026-11-26T09:26:32.872Z",
-      "by": "Orchestrator",
-      "action": "card.criteria-meet",
-      "ref": "c0oi3k2t",
-      "note": "#4"
-    },
-    {
-      "at": "2026-11-26T09:26:32.061Z",
-      "by": "Orchestrator",
-      "action": "card.criteria-meet",
-      "ref": "c0oi3k2t",
-      "note": "#3"
-    },
-    {
-      "at": "2026-11-26T09:26:31.191Z",
-      "by": "Orchestrator",
-      "action": "card.criteria-meet",
-      "ref": "c0oi3k2t",
-      "note": "#2"
-    },
-    {
-      "at": "2026-11-26T09:26:30.315Z",
-      "by": "Orchestrator",
-      "action": "card.criteria-meet",
-      "ref": "c0oi3k2t",
-      "note": "#1"
-    },
-    {
-      "at": "2026-11-26T09:26:29.496Z",
-      "by": "Orchestrator",
-      "action": "card.update",
-      "ref": "c0blttm0",
-      "note": "phase,logEntry"
-    },
-    {
-      "at": "2026-11-26T09:26:27.879Z",
-      "by": "Orchestrator",
-      "action": "card.criteria-meet",
-      "ref": "c0blttm0",
-      "note": "#5"
-    },
-    {
-      "at": "2026-11-26T09:26:27.063Z",
-      "by": "Orchestrator",
-      "action": "card.criteria-meet",
-      "ref": "c0blttm0",
-      "note": "#4"
-    },
-    {
-      "at": "2026-11-26T09:26:25.882Z",
-      "by": "Orchestrator",
-      "action": "card.criteria-meet",
-      "ref": "c0blttm0",
-      "note": "#2"
-    },
-    {
-      "at": "2026-11-26T09:14:18.610Z",
-      "by": "Orchestrator",
-      "action": "card.update",
-      "ref": "c0dktg7a",
-      "note": "logEntry"
-    },
-    {
-      "at": "2026-11-26T09:14:17.140Z",
-      "by": "Orchestrator",
-      "action": "card.criteria-meet",
-      "ref": "c0blttm0",
-      "note": "#6"
-    },
-    {
-      "at": "2026-11-26T09:14:15.698Z",
-      "by": "Orchestrator",
-      "action": "card.criteria-meet",
-      "ref": "c028lxdd",
-      "note": "#11"
     }
   ],
   "nextNum": 368,
