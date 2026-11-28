@@ -3,7 +3,7 @@
     "version": 4,
     "project": "Jet",
     "nextNum": 7071,
-    "rev": 115467,
+    "rev": 115469,
     "ui": {
       "toggled": [
         "dec-group:syntax",
@@ -9147,7 +9147,7 @@
       "track": "epoch",
       "epoch": "G2",
       "milestoneId": null,
-      "phase": "ready",
+      "phase": "done",
       "priority": "P1",
       "plan": "## Goal\nImplement D-BIG-DIAGORIGIN1=A (ratified; criterion 1 met). Every source-bound compiler diagnostic identifies the checked source snapshot it came from with a versioned optional `origin {path: String?, source_digest: String}`, and byte spans are relative to that origin. Source-free diagnostics carry no origin, and no diagnostic inherits the entry file's path. The public `core.compiler` CompilerDiagnostic, the host DiagnosticCodec and the CLI/LSP report cut over together. There is no new module, service or dependency. Source: BIG-F20. Integrates with #3509's compiler-session consumers.\n\n## Current state\n- The model exists but nothing sets it:\n  - `Compiler/JetLexer/Source/Lexer/Tokens.jet:25-30` (`DiagnosticOrigin{display, path, source, revision}`) and `:149` (`Diagnostic.origin`).\n  - `:194-197` (`diagnostic_with_origin`) has zero callers in Compiler/.\n- Source segments already carry the file: `Compiler/JetSema/Source/Sema/Diagnostics.jet:14-72` (`sema_source_location_at`, `sema_diagnostic_with_source_location`) and `Compiler/JetDriver/Source/Driver/Loader.jet:915-916`.\n- A per-source digest is already computed for the semantic index: `Compiler/JetSema/Source/Sema/SemanticIndex.jet:1666` (`mir_sha256_hex(source)`).\n- The public value has no origin: `Compiler/JetEval/Source/CompilerServices.jet:69-79` (`code`, `severity`, `message`, `why`, `fix`, `span`), with sema typing in `Compiler/JetSema/Source/Sema/Calls/CompilerServices.jet`. The shipped Rust field table (`crates/jet-sema/src/Sema/CheckerCoreLib/core_types.rs:951-954`) also lacks it.\n- The host round-trips origin already: `Compiler/Bootstrap/Host/DiagnosticCodec.rs:351-354`. The CLI report is `crates/jet-foundation/src/Report.rs` (`jet.report/v3`).\n\n## Changes\n1. **JetDriver.** Compute the digest once per loaded source snapshot, store it on the source unit (`Identity.jet` `JetDriverSourceUnit`), and reuse the semantic index's digest rather than hashing twice.\n2. **JetSema.** In `sema_diagnostic_with_source_location` (`Diagnostics.jet:72`), attach `DiagnosticOrigin` from the segment's own file and digest. Compiler-generated segments carry their generated path. A diagnostic with no segment stays `origin: None`.\n3. **JetEval and JetSema public value.** Add `origin: CompilerDiagnosticOrigin?` (`path: String?`, `source_digest: String`) to CompilerDiagnostic in `CompilerServices.jet`, and declare the type once in `Core/compiler`. Bump its schema version.\n4. **Shipped-binary mirror.** Make the same field in `core_types.rs`, the Rust diagnostic origin attach, and `Report.rs` JSON (`file` from the origin, plus `source_digest`). Update the LSP (`Source/LSP/Server.rs`) to publish per-origin URIs. Package-model schemas stay unchanged.\n5. Remove `crates/jet-semindex` from this card's owned paths; it is not the home.\n\n## Proof\n- `cargo test --test compiler_api diagnostic_origin_identifies_imported_snapshot`: pass.\n- `cargo test --test report diagnostic_origin_in_report_json`: pass.\n- `jet test Compiler --profile cases lsp/`: existing projections green.\n- `Tools/agent/jet-env bash Compiler/Bootstrap/check.sh`: exit 0.\n\n## Batch\n`batch-jetc-sema`: origins are attached in JetSema/JetDriver diagnostics. This card batches with #3205, whose causes reuse these origins.\n\n## Dependencies\nNone. The ratified decision is in hand. #3205 consumes this card's origins.\n",
       "checkSteps": "1. Owner ratifies D-BIG-DIAGORIGIN1 or retains the current thin facade explicitly.\n2. If A, every source-bound diagnostic identifies its actual checked snapshot; pathless input still has a digest, while genuinely source-free diagnostics use no origin.\n3. No diagnostic inherits the entry path merely because its own origin is absent; imported/local contrasts identify the right document.\n4. Typed, Rust and CLI compiler values undergo one consistent versioned cutover; package-model schemas are not silently changed.\n5. Reuse originating source identity and compute/reuse a digest per snapshot, not once per diagnostic or from changed disk text.\n6. No new runtime compiler service, AST mutation, third-party dependency or optional Core library is introduced.\n\nRebuild: scripts/agent/jet-env cargo build -p jet --bin jet with CARGO_INCREMENTAL=0. Keep scratch at ~/.cache/jet-test-scratch. Existing stale CoreModuleExports.rs is an execution prerequisite, not evidence that any feature passes.\n\n1. Owner ratifies D-BIG-DIAGORIGIN1 or retains the current thin facade explicitly.\n2. If A, every source-bound diagnostic identifies its actual checked snapshot; pathless input still has a digest, while genuinely source-free diagnostics use no origin.\n3. No diagnostic inherits the entry path merely because its own origin is absent; imported/local contrasts identify the right document.\n4. Typed, Rust and CLI compiler values undergo one consistent versioned cutover; package-model schemas are not silently changed.\n5. Reuse originating source identity and compute/reuse a digest per snapshot, not once per diagnostic or from changed disk text.\n6. No new runtime compiler service, AST mutation, third-party dependency or optional Core library is introduced.\n\nFor each planned package witness, use scripts/agent/jet-env jet check, jet run, jet run --interpret, jet dev --watch=off where relevant, and jet build from that package directory; launch its emitted .jet/build/run artifact. Compare the named golden and actual state changes. Use the existing web harness when the feature reaches web. No broad suite outside the composed closeout gate.",
@@ -9291,10 +9291,11 @@
           "n": 1,
           "text": "Owner ratifies D-BIG-DIAGORIGIN1 or retains the current thin facade explicitly.",
           "status": "met",
-          "metBy": "Main",
+          "metBy": "Orchestrator",
           "verifiedBy": null,
-          "evidence": "Tower decision D-BIG-DIAGORIGIN1 is explicitly ratified with outcome A on 2026-09-12. The owner gate for structured diagnostic source origin is satisfied; this does not claim the public report, origin propagation, or projection cutover criteria.",
-          "at": "2026-09-22T16:28:25.396Z"
+          "evidence": "Tower decision D-BIG-DIAGORIGIN1 is ratified with outcome A on 2026-09-12 (decision show: status ratified, outcome A). This criterion is the owner gate itself; the cutover criteria carry their own commit evidence.",
+          "at": "2026-11-28T06:16:31.519Z",
+          "closure": "decision"
         },
         {
           "n": 8,
@@ -9648,10 +9649,11 @@
       "parentId": "c0yfcz0w",
       "needsAcceptance": false,
       "created": "2026-09-12T14:11:42.570Z",
-      "updated": "2026-11-27T11:08:19.182Z",
+      "updated": "2026-11-28T06:16:35.433Z",
       "updatedBy": "Orchestrator",
       "workOrder": 19,
-      "criteriaLastN": 42
+      "criteriaLastN": 42,
+      "completedAt": "2026-11-28T06:16:35.433Z"
     },
     {
       "id": "c0svneex",
@@ -133628,6 +133630,20 @@
     }
   ],
   "events": [
+    {
+      "at": "2026-11-28T06:16:35.433Z",
+      "by": "Orchestrator",
+      "action": "card.update",
+      "ref": "c0dktg7a",
+      "note": "phase"
+    },
+    {
+      "at": "2026-11-28T06:16:31.519Z",
+      "by": "Orchestrator",
+      "action": "card.criteria-meet",
+      "ref": "c0dktg7a",
+      "note": "#1"
+    },
     {
       "at": "2026-11-28T06:16:08.317Z",
       "by": "Orchestrator",
