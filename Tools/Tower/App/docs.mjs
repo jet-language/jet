@@ -590,6 +590,7 @@ export function showScratchPad(dataDir) {
       id: SCRATCH_ID,
       title: title || 'Owner scratch',
       body,
+      revision: contentRevision(entry.data),
       ...fileTimes(entry.stat),
       bytes: entry.stat.size,
     };
@@ -598,15 +599,26 @@ export function showScratchPad(dataDir) {
   }
 }
 
+// A save names the revision it was loaded from (expectRev). If the file changed
+// since — another tab, another device, an editor, or a git checkout — the save
+// is refused rather than silently writing the stale copy back over it.
+function requireRevision(patch, data, what) {
+  if (patch.expectRev !== undefined && patch.expectRev !== contentRevision(data))
+    fail('E_CONFLICT', `${what} changed since it was loaded; reload before saving`);
+}
+
 export function updateScratchPad(dataDir, patch = {}) {
   const context = openDataContext(dataDir, true);
   try {
     ensureScratchPad(context);
     const current = readEntryAt(context.scratchFd, SCRATCH_FILE, { message: 'scratch pad cannot be opened safely' });
+    requireRevision(patch, current.data, 'the scratch pad');
     const { title: currentTitle, body: currentBody } = parseFront(current.data);
     const title = patch.title !== undefined ? patch.title : (currentTitle || 'Owner scratch');
     const body = patch.body !== undefined ? patch.body : currentBody;
-    atomicWriteAt(context.scratchFd, SCRATCH_FILE, serializeScratch(title, body));
+    atomicWriteAt(context.scratchFd, SCRATCH_FILE, serializeScratch(title, body), {
+      beforeReplace: () => requireRevision(patch, readEntryAt(context.scratchFd, SCRATCH_FILE, { message: 'scratch pad cannot be opened safely' }).data, 'the scratch pad'),
+    });
   } finally {
     closeContext(context);
   }
@@ -700,6 +712,7 @@ export function showDoc(dataDir, relPath) {
       path: target.rel,
       title,
       body,
+      revision: contentRevision(body),
       ...fileTimes(target.stat),
       bytes: target.stat.size,
     };
@@ -778,6 +791,7 @@ export function updateDoc(dataDir, relPath, patch = {}) {
   let rel;
   try {
     const current = readOpenedFile(target.parentFd, target.fd, 'utf8');
+    requireRevision(patch, current, target.rel);
     const body = patch.body !== undefined ? patch.body : current;
     const currentStat = entryStatAt(target.parentFd, target.leaf);
     if (!currentStat || !isSafeRegular(currentStat) || currentStat.dev !== target.stat.dev || currentStat.ino !== target.stat.ino)
@@ -791,7 +805,8 @@ export function updateDoc(dataDir, relPath, patch = {}) {
   return showDoc(dataDir, rel);
 }
 
-const guidanceRevision = body => createHash('sha256').update(body).digest('hex');
+const contentRevision = body => createHash('sha256').update(body).digest('hex');
+const guidanceRevision = contentRevision;
 
 function readGuidanceAt(rootFd) {
   const entry = readEntryAt(rootFd, OWNER_GUIDANCE_PATH, {

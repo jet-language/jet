@@ -247,6 +247,27 @@ test('docs: scratchpad seeds and updates; cannot delete via docs delete of scrat
   assert.match(docs.showScratchPad(dataDir).body, /todo:/);
 });
 
+test('docs: a save from a stale copy is refused instead of restoring removed text', t => {
+  const { dataDir, proj } = projectLayout();
+  t.after(() => rmSync(proj, { recursive: true, force: true }));
+  docs.updateScratchPad(dataDir, { body: 'keep\nremove me\n' });
+  const staleTab = docs.showScratchPad(dataDir);
+  // The owner removes a line somewhere else (another tab, an editor, git).
+  const fresh = docs.updateScratchPad(dataDir, { body: 'keep\n', expectRev: staleTab.revision });
+  assert.notEqual(fresh.revision, staleTab.revision);
+  // The stale copy adds a note and saves: refused, the removal survives.
+  assert.throws(
+    () => docs.updateScratchPad(dataDir, { body: 'keep\nremove me\nnew idea\n', expectRev: staleTab.revision }),
+    e => e.code === 'E_CONFLICT');
+  assert.equal(docs.showScratchPad(dataDir).body, 'keep\n');
+  docs.updateScratchPad(dataDir, { body: 'keep\nnew idea\n', expectRev: fresh.revision });
+  assert.equal(docs.showScratchPad(dataDir).body, 'keep\nnew idea\n');
+
+  const n = docs.addDoc(dataDir, { section: 'research', title: 'Note', body: 'a\n' });
+  docs.updateDoc(dataDir, n.path, { body: 'b\n', expectRev: n.revision });
+  assert.throws(() => docs.updateDoc(dataDir, n.path, { body: 'a\nc\n', expectRev: n.revision }), e => e.code === 'E_CONFLICT');
+});
+
 test('docs operations leave unrelated scratch reports untouched', () => {
   const { dataDir, proj } = projectLayout();
   const scratch = join(dataDir, 'scratch');

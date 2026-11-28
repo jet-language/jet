@@ -2411,7 +2411,7 @@ async function openDocsFile(sel, { keepDraft = false, keepBrowse = false } = {})
   }
   if (request !== docsOpenRequest) return;
   if (keepDraft && docsDraft && docsDraft.key === docsKey(sel)) {
-    n = { ...n, body: docsDraft.body };
+    n = { ...n, body: docsDraft.body, revision: docsDraft.base ?? n.revision };
   } else {
     docsDirty = false;
     docsDraft = null;
@@ -2472,7 +2472,7 @@ async function openDocsFile(sel, { keepDraft = false, keepBrowse = false } = {})
   const mark = () => {
     docsDirty = true;
     save.disabled = false;
-    docsDraft = { key: docsKey(sel), body: body.value };
+    docsDraft = { key: docsKey(sel), body: body.value, base: n.revision };
   };
 
   const renderCompose = () => {
@@ -2489,7 +2489,7 @@ async function openDocsFile(sel, { keepDraft = false, keepBrowse = false } = {})
       compose.innerHTML = '';
       const empty = el(`<div class="docs__block docs__block--empty">Click to start writing…</div>`);
       empty.addEventListener('click', () => {
-        docsDraft = { key: docsKey(sel), body: body.value };
+        docsDraft = { key: docsKey(sel), body: body.value, base: n.revision };
         docsMode = 'source';
         openDocsFile(docsSel, { keepDraft: true });
       });
@@ -2526,17 +2526,19 @@ async function openDocsFile(sel, { keepDraft = false, keepBrowse = false } = {})
 
   $('#docs-files').addEventListener('click', () => setDocsBrowse(true));
   $('#docs-mode').addEventListener('click', () => {
-    docsDraft = { key: docsKey(sel), body: body.value };
+    docsDraft = { key: docsKey(sel), body: body.value, base: n.revision };
     docsMode = docsMode === 'compose' ? 'source' : 'compose';
     openDocsFile(docsSel, { keepDraft: true });
   });
 
+  // expectRev: the revision this copy was loaded from. If the file changed on
+  // disk since (another tab or device, an editor, git), the server refuses the
+  // save instead of writing this stale copy over the newer file.
   const doSave = async () => {
-    if (sel.kind === 'scratch') {
-      await docsPost('update', { scratch: true, title: n.title, body: body.value });
-    } else {
-      await docsPost('update', { path: sel.path, body: body.value });
-    }
+    const saved = sel.kind === 'scratch'
+      ? await docsPost('update', { scratch: true, title: n.title, body: body.value, expectRev: n.revision })
+      : await docsPost('update', { path: sel.path, body: body.value, expectRev: n.revision });
+    n.revision = saved?.revision;
     docsDirty = false;
     docsDraft = null;
     save.disabled = true;
@@ -2558,6 +2560,15 @@ async function openDocsFile(sel, { keepDraft = false, keepBrowse = false } = {})
     toast('Deleted');
   });
 }
+
+// A clean (unsaved-edit-free) open file reloads when the tab comes back, so a
+// copy left open for hours never shows text that was since removed elsewhere.
+function refreshDocsOnReturn() {
+  if (document.hidden || VIEW !== 'docs' || docsDirty || !docsSel || docsReportFrame) return;
+  openDocsFile(docsSel, { keepBrowse: docsBrowse });
+}
+window.addEventListener('focus', refreshDocsOnReturn);
+document.addEventListener('visibilitychange', refreshDocsOnReturn);
 
 // ---- AGENTS.md: the repository-root agent contract -----------------------------
 let guidanceCache = null;
