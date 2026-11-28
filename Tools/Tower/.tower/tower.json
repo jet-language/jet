@@ -3,7 +3,7 @@
     "version": 4,
     "project": "Jet",
     "nextNum": 7071,
-    "rev": 115483,
+    "rev": 115484,
     "ui": {
       "toggled": [
         "dec-group:syntax",
@@ -63574,6 +63574,11 @@
         {
           "at": "2026-11-28",
           "by": "Orchestrator",
+          "text": "Bootstrap determinism landed on dev c0c7ee8744e. Two builds of one tree by one compiler gave different core.bodies (one integer), jet_core.o and jet. Root causes: (1) thread-ordered TypeId interner rows written into the bodies codec; (2) thread-checked bodies skipped checks gated on the function name, and bodies checked on the module pass's own thread skipped prelude demands; (3) TypeId handle/table words baked into jet_core.o static data. Proof: check Compiler 0; built A from seed dev-7059c, B from A, C from B; A == B == C by sha256 over all 22 output files. The worker also showed runtime-pack identical at 1, 4 and 32 threads and all CPUs. The remaining sandbox-vs-checkout runtime-pack difference is now a criterion on #6967."
+        },
+        {
+          "at": "2026-11-28",
+          "by": "Orchestrator",
           "text": "Part 2 landed on dev 4ed53e3e59b: the rebased ? to ! cutover (5626 files) on the bootstrapped bang seed. Checks: DiagnosticRows, CoreRows and check Compiler all 0, dev build 0, goldens 21/21 on O0/O1/O2, UI E0403 3/0. Seed saved at dev-bang/ with jet.debug. Still open: the full suite and a deterministic S2==S3 (stage B and C differ by a core.bodies integer that changes run to run; root cause in progress), plus the owner decisions on the Option spec snippets, loop? x, {x:Sel?} and call()! (ctx)."
         },
         {
@@ -63643,7 +63648,7 @@
       "parentId": null,
       "needsAcceptance": false,
       "created": "2026-11-27T16:06:40.188Z",
-      "updated": "2026-11-28T08:13:42.631Z",
+      "updated": "2026-11-28T10:50:43.292Z",
       "updatedBy": "Orchestrator",
       "criteriaLastN": 6
     },
@@ -133891,6 +133896,13 @@
     }
   ],
   "events": [
+    {
+      "at": "2026-11-28T10:50:43.293Z",
+      "by": "Orchestrator",
+      "action": "card.update",
+      "ref": "c0o31o03",
+      "note": "logEntry"
+    },
     {
       "at": "2026-11-28T10:34:01.689Z",
       "by": "Orchestrator",
