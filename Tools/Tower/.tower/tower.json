@@ -3,7 +3,7 @@
     "version": 4,
     "project": "Jet",
     "nextNum": 7067,
-    "rev": 115231,
+    "rev": 115236,
     "ui": {
       "toggled": [
         "dec-group:syntax",
@@ -51,7 +51,7 @@
         "board-ideas"
       ]
     },
-    "completionCursor": "2026-11-27T22:01:21.984Z",
+    "completionCursor": "2026-11-28T01:14:05.848Z",
     "dayStart": {
       "date": "2026-11-28",
       "openCards": 314,
@@ -61264,8 +61264,8 @@
       "parentId": null,
       "needsAcceptance": false,
       "created": "2026-11-25T17:39:07.143Z",
-      "updated": "2026-11-27T12:33:02.698Z",
-      "updatedBy": "Orchestrator"
+      "updated": "2026-11-28T01:15:14.981Z",
+      "updatedBy": "owner"
     },
     {
       "id": "c0vdpcu6",
@@ -64315,6 +64315,11 @@
       "assignee": null,
       "log": [
         {
+          "at": "2026-11-28",
+          "by": "Orchestrator",
+          "text": "c2 part 1 landed on dev 2d75085315c: slices > 64 bytes share the source buffer, short slices copy, mutation is copy-on-write; golden Examples/Text/StringZeroCopySlice; -O2 returned-slice bench 3.6-4.8s/14MB -> 0.01-0.02s/4MB. c2 still open: 24-byte inline-short String layout (audit's first choice), thread-local RC with promotion, non-ASCII byte_slice without the temporary copy, stale Jet.HiddenCopyInLoop reason for long slices on web, View<str> retirement ballot."
+        },
+        {
           "at": "2026-11-27",
           "by": "Orchestrator",
           "text": "Owner delegated engineering away memory-trio downsides to mandatory adversarial audit (c1) before build: (1) COW/SSO String and Shared<T> must engineer away atomic RC overhead via immortal static literals + single-threaded non-atomic RC with transitive promotion at task-send boundaries (Lean-4 model, avoiding Swift lazy biased-RC races), explicitly auditing Weak<T> upgrade races during promotion; (2) define sound COW String in-place mutation ergonomics (rc == 1 fast path vs StringBuilder) avoiding hidden O(n^2) traps; (3) Pool<T>/ID<T> must provide safe disjoint multi-element edits (edit_pair/edit_many with runtime distinctness check, zero unsafe) alongside generational 64-bit ID<T>."
@@ -64363,7 +64368,7 @@
       "parentId": null,
       "needsAcceptance": false,
       "created": "2026-11-27T19:19:25.407Z",
-      "updated": "2026-11-27T21:41:52.218Z",
+      "updated": "2026-11-28T01:44:13.334Z",
       "updatedBy": "Orchestrator",
       "criteriaLastN": 4
     },
@@ -64641,7 +64646,13 @@
       "visualMedia": [],
       "blockedBy": [],
       "assignee": null,
-      "log": [],
+      "log": [
+        {
+          "at": "2026-11-28",
+          "by": "Orchestrator",
+          "text": "Stage 1 landed on dev 2255bace839: marker forms parse onto the existing combinator/group AST, E0003 rows + 2 UI snapshots, golden Examples/Concurrency/TaskMarker (O0/O1/O2 identical), formatter keeps the form; task.* untouched. Stage 2 (caller cutover + keyword retirement) waits for the #7047 bang sweep."
+        }
+      ],
       "criteria": [
         {
           "n": 1,
@@ -64669,6 +64680,15 @@
           "verifiedBy": null,
           "evidence": "",
           "at": "2026-11-27T21:29:01.152Z"
+        },
+        {
+          "n": 4,
+          "text": "Unified #Task marker family (#Task, #Task(.All|.Race|.Any), #Task(.Group) + inner #Task spawn): Stage 2 migrates every task.* caller repo-wide to the marker and retires the task.all/race/any/group forms and the task keyword, with O0/O1/O2 goldens, UI snapshots and a full suite green",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-11-28T01:44:06.163Z"
         }
       ],
       "refs": [],
@@ -64676,9 +64696,9 @@
       "parentId": null,
       "needsAcceptance": false,
       "created": "2026-11-27T21:28:08.583Z",
-      "updated": "2026-11-27T22:15:35.395Z",
+      "updated": "2026-11-28T01:44:12.233Z",
       "updatedBy": "Orchestrator",
-      "criteriaLastN": 3
+      "criteriaLastN": 4
     },
     {
       "id": "c01iyhud",
@@ -121549,8 +121569,10 @@
       "draftedBy": "Orchestrator",
       "reviewedBy": "4e940546",
       "draft": false,
-      "status": "open",
-      "created": "2026-11-27T12:32:56.652Z"
+      "status": "ratified",
+      "created": "2026-11-27T12:32:56.652Z",
+      "outcome": "A",
+      "ratifiedAt": "2026-11-28"
     },
     {
       "id": "D-NET-DTLS-PEER1",
@@ -123875,6 +123897,41 @@
     }
   ],
   "events": [
+    {
+      "at": "2026-11-28T01:44:13.334Z",
+      "by": "Orchestrator",
+      "action": "card.update",
+      "ref": "c0nnf642",
+      "note": "logEntry"
+    },
+    {
+      "at": "2026-11-28T01:44:12.234Z",
+      "by": "Orchestrator",
+      "action": "card.update",
+      "ref": "c0mvk3ul",
+      "note": "logEntry"
+    },
+    {
+      "at": "2026-11-28T01:44:06.163Z",
+      "by": "Orchestrator",
+      "action": "card.criteria-add",
+      "ref": "c0mvk3ul",
+      "note": "#4 Unified #Task marker family (#Task, #Task(.All|.Race|.Any), "
+    },
+    {
+      "at": "2026-11-28T01:15:14.981Z",
+      "by": "owner",
+      "action": "decision.ratify",
+      "ref": "D-CROSSED-ARGS1",
+      "note": "A"
+    },
+    {
+      "at": "2026-11-28T01:14:05.848Z",
+      "by": "owner",
+      "action": "done.clear",
+      "ref": null,
+      "note": "2026-11-28T01:14:05.848Z"
+    },
     {
       "at": "2026-11-28T00:22:21.353Z",
       "by": "Orchestrator",
