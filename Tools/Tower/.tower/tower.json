@@ -3,7 +3,7 @@
     "version": 4,
     "project": "Jet",
     "nextNum": 7071,
-    "rev": 115480,
+    "rev": 115483,
     "ui": {
       "toggled": [
         "dec-group:syntax",
@@ -63815,7 +63815,7 @@
       "parentId": null,
       "needsAcceptance": false,
       "created": "2026-11-27T17:33:24.075Z",
-      "updated": "2026-11-28T06:55:30.998Z",
+      "updated": "2026-11-28T10:34:01.689Z",
       "updatedBy": "Orchestrator",
       "criteriaLastN": 6
     },
@@ -131526,6 +131526,220 @@
       "draft": false,
       "status": "open",
       "created": "2026-11-28T05:01:39.223Z"
+    },
+    {
+      "id": "D-ARM-ARROW1",
+      "cardId": "c0aularf",
+      "group": "syntax",
+      "title": "Choose the arm spelling after control heads switch to braces",
+      "situation": "An arm table chooses the first matching case and runs its body, written today as `case -> value`. The approved move to braced control bodies leaves readers unsure whether those table arrows disappear too. This vote chooses the arm spelling and explains how tables stay distinct from conditions written as blocks. We recommend keeping arm arrows, while requiring parser changes and tests before the wider cutover can close.",
+      "gist": "Should arm tables keep arrows when control heads switch to braces?",
+      "lesson": "Heads will use braced bodies. Tables choose the first matching arm, which can produce a value or perform an action. This vote sets their spelling. Every option still owes the wider control-body cutover; keeping arrows alone does not make block conditions work.",
+      "explainer": "",
+      "story": "Mia converts a one-line conditional to a braced body, then meets an arm table. She needs one rule for its cases and final `else`, including payload patterns.",
+      "inWild": "// https://doc.rust-lang.org/reference/expressions/match-expr.html\nfn main() {\nlet (a, b, n) = (10, 3, -4);\nlet m = if a > b { a } else { b };\nlet sign = match n { n if n > 0 => \"positive\", _ => \"other\" };\nprintln!(\"{m} {sign}\"); }",
+      "detail": "Authority: Docs/Spec/composition-laws.md:29-33 requires braced control bodies. G1.1 at lines 48-55 leaves arm arrows open; G1.2 at lines 56-60 requires tables and block conditions to be distinguished. The verdict at lines 306-308 requires this ballot before build. Card #7049 criterion 2 remains open and requires a whole-repository migration without legacy shims.\n\nDocs/Spec/spec.md:814-823 makes ordered arm tables the preferred multi-branch form and keeps chains legal. It cites D-IF1, D-IF2, D-IF3, D-IFGUARD1=A, and D-IFDIST1=A. Their Tower records were read in this pass. C explicitly replaces the subjectless-table part of that contract; it is not routine cleanup. Compiler/JetParser/Source/Parser/State.jet:1115-1125 emits L0507, Jet.BranchArmTable. The dev probe produced a warning, not a compilation failure.\n\nCompiler/JetFoundation/Data/Syntax/Spellings.jet:82 defines records and value-body braces, including an arm's arrow. Line 83 registers yielding-loop arrows. Lines 18 and 20 also register computed-field and state-transition arrows. Thus neither B nor D makes `->` exclusive to signatures. Function signatures, computed fields, and state transitions are outside this vote.\n\nCompiler/JetParser/Source/Parser/ExpressionForms/DecisionTables.jet:205-207 treats immediate `if {` as a table candidate. Its lines 75-128 scan arrows to classify statement arms, not to distinguish tables from block conditions. A therefore does not settle G1.2 merely by preserving arrows.\n\nUnder A, B, and D, a complete nonempty arm sequence identifies a table; otherwise the braces are a condition expression followed by its body. Grouping the condition remains available when both complete readings fit. Recognition must parse whole arms, including nested syntax, rather than search for any arrow.\n\nCompiler/JetParser/Source/Parser/Patterns.jet:727-767 uses token lookahead for named payload braces, not spacing. The dev probe accepted `.Rect {h, w} -> w * h` and `.Circle {r} -> r`, printing 6 and 3. Braced arm results can also be records: `{x: 1, y: 2}` produced fields 1 and 2. This requires a boundary rule under B, but does not prove that every complete B table is irreducibly ambiguous.\n\nAll proposed snippets show target syntax, not present acceptance. Run the same workload before and after migration; each must print `10 other`. Keep first-match order, subject evaluation, pattern binding, coverage, and result typing unchanged. Cover subjectless, subject, distributed-comparison, hole, type, and statement tables; nested tables; record results; named payloads; markers; and final `else`. C changes only which surface expresses subjectless choices.\n\nEvery choice requires the control-head rewrite and block-condition tests before #7049 criterion 2 closes. B, C, and D also require their arm or table rewrite in that same cutover, not an unspecified follow-up. Register breaking rewrites in Spellings.jet LANGUAGE_REWRITES:115-127; no control-head rewrite row exists there yet. Update parser, formatter, migrations, registry text, spec, diagnostics, snapshots, Compiler, Core, Examples, and Tests together. Remove obsolete acceptance instead of keeping aliases.\n\nExecutable evidence used `J=$JET_SCRATCH_ROOT/tmp/orch/dev-7059c/jet`, reporting `a0.0.46-dev`. JET_TOOLCHAIN_ROOT selected the reviewed worktree. Snippets were piped to `timeout 60s $J run - --no-prepare`; warning probes added `--verbose`. The current surface printed `10 other`.\n\nArrow tables and grouped block conditions with arrow heads ran. Ungrouped block conditions and proposed braced value heads failed with Jet.InvalidStatement. Brace arms failed at `{`; `=>` arms failed at `=`. These are current failures, not objections to implementing the proposed designs.\n\nRust source: https://doc.rust-lang.org/reference/expressions/match-expr.html. The shown workload compiled with rustc 1.99.0 (b940084d7), using stdin, then ran and printed `10 other`. Swift was removed because this pass did not execute its example.",
+      "options": [
+        {
+          "key": "A",
+          "name": "Arms keep `->`",
+          "detail": "Control heads and their outer `else` use braces. Every table keeps `head -> body` and `else -> body`, including statement arms and subject, comparison, hole, and type tables. Bodies may be single statements or braced values or code. No table spelling changes.",
+          "technical": "Parser work is required: `if { ... }` is a table only when its contents form complete nonempty arms. Otherwise parse a block condition and require its braced body. Grouping selects a condition when needed. Test a condition block containing a function signature, nested tables, empty blocks, and statement arms. An arrow-presence scan is insufficient. This is proposed G1.2 behavior, not today's parser.",
+          "code": "m: if a > b { a } else { b }\nsign: if { n > 0 -> \"positive\", else -> \"other\" }\narea: if shape == { .Rect{h, w} -> h * w, .Circle{r} -> r }\n// A block condition must also parse after cutover:\nx: if { ready() } { 1 } else { 0 }"
+        },
+        {
+          "key": "B",
+          "name": "Arms use braces too",
+          "detail": "Every arm uses `head { body }`, including `else { body }`. The body keeps existing arm-value rules, including record results. Adjacent arms require a comma or line break. Payload patterns remain available, but share their braces with body syntax. This removes arm arrows, not every non-signature arrow.",
+          "technical": "Require a complete head and braced body per arm. The final top-level brace group before the arm separator is the body; earlier groups belong to its head. Thus `.Circle{r} { r }` binds a payload, while `.Empty { fallback }` has no payload binding. Whitespace never selects the meaning. Apply complete-arm recognition for block conditions; grouping forces a condition if both readings fit. Rewrite every arm and remove legacy arm-arrow acceptance.",
+          "code": "m: if a > b { a } else { b }\nsign: if { n > 0 { \"positive\" }, else { \"other\" } }\narea: if shape == { .Rect{h, w} { h * w }, .Circle{r} { r } }\n// Record result, not payload binding:\npair: if flag == { true {x: 1, y: 2}, else {x: 0, y: 0} }"
+        },
+        {
+          "key": "C",
+          "name": "Remove subjectless tables",
+          "detail": "Subject, comparison, hole, and type tables keep arrows, including table `else`. Subjectless choices use braced `if` chains. An immediate brace after `if` starts a condition block, never a subjectless table. This explicitly reverses the approved subjectless-table teaching rule, while preserving first-match behavior.",
+          "technical": "Rewrite every subjectless table to a chain, preserving order, scope, jumps, and result types. Update Docs/Spec/spec.md:814-823 and parser_prefer_arm_table so the fixer does not recreate the retired form. Amend the subjectless surface from D-IFGUARD1 and the ordered-table teaching contract; keep existing coverage laws. Reject the old subjectless spelling in the same cutover.",
+          "code": "m: if a > b { a } else { b }\nsign: if n > 0 { \"positive\" } else { \"other\" }\narea: if shape == { .Rect{h, w} -> h * w, .Circle{r} -> r }\nx: if { ready() } { 1 } else { 0 }"
+        },
+        {
+          "key": "D",
+          "name": "Give arms `=>`",
+          "detail": "Replace `->` with `=>` in every arm, including table `else`, with no change to table meaning. Function, computed-field, and state-transition arrows stay unchanged. A distinct arm sigil preserves payload boundaries but adds a spelling to learn and migrates every table.",
+          "technical": "This is new syntax: Compiler/JetLexer/Source/Lexer/Scan.jet:1166-1175 reads `=` separately; it has no `=>` token. Register and implement `=>`; apply complete-arm recognition for G1.2. Under I8's one-in, one-out rule, retire `->` from arms in the same cutover; never accept both. The new glyph still enlarges the alphabet because other uses retain `->`. Cover every table family and update rewrite rows, diagnostics, examples, and formatting.",
+          "code": "m: if a > b { a } else { b }\nsign: if { n > 0 => \"positive\", else => \"other\" }\narea: if shape == { .Rect{h, w} => h * w, .Circle{r} => r }\nx: if { ready() } { 1 } else { 0 }"
+        }
+      ],
+      "comparisons": [
+        {
+          "lang": "Rust",
+          "note": "Rust uses braced control bodies and `=>` match arms. Source: https://doc.rust-lang.org/reference/expressions/match-expr.html.",
+          "code": "let m = if a > b { a } else { b };\nlet sign = match n { n if n > 0 => \"positive\", _ => \"other\" };"
+        }
+      ],
+      "rec": "A",
+      "recommendation": {
+        "why": "A preserves readable arm boundaries without another sigil. It needs a real parser fix, not an arrow scan.",
+        "gains": [
+          "Preserves tables and payload patterns without an arm rewrite."
+        ],
+        "losses": [
+          {
+            "loss": "The arrow keeps several roles.",
+            "mitigation": "`fn(...) -> T` names a type; `case -> value` names an arm result."
+          },
+          {
+            "loss": "Block conditions still need parser work.",
+            "mitigation": "Recognize complete arms; test block conditions, nested tables, function signatures, and formatting."
+          }
+        ],
+        "whyNot": [
+          {
+            "key": "B",
+            "reason": "B unifies body braces but makes payload, record, and body boundaries harder to read."
+          },
+          {
+            "key": "C",
+            "reason": "C removes one ambiguity but replaces approved ordered-table guidance with chains."
+          },
+          {
+            "key": "D",
+            "reason": "D distinguishes arms, but adds a sigil without changing branch meaning."
+          }
+        ],
+        "tradeoff": "Keep arm arrows; do not mistake that choice for finished parsing."
+      },
+      "hybrid": null,
+      "ballotMode": "full",
+      "shortAuthorizedBy": null,
+      "ballotProcessVersion": 5,
+      "reviewPasses": {
+        "adversarial": "Author model family: Claude. Adversarial model family: OpenAI GPT.\nFresh agent: SolArmArrow.\nChecked source and executable probes; repaired arrow-role counts, parser claims, ambiguity framing, citations, examples, and mitigations. Added distinct-arrow option D with replacement-only cutover; retained recommendation A and exposed its parser work."
+      },
+      "checkInstructions": null,
+      "surface": {
+        "gist": "Should arm tables keep arrows when control heads switch to braces?",
+        "lesson": "Heads will use braced bodies. Tables choose the first matching arm, which can produce a value or perform an action. This vote sets their spelling. Every option still owes the wider control-body cutover; keeping arrows alone does not make block conditions work.",
+        "trio": {
+          "current": {
+            "note": "Current dev: heads and arms use arrows; this prints `10 other`.",
+            "code": "a: 10\nb: 3\nn: -4\nm: if a > b -> a else -> b\nsign: if { n > 0 -> \"positive\", else -> \"other\" }\nprint(\"{m} {sign}\")"
+          },
+          "wild": {
+            "lang": "Rust",
+            "note": "Rust separates braced heads from arrow arms; this prints `10 other`.",
+            "code": "// https://doc.rust-lang.org/reference/expressions/match-expr.html\nfn main() {\nlet (a, b, n) = (10, 3, -4);\nlet m = if a > b { a } else { b };\nlet sign = match n { n if n > 0 => \"positive\", _ => \"other\" };\nprintln!(\"{m} {sign}\"); }"
+          }
+        },
+        "options": [
+          {
+            "key": "A",
+            "name": "Arms keep `->`",
+            "gist": "Keep arrows in every table, including its final `else`.",
+            "gains": [
+              "Preserves existing arm spelling.",
+              "Keeps a visible boundary after payload patterns."
+            ],
+            "losses": [
+              "The arrow keeps several roles.",
+              "Block conditions still need parser changes and boundary tests."
+            ],
+            "proposed": {
+              "code": "a: 10\nb: 3\nn: -4\nm: if a > b { a } else { b }\nsign: if { n > 0 -> \"positive\", else -> \"other\" }\nprint(\"{m} {sign}\")"
+            }
+          },
+          {
+            "key": "B",
+            "name": "Arms use braces too",
+            "gist": "Write `case { value }` and `else { value }`.",
+            "gains": [
+              "Heads and arms share braced bodies.",
+              "Removes arm arrows."
+            ],
+            "losses": [
+              "Braces mark payloads, records, and bodies.",
+              "Every arm changes; adjacent arms need separators."
+            ],
+            "proposed": {
+              "code": "a: 10\nb: 3\nn: -4\nm: if a > b { a } else { b }\nsign: if { n > 0 { \"positive\" }, else { \"other\" } }\nprint(\"{m} {sign}\")"
+            }
+          },
+          {
+            "key": "C",
+            "name": "Remove subjectless tables",
+            "gist": "Keep subject-table arrows; use chains for conditions without a shared subject.",
+            "gains": [
+              "A leading brace can only start a condition block."
+            ],
+            "losses": [
+              "Reverses the approved teaching form.",
+              "Every subjectless table becomes a chain."
+            ],
+            "proposed": {
+              "code": "a: 10\nb: 3\nn: -4\nm: if a > b { a } else { b }\nsign: if n > 0 { \"positive\" } else { \"other\" }\nprint(\"{m} {sign}\")"
+            }
+          },
+          {
+            "key": "D",
+            "name": "Give arms `=>`",
+            "gist": "Replace every arm arrow, including table `else`, with `=>`.",
+            "gains": [
+              "Distinguishes arms from every other arrow role.",
+              "Keeps the boundary after payload patterns."
+            ],
+            "losses": [
+              "Adds a new sigil to learn.",
+              "Every arm changes; old arm arrows must disappear."
+            ],
+            "proposed": {
+              "code": "a: 10\nb: 3\nn: -4\nm: if a > b { a } else { b }\nsign: if { n > 0 => \"positive\", else => \"other\" }\nprint(\"{m} {sign}\")"
+            }
+          }
+        ],
+        "recommendation": {
+          "rec": "A",
+          "why": "A preserves readable arm boundaries without another sigil. It needs a real parser fix, not an arrow scan.",
+          "gains": [
+            "Preserves tables and payload patterns without an arm rewrite."
+          ],
+          "losses": [
+            {
+              "loss": "The arrow keeps several roles.",
+              "mitigation": "`fn(...) -> T` names a type; `case -> value` names an arm result."
+            },
+            {
+              "loss": "Block conditions still need parser work.",
+              "mitigation": "Recognize complete arms; test block conditions, nested tables, function signatures, and formatting."
+            }
+          ],
+          "whyNot": [
+            {
+              "key": "B",
+              "reason": "B unifies body braces but makes payload, record, and body boundaries harder to read."
+            },
+            {
+              "key": "C",
+              "reason": "C removes one ambiguity but replaces approved ordered-table guidance with chains."
+            },
+            {
+              "key": "D",
+              "reason": "D distinguishes arms, but adds a sigil without changing branch meaning."
+            }
+          ],
+          "tradeoff": "Keep arm arrows; do not mistake that choice for finished parsing."
+        }
+      },
+      "reports": [
+        {
+          "title": "Composition laws audit",
+          "path": "Docs/Spec/composition-laws.md",
+          "note": "Law 1, gaps G1.1 and G1.2."
+        }
+      ],
+      "draftedBy": "Orchestrator",
+      "reviewedBy": "SolArmArrow",
+      "draft": false,
+      "status": "open",
+      "created": "2026-11-28T10:33:56.746Z"
     }
   ],
   "questions": [
@@ -133677,6 +133891,27 @@
     }
   ],
   "events": [
+    {
+      "at": "2026-11-28T10:34:01.689Z",
+      "by": "Orchestrator",
+      "action": "decision.post",
+      "ref": "D-ARM-ARROW1",
+      "note": "reviewed by SolArmArrow"
+    },
+    {
+      "at": "2026-11-28T10:34:00.600Z",
+      "by": "SolArmArrow",
+      "action": "decision.review",
+      "ref": "D-ARM-ARROW1",
+      "note": "passed"
+    },
+    {
+      "at": "2026-11-28T10:33:56.746Z",
+      "by": "Orchestrator",
+      "action": "decision.add",
+      "ref": "D-ARM-ARROW1",
+      "note": "Choose the arm spelling after control heads switch to braces (draft)"
+    },
     {
       "at": "2026-11-28T09:32:37.207Z",
       "by": "Orchestrator",
