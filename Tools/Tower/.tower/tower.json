@@ -3,7 +3,7 @@
     "version": 4,
     "project": "Jet",
     "nextNum": 7071,
-    "rev": 115478,
+    "rev": 115479,
     "ui": {
       "toggled": [
         "dec-group:syntax",
@@ -64397,6 +64397,11 @@
         {
           "at": "2026-11-28",
           "by": "Orchestrator",
+          "text": "c2 part 3 landed on dev 8defd260767: interpolated append writes in place, sink room, wrapping digits. Checks: check Compiler 0, build 0, StringAppend 3/0, Examples/Text 150/15 with the same FAIL rows as the seed, text fragment case 1/0. c2 stays open: the peer floor is unmet (push 150 ms vs Go 67 ms; short-cell RSS 409 MB vs Rust 167 MB), and the remaining gap needs layout A plus += on String fields."
+        },
+        {
+          "at": "2026-11-28",
+          "by": "Orchestrator",
           "text": "c2 part 3 built (3 patches; they land after #7047 converts them). Profile (jet perf, O2): push lost 41% to the temporary text for s += \"{x}\", 35% to the append/growth chain and 18% to integer display overflow checks; atomic RC is at most 4% in every cell, so D2 thread-local counts is dropped (no crossing census needed). Fixes: interpolated append writes straight into the owner (new runtime reopen exports), in-place sink room when the owner is sole with spare capacity, and wrapping integer digits. Median of 7 vs Rust/Go: push 298->150 ms (Rust 114, Go 67); short 291->275 ms, 409 MB (Rust 174/167 MB); slices 47->40 (21/32); views 45->39 (20/34); bslice 44->35 (19/33). Second programs: report 262->171, numbers 226->196. The peer floor is still unmet; the short-cell RSS and slice-block allocation need layout A (audit section 10). Not fixed: += on a String field still concatenates the whole text."
         },
         {
@@ -64496,7 +64501,7 @@
       "parentId": null,
       "needsAcceptance": false,
       "created": "2026-11-27T19:19:25.407Z",
-      "updated": "2026-11-28T07:40:36.917Z",
+      "updated": "2026-11-28T08:45:36.612Z",
       "updatedBy": "Orchestrator",
       "criteriaLastN": 6
     },
@@ -133667,6 +133672,13 @@
     }
   ],
   "events": [
+    {
+      "at": "2026-11-28T08:45:36.612Z",
+      "by": "Orchestrator",
+      "action": "card.update",
+      "ref": "c0nnf642",
+      "note": "logEntry"
+    },
     {
       "at": "2026-11-28T08:32:07.185Z",
       "by": "Orchestrator",
