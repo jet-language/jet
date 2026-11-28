@@ -3,7 +3,7 @@
     "version": 4,
     "project": "Jet",
     "nextNum": 7071,
-    "rev": 115475,
+    "rev": 115478,
     "ui": {
       "toggled": [
         "dec-group:syntax",
@@ -50278,7 +50278,13 @@
       "visualMedia": [],
       "blockedBy": [],
       "assignee": null,
-      "log": [],
+      "log": [
+        {
+          "at": "2026-11-28",
+          "by": "Orchestrator",
+          "text": "c4 half proven on dev a33ab50305c: cases Moves/task_args_follow_sema_decision gives PASS 1 FAIL 0 (no clone without a sema decision; the root cause was in Lambdas.jet). The other half's command, jet test Compiler --profile golden --filter Tasks/, selects 0 tests since the TitleCase rename (no golden path contains Tasks/). Closest run: --filter Concurrency/Task gives 42/9, the same 9 FAIL rows as the seed (TaskDomainError on all tiers; O2 --release warnings). c4 stays open: the proof filter needs an owner reword, and the 9 golden failures need fixing. Also spotted: spec.md:2614 says a call is always written plain, which conflicts with the live ^ call-mark rule."
+        }
+      ],
       "criteria": [
         {
           "n": 1,
@@ -50338,11 +50344,11 @@
         {
           "n": 5,
           "text": "When a task body moves a captured value out or drops it, the closure environment no longer keeps it alive. Proof: `jet test Compiler --profile cases --filter Moves/task_capture_moved_out_frees`, where a task moves out a large captured value and then allocates as much again, and peak RSS stays below twice the value's size.",
-          "status": "open",
-          "metBy": null,
+          "status": "met",
+          "metBy": "Orchestrator",
           "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-11-16T13:14:04.372Z"
+          "evidence": "dev a33ab50305c (Task captures move instead of copying): jet test Compiler --profile cases --filter Moves/task_capture_moved_out_frees -> PASS 1 FAIL 0 on the dev build from seed dev-bang; the case moves out a large captured value in a detached task, then allocates as much again, on O0/O1/O2, with peak RSS under 2x. The seed fails it (peak 70.8 MB against a 64 MB limit).",
+          "at": "2026-11-28T08:32:05.421Z"
         },
         {
           "n": 6,
@@ -50389,11 +50395,11 @@
         {
           "n": 9,
           "text": "The stage-2 copy-work repros for E0204, E0320 and the false L0102 are each accepted or rejected as the Jet spec says, each with its own UI snapshot.",
-          "status": "open",
-          "metBy": null,
+          "status": "met",
+          "metBy": "Orchestrator",
           "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-11-15T04:30:04.307Z",
+          "evidence": "dev a33ab50305c: jet test Compiler --profile ui --filter stage2_copy_gaps_ -> PASS 6 FAIL 0. One snapshot per repro outcome, as the spec decides. E0204: look(xs[0], bump(^xs)) with an Int element is accepted (prints 4); a held String element is refused with Jet.UseWhileWriteActive, per the spec line that a later argument the call keeps holding is still E0204. E0320: Inst.Compare{left: 3, right: 4} and the pattern Inst.Compare{left, ..} are accepted; the dotted Inst.Compare.{...} is refused (InvalidStatement; E0320 is a retired row). L0102: no warning for a parameter used only inside an if body.",
+          "at": "2026-11-28T08:32:06.337Z",
           "proof": {
             "profile": "ui",
             "filter": "stage2_copy_gaps_"
@@ -50446,7 +50452,7 @@
       "parentId": null,
       "needsAcceptance": false,
       "created": "2026-11-15T04:30:04.307Z",
-      "updated": "2026-11-27T14:49:08.023Z",
+      "updated": "2026-11-28T08:32:07.185Z",
       "updatedBy": "Orchestrator",
       "criteriaLastN": 12
     },
@@ -133661,6 +133667,27 @@
     }
   ],
   "events": [
+    {
+      "at": "2026-11-28T08:32:07.185Z",
+      "by": "Orchestrator",
+      "action": "card.update",
+      "ref": "c0d4kf8m",
+      "note": "logEntry"
+    },
+    {
+      "at": "2026-11-28T08:32:06.337Z",
+      "by": "Orchestrator",
+      "action": "card.criteria-meet",
+      "ref": "c0d4kf8m",
+      "note": "#9"
+    },
+    {
+      "at": "2026-11-28T08:32:05.421Z",
+      "by": "Orchestrator",
+      "action": "card.criteria-meet",
+      "ref": "c0d4kf8m",
+      "note": "#5"
+    },
     {
       "at": "2026-11-28T08:20:56.403Z",
       "by": "Orchestrator",
