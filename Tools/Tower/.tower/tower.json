@@ -3,7 +3,7 @@
     "version": 4,
     "project": "Jet",
     "nextNum": 7071,
-    "rev": 115375,
+    "rev": 115400,
     "ui": {
       "toggled": [
         "dec-group:syntax",
@@ -64505,7 +64505,7 @@
       "parentId": null,
       "needsAcceptance": false,
       "created": "2026-11-27T20:04:52.447Z",
-      "updated": "2026-11-28T04:32:13.428Z",
+      "updated": "2026-11-28T04:32:15.445Z",
       "updatedBy": "Orchestrator",
       "criteriaLastN": 4
     },
@@ -64581,7 +64581,7 @@
       "parentId": null,
       "needsAcceptance": false,
       "created": "2026-11-27T21:28:05.024Z",
-      "updated": "2026-11-28T04:00:02.799Z",
+      "updated": "2026-11-28T04:32:23.244Z",
       "updatedBy": "Orchestrator",
       "criteriaLastN": 4
     },
@@ -64646,7 +64646,7 @@
       "parentId": null,
       "needsAcceptance": false,
       "created": "2026-11-27T21:28:06.305Z",
-      "updated": "2026-11-28T04:00:06.329Z",
+      "updated": "2026-11-28T04:32:36.745Z",
       "updatedBy": "Orchestrator",
       "criteriaLastN": 4
     },
@@ -64702,8 +64702,8 @@
       "parentId": null,
       "needsAcceptance": false,
       "created": "2026-11-27T21:28:07.686Z",
-      "updated": "2026-11-28T04:00:14.590Z",
-      "updatedBy": "Orchestrator",
+      "updated": "2026-11-28T04:32:38.808Z",
+      "updatedBy": "BallotReview4",
       "criteriaLastN": 3
     },
     {
@@ -127617,10 +127617,1219 @@
         }
       ],
       "draftedBy": "Orchestrator",
-      "reviewedBy": null,
-      "draft": true,
+      "reviewedBy": "BallotReview4",
+      "draft": false,
       "status": "open",
       "created": "2026-11-28T04:32:13.428Z"
+    },
+    {
+      "id": "D-COPIES-LINT1",
+      "cardId": "c000ls9h",
+      "group": "diagnostics",
+      "title": "#Policy(copies: .Explicit) becomes a lint a package can deny",
+      "situation": "",
+      "gist": "Should the `copies: .Explicit` policy become an ordinary lint a package can deny, be deleted, or stay a policy key?",
+      "lesson": "Today a package can set `copies: .Explicit` so every hidden copy must be written as `.copy()`. It already only tightens, so it does not break the policy law. The card wants fewer policy keys. As a lint, the package turns the check on in the lints deny list it already uses for other lints.",
+      "explainer": "",
+      "story": "Pia runs a team that wants every copy written out. She wants that check without learning a policy key that works unlike every other rule.",
+      "inWild": "#![deny(clippy::implicit_clone)]",
+      "detail": "Current law. Compiler/JetFoundation/Source/Policy/Policy.jet registers PolicyKey.Copies with PolicyCombine.Tighten (line 211) and accepts only `.Explicit` (lines 464-466). Compiler/JetSema/Source/Sema/Ownership/CopySites.jet, sema_copy_site_refuse_in_place_copy (line 484), turns eligible implicit materialization into a diagnostic under that policy. Docs/Spec/spec.md lines 2603-2606 describe the gate with a Safe `.copy()` edit.\n\nThe lint home exists. Spec lines 1262-1263 already let a package deny a lint with `policy: { lints: { deny: [auto_derive] } }`. Under A the hidden-copy lint is off unless a package denies it the same way, so ordinary code gains no new warnings. `--deny-warnings` alone does not switch it on.\n\nA moves the semantic check to a package-deniable lint; B removes the semantic requirement; C keeps the tightening policy. A lint fix must preserve ownership, evaluation count and copy effects.\n\nThe formatter flag is separate. Compiler/JetCLI/Source/CLI/Front.jet registers `--explicit-copies` (lines 383-384, 3133), and spec lines 6496-6514 document it as formatting behavior. Removing the policy does not by itself justify deleting that mode or its tests.",
+      "options": [
+        {
+          "key": "A",
+          "name": "A lint a package can deny",
+          "detail": "Remove the `copies` policy key. The hidden-copy check becomes a lint with a `.copy()` fix, deniable like any lint.",
+          "code": "names: other_names   // lint: hidden copy; fix: other_names.copy()"
+        },
+        {
+          "key": "B",
+          "name": "Delete the check",
+          "detail": "Delete the semantic key and check. Retain independent explicit-copy formatting behavior unless a separate public-CLI decision removes it.",
+          "code": "names: other_names   // copies silently"
+        },
+        {
+          "key": "C",
+          "name": "Keep the policy key",
+          "detail": "Keep today's key and gate.",
+          "code": "#Policy(copies: .Explicit)"
+        }
+      ],
+      "comparisons": [
+        {
+          "lang": "Rust",
+          "note": "Clippy enforces style rules as lints a crate can deny, such as `implicit_clone`. See https://rust-lang.github.io/rust-clippy/master/index.html#implicit_clone.",
+          "code": "#![deny(clippy::implicit_clone)]"
+        }
+      ],
+      "rec": "A",
+      "recommendation": {
+        "why": "The check helps teams that want visible copies, but a policy key is the wrong home for a style rule. A lint keeps the check, removes a key and joins the warning tools CI already uses.",
+        "gains": [
+          "The check survives for teams that want it.",
+          "One fewer policy key."
+        ],
+        "losses": [
+          {
+            "loss": "Packages using the key must migrate.",
+            "mitigation": "`jet fix` replaces the key with the lint setting in one edit."
+          }
+        ],
+        "whyNot": [
+          {
+            "key": "B",
+            "reason": "B drops a check some teams rely on."
+          },
+          {
+            "key": "C",
+            "reason": "C keeps a style rule in the policy system the card is shrinking."
+          }
+        ],
+        "tradeoff": "One migration edit moves a style rule to where style rules live."
+      },
+      "hybrid": null,
+      "ballotMode": "short",
+      "shortAuthorizedBy": null,
+      "ballotProcessVersion": 5,
+      "reviewPasses": null,
+      "checkInstructions": null,
+      "surface": {
+        "gist": "Should the `copies: .Explicit` policy become an ordinary lint a package can deny, be deleted, or stay a policy key?",
+        "lesson": "Today a package can set `copies: .Explicit` so every hidden copy must be written as `.copy()`. It already only tightens, so it does not break the policy law. The card wants fewer policy keys. As a lint, the package turns the check on in the lints deny list it already uses for other lints.",
+        "trio": {
+          "current": {
+            "note": "Today a package policy key turns on the check.",
+            "code": "#Policy(copies: .Explicit)\nnames: other_names.copy()"
+          },
+          "wild": {
+            "lang": "Rust",
+            "note": "Clippy enforces style rules as lints a crate can deny, such as `implicit_clone`. See https://rust-lang.github.io/rust-clippy/master/index.html#implicit_clone.",
+            "code": "#![deny(clippy::implicit_clone)]"
+          }
+        },
+        "options": [
+          {
+            "key": "A",
+            "name": "A lint a package can deny",
+            "gist": "The policy key goes; a package denies a hidden-copy lint instead.",
+            "gains": [
+              "One home for style checks.",
+              "Uses the package lints deny list that already exists."
+            ],
+            "losses": [
+              "Packages using the key change one setting."
+            ],
+            "proposed": {
+              "code": "names: other_names   // lint: hidden copy; fix: other_names.copy()"
+            }
+          },
+          {
+            "key": "B",
+            "name": "Delete the check",
+            "gist": "Remove the key and the check; the formatter flag is a separate question.",
+            "gains": [
+              "Less code to keep."
+            ],
+            "losses": [
+              "Teams that want written copies lose the check."
+            ],
+            "proposed": {
+              "code": "names: other_names   // copies silently"
+            }
+          },
+          {
+            "key": "C",
+            "name": "Keep the policy key",
+            "gist": "Keep `copies: .Explicit` as today; it already only tightens.",
+            "gains": [
+              "No migration."
+            ],
+            "losses": [
+              "A style rule stays in the policy system."
+            ],
+            "proposed": {
+              "code": "#Policy(copies: .Explicit)"
+            }
+          }
+        ],
+        "recommendation": {
+          "rec": "A",
+          "why": "The check helps teams that want visible copies, but a policy key is the wrong home for a style rule. A lint keeps the check, removes a key and joins the warning tools CI already uses.",
+          "gains": [
+            "The check survives for teams that want it.",
+            "One fewer policy key."
+          ],
+          "losses": [
+            {
+              "loss": "Packages using the key must migrate.",
+              "mitigation": "`jet fix` replaces the key with the lint setting in one edit."
+            }
+          ],
+          "whyNot": [
+            {
+              "key": "B",
+              "reason": "B drops a check some teams rely on."
+            },
+            {
+              "key": "C",
+              "reason": "C keeps a style rule in the policy system the card is shrinking."
+            }
+          ],
+          "tradeoff": "One migration edit moves a style rule to where style rules live."
+        }
+      },
+      "reports": [
+        {
+          "title": "Tier 1 policy, roles and AST pre-build review",
+          "path": "Docs/Audits/2026-11-27-tier1-policy-roles-ast-review.md",
+          "note": "Sections 1.4 and 1.6, question Q3."
+        }
+      ],
+      "draftedBy": "Orchestrator",
+      "reviewedBy": "BallotReview4",
+      "draft": false,
+      "status": "open",
+      "created": "2026-11-28T04:32:16.255Z"
+    },
+    {
+      "id": "D-NEW-RETURN1",
+      "cardId": "c000ls9h",
+      "group": "language",
+      "title": "A static method named new is an ordinary method; E0181 retires",
+      "situation": "",
+      "gist": "Should a static `new` be free to return any type, retiring E0181, the rule that `new` must return its owner?",
+      "lesson": "Today a static method named `new` must return its own type, or E0181 fires. It is a rule keyed on one method name. Deleting it makes `new` an ordinary method. Extending it to every static method would need a new marker. Keeping it leaves one name the compiler treats specially.",
+      "explainer": "",
+      "story": "Lena writes `Parser.new(text)` that returns a parse result type. She hits a rule that applies only because she named the method `new`.",
+      "inWild": "impl Gate { fn new() -> i32 { 0 } } // allowed",
+      "detail": "Current law. Docs/Spec/spec.md lines 1109-1113 make a static `new` the type's constructor: its result is the owner type or one of its states, optionally behind `?` or a failure contract, else E0181. Compiler/JetSema/Source/Sema/Registration/Checked.jet, sema_checked_validate_constructor (lines 2633-2646) with sema_checked_constructor_result (2651-2664), enforces this for written static methods named new.\n\nRatified API laws are unaffected. The constructor-idiom law says `.new(…)` makes fresh stateful values in Core, and the fresh-value verb ruling made every constructor start with new. Both are review rules for API authors. Under A they remain review rules, not a compiler check keyed on a name.\n\nDependent rewrites. The tier 1 review (Docs/Audits/2026-11-27-tier1-policy-roles-ast-review.md, section 2.4) also lists expected-type `.new(…)` inference and the `Decimal(…)` call-as-constructor rewrite to `Name.new(…)`. Both assume new returns its owner. Under A each must check its own result type at the site that uses it. The paired inferred-member ballot covers the first; the rewrite must refuse a non-owner result.\n\nThe original draft's B offered an unspecified constructor marker. It is removed rather than asking the owner to approve undefined syntax; the keep option is now B. Removing this diagnostic must preserve unrelated method-result checks.",
+      "options": [
+        {
+          "key": "A",
+          "name": "Delete E0181",
+          "detail": "Remove the E0181 check, its registry row and its tests.",
+          "code": "Gate: struct {\n    new: fn() -> Int { 0 }   // allowed\n}"
+        },
+        {
+          "key": "B",
+          "name": "Keep E0181",
+          "detail": "Keep today's rule and reword the card criterion.",
+          "code": "Gate: struct {\n    new: fn() -> Int { 0 }   // E0181\n}"
+        }
+      ],
+      "comparisons": [
+        {
+          "lang": "Rust",
+          "note": "Rust treats `new` as a naming convention; any associated function may return any type. See https://rust-lang.github.io/api-guidelines/predictability.html.",
+          "code": "impl Gate { fn new() -> i32 { 0 } } // allowed"
+        }
+      ],
+      "rec": "A",
+      "recommendation": {
+        "why": "A rule that applies only because of a method's name is the hidden meaning the card removes. Deleting it adds nothing to learn and leaves every static method under one rule.",
+        "gains": [
+          "No name-keyed rule.",
+          "Nothing new to learn."
+        ],
+        "losses": [
+          {
+            "loss": "`new` may return an unexpected type.",
+            "mitigation": "Signatures and hover show the result type, as for any static method."
+          }
+        ],
+        "whyNot": [
+          {
+            "key": "B",
+            "reason": "B keeps the name-keyed rule the card asks to remove."
+          }
+        ],
+        "tradeoff": "A lost promise about `new` buys one rule for static methods."
+      },
+      "hybrid": null,
+      "ballotMode": "short",
+      "shortAuthorizedBy": null,
+      "ballotProcessVersion": 5,
+      "reviewPasses": null,
+      "checkInstructions": null,
+      "surface": {
+        "gist": "Should a static `new` be free to return any type, retiring E0181, the rule that `new` must return its owner?",
+        "lesson": "Today a static method named `new` must return its own type, or E0181 fires. It is a rule keyed on one method name. Deleting it makes `new` an ordinary method. Extending it to every static method would need a new marker. Keeping it leaves one name the compiler treats specially.",
+        "trio": {
+          "current": {
+            "note": "Today `new` must return its owner type, behind any `?` or failure.",
+            "code": "Gate: struct {\n    new: fn() -> Int { 0 }   // E0181\n}"
+          },
+          "wild": {
+            "lang": "Rust",
+            "note": "Rust treats `new` as a naming convention; any associated function may return any type. See https://rust-lang.github.io/api-guidelines/predictability.html.",
+            "code": "impl Gate { fn new() -> i32 { 0 } } // allowed"
+          }
+        },
+        "options": [
+          {
+            "key": "A",
+            "name": "Delete E0181",
+            "gist": "`new` is an ordinary static method and may return any type.",
+            "gains": [
+              "No rule keyed on a method name.",
+              "One rule for all static methods."
+            ],
+            "losses": [
+              "`Type.new(…)` no longer promises a `Type`."
+            ],
+            "proposed": {
+              "code": "Gate: struct {\n    new: fn() -> Int { 0 }   // allowed\n}"
+            }
+          },
+          {
+            "key": "B",
+            "name": "Keep E0181",
+            "gist": "Keep the rule for methods named `new`.",
+            "gains": [
+              "No change."
+            ],
+            "losses": [
+              "The compiler still treats one name specially."
+            ],
+            "proposed": {
+              "code": "Gate: struct {\n    new: fn() -> Int { 0 }   // E0181\n}"
+            }
+          }
+        ],
+        "recommendation": {
+          "rec": "A",
+          "why": "A rule that applies only because of a method's name is the hidden meaning the card removes. Deleting it adds nothing to learn and leaves every static method under one rule.",
+          "gains": [
+            "No name-keyed rule.",
+            "Nothing new to learn."
+          ],
+          "losses": [
+            {
+              "loss": "`new` may return an unexpected type.",
+              "mitigation": "Signatures and hover show the result type, as for any static method."
+            }
+          ],
+          "whyNot": [
+            {
+              "key": "B",
+              "reason": "B keeps the name-keyed rule the card asks to remove."
+            }
+          ],
+          "tradeoff": "A lost promise about `new` buys one rule for static methods."
+        }
+      },
+      "reports": [
+        {
+          "title": "Tier 1 policy, roles and AST pre-build review",
+          "path": "Docs/Audits/2026-11-27-tier1-policy-roles-ast-review.md",
+          "note": "Section 2.4 item 1."
+        }
+      ],
+      "draftedBy": "Orchestrator",
+      "reviewedBy": "BallotReview4",
+      "draft": false,
+      "status": "open",
+      "created": "2026-11-28T04:32:18.885Z"
+    },
+    {
+      "id": "D-OVERFLOW-BLOCK1",
+      "cardId": "c000ls9h",
+      "group": "language",
+      "title": "#Overflow blocks leave the language; wrapping, saturating and checked mark each operation",
+      "situation": "",
+      "gist": "Should `#Overflow` blocks go, leaving `wrapping(…)`, `saturating(…)` and `checked(…)` as the only overflow opt-ins?",
+      "lesson": "Fixed-width integers stop on overflow by default. Today two tools change that: the per-operation gates `wrapping(…)`, `saturating(…)` and `checked(…)`, and an `#Overflow` block that changes every operation inside it. The block is the only policy where an inner setting loosens an outer one. Deleting it leaves one tool, visible at each operation.",
+      "explainer": "",
+      "story": "Noor reads a hash function wrapped in `#Overflow(.Wrapping)`. She cannot tell which of its forty lines rely on wrapping and which would be bugs.",
+      "inWild": "let x = hi.wrapping_add(lo);\nlet y = Wrapping(hi) * Wrapping(lo);",
+      "detail": "Current law. Compiler/JetFoundation/Source/Policy/Policy.jet, POLICY_RULES (lines 213-214), has one Override row: Arithmetic, the key behind #Overflow, where the innermost mode wins. Every other row tightens. Examples/LowLevel/FixedOverflowModes.jet lines 30-35 use wrapping, saturating, checked and block modes. The older executable ran that example and printed 44, 255, 0 and 0 for the four gates, then 32 and 255 for the two blocks. This is baseline evidence, not parity with dev.\n\nThis ballot amends a ratified ruling. The one-overflow-rule ruling chose plain-stops plus three words and kept the block form: #Overflow(.Wrapping), (.Saturating) and (.Stop) set the same outcome for a function, method or block, innermost wins. The card's tighten-only policy law, recorded on the card as owner-approved, lists #Overflow for deletion. The two records conflict, so the owner decides here. Under A that ruling's words and conversion law stand; only its block form goes.\n\nA removes #Overflow and preserves the effective mode at each affected fixed-width operation. Nested blocks use the innermost applicable mode; existing explicit gates retain their own meaning. A word already covers every fixed-width operation inside its parentheses up to a call, so one word per expression usually suffices. Preserve left-to-right evaluation, compound-assignment place evaluation once, shifts, conversions and checked-result handling. Do not wrap a whole expression if that changes an inner intermediate overflow. The lexical mode does not silently change a separately defined callee's arithmetic.\n\nThe Overflow event remains a separate concept. Review removes the audit's unspecified wrapping-type option: no name or complete arithmetic/conversion law was supplied. B is the complete alternative, retaining block convenience and override semantics. Existing fix tooling is not claimed to perform this migration today.",
+      "options": [
+        {
+          "key": "A",
+          "name": "Per-operation gates only",
+          "detail": "Remove the marker and Override row. Implement checked per-operation fixes preserving effective nested modes, intermediate operations, place evaluation and checked-result behavior.",
+          "code": "print(wrapping(hi * lo))\nprint(saturating(hi * lo))"
+        },
+        {
+          "key": "B",
+          "name": "Keep #Overflow",
+          "detail": "Keep today's block policy and its Override row.",
+          "code": "#Overflow(.Wrapping) { print(hi * lo) }"
+        }
+      ],
+      "comparisons": [
+        {
+          "lang": "Rust",
+          "note": "Rust offers per-operation methods and a `Wrapping<T>` type, with no block mode. See https://doc.rust-lang.org/std/num/struct.Wrapping.html.",
+          "code": "let x = hi.wrapping_add(lo);\nlet y = Wrapping(hi) * Wrapping(lo);"
+        },
+        {
+          "lang": "C#",
+          "note": "C# has `checked` and `unchecked` blocks that switch overflow mode for every operation inside. See https://learn.microsoft.com/dotnet/csharp/language-reference/statements/checked-and-unchecked.",
+          "code": "unchecked { int h = a * b; }"
+        }
+      ],
+      "rec": "A",
+      "recommendation": {
+        "why": "Existing gates expose overflow mode per operation. Removing the block removes the sole Override policy, with semantics-preserving fixes rather than blind wrapping.",
+        "gains": [
+          "One overflow tool.",
+          "No policy loosens an outer one."
+        ],
+        "losses": [
+          {
+            "loss": "Hash bodies repeat the gate on many lines.",
+            "mitigation": "Preserve nested modes and intermediate operations; evaluate compound-assignment places once and diagnose migrations needing review."
+          }
+        ],
+        "whyNot": [
+          {
+            "key": "B",
+            "reason": "B keeps two tools and the only policy that loosens an outer one."
+          }
+        ],
+        "tradeoff": "Longer hash bodies buy one visible overflow tool."
+      },
+      "hybrid": null,
+      "ballotMode": "short",
+      "shortAuthorizedBy": null,
+      "ballotProcessVersion": 5,
+      "reviewPasses": null,
+      "checkInstructions": null,
+      "surface": {
+        "gist": "Should `#Overflow` blocks go, leaving `wrapping(…)`, `saturating(…)` and `checked(…)` as the only overflow opt-ins?",
+        "lesson": "Fixed-width integers stop on overflow by default. Today two tools change that: the per-operation gates `wrapping(…)`, `saturating(…)` and `checked(…)`, and an `#Overflow` block that changes every operation inside it. The block is the only policy where an inner setting loosens an outer one. Deleting it leaves one tool, visible at each operation.",
+        "trio": {
+          "current": {
+            "note": "Today both the per-operation gate and the block form work.",
+            "code": "print(wrapping(hi + lo))\n#Overflow(.Wrapping) { print(hi * lo) }"
+          },
+          "wild": {
+            "lang": "Rust",
+            "note": "Rust offers per-operation methods and a `Wrapping<T>` type, with no block mode. See https://doc.rust-lang.org/std/num/struct.Wrapping.html.",
+            "code": "let x = hi.wrapping_add(lo);\nlet y = Wrapping(hi) * Wrapping(lo);"
+          }
+        },
+        "options": [
+          {
+            "key": "A",
+            "name": "Per-operation gates only",
+            "gist": "Delete #Overflow; checked fixes preserve each affected operation's effective mode and evaluation order.",
+            "gains": [
+              "One overflow tool, visible at each operation.",
+              "Every policy only tightens."
+            ],
+            "losses": [
+              "Hash and crypto bodies repeat the gate on many lines."
+            ],
+            "proposed": {
+              "code": "print(wrapping(hi * lo))\nprint(saturating(hi * lo))"
+            }
+          },
+          {
+            "key": "B",
+            "name": "Keep #Overflow",
+            "gist": "Keep the block form beside the gates.",
+            "gains": [
+              "No migration."
+            ],
+            "losses": [
+              "Two tools for one job.",
+              "One policy still loosens an outer setting."
+            ],
+            "proposed": {
+              "code": "#Overflow(.Wrapping) { print(hi * lo) }"
+            }
+          }
+        ],
+        "recommendation": {
+          "rec": "A",
+          "why": "Existing gates make the overflow mode visible at each operation. Removing the block removes the sole Override policy, but migration needs semantic checks rather than a blind text wrap.",
+          "gains": [
+            "One overflow tool.",
+            "No policy loosens an outer one."
+          ],
+          "losses": [
+            {
+              "loss": "Hash bodies repeat the gate on many lines.",
+              "mitigation": "Provide checked fixes for affected operations, preserving nested modes and single evaluation of compound-assignment places."
+            }
+          ],
+          "whyNot": [
+            {
+              "key": "B",
+              "reason": "B keeps two tools and the only policy that loosens an outer one."
+            }
+          ],
+          "tradeoff": "Longer hash bodies buy one visible overflow tool."
+        }
+      },
+      "reports": [
+        {
+          "title": "Tier 1 policy, roles and AST pre-build review",
+          "path": "Docs/Audits/2026-11-27-tier1-policy-roles-ast-review.md",
+          "note": "Sections 1.4 and 1.6, question Q2."
+        }
+      ],
+      "draftedBy": "Orchestrator",
+      "reviewedBy": "BallotReview4",
+      "draft": false,
+      "status": "open",
+      "created": "2026-11-28T04:32:21.570Z"
+    },
+    {
+      "id": "D-TAKE-MARK-COPY1",
+      "cardId": "c0l6uetj",
+      "group": "memory",
+      "title": "A ^^ mark on a value that copies structurally is accepted as a copy",
+      "situation": "",
+      "gist": "Should `^^p` on a value whose type copies structurally be accepted as a plain copy, instead of an error?",
+      "lesson": "The ratified call-mark rule rejects a take mark when the argument copies rather than moves. A explicitly amends that clause and accepts the mark as a copy. B keeps marks truthful to the current transfer. C gives the mark a uniform consuming meaning even for Copy values. None makes arbitrary layout changes API-neutral.",
+      "explainer": "",
+      "story": "Ken adds a field to a small `Point` struct. It stops copying structurally, and he wonders why unrelated call sites changed.",
+      "inWild": "#[derive(Copy, Clone)] struct Point { x: i32 }\nfn send(_: Point) {}\nlet p = Point { x: 1 }; send(p); let _ = p;",
+      "detail": "The ratified call-mark ruling (mark every changed named argument) makes whole-name takes optional but checked. It makes `^^` on a name whose type copies E0225 with a Safe removal, so a visible mark reports actual source invalidation. This is B's rationale, not resistance to layout changes. Compiler/JetFoundation/Data/Syntax/Spellings.jet lines 75-76 record optional whole-name takes. Compiler/JetSema/Source/Sema/Ownership/CallMarks.jet, sema_call_marks_unused (line 208, MoveCopyType arm at 223), emits E0225 and supplies a behavior-preserving deletion.\n\nBaseline send(^^p) with p:Int was rejected with Jet.UnusedPlaceMark, explaining that Int copies and p stays usable. This older executable is not implementation parity with dev. In Compiler/JetSema/Source/Sema/Ownership/Copy.jet, sema_copy_nominal_combine (lines 918-978) derives structural copying from field facts and a size cap (line 961). Adding a field can therefore change whether a struct copies. The illustrative Point need not be Copy in the older binary.\n\nA amends only copied-take rejection. Receiver, read-input, fresh-value and field/index restrictions remain. It avoids errors when a marked type becomes Copy, but not later-use errors when Copy becomes moving. Allocation and cleanup may also change across layout changes. B retains the ratified truthfulness rule.\n\nC is a new alternative: an explicit whole-name take invalidates the binding even if lowering copies bits. Unmarked Copy passing still leaves it usable. This changes ownership analysis, not stored-byte erasure. Rust's ordinary passing copies Copy types and has no equivalent explicit take operator.",
+      "options": [
+        {
+          "key": "A",
+          "name": "Accept ^^ as a copy",
+          "detail": "Remove only MoveCopyType rejection: a take mark on Copy copies and leaves the source usable. This explicitly amends the ratified copied-take clause.",
+          "code": "send(^^p) // copies\nprint(p) // allowed"
+        },
+        {
+          "key": "B",
+          "name": "Keep copied-take rejection",
+          "detail": "Retain the ratified guarantee that a visible take mark describes a real move; remove redundant marks when a type becomes Copy.",
+          "code": "send(^^p) // Copy: rejected\nsend(p) // copies"
+        },
+        {
+          "key": "C",
+          "name": "Explicit take always consumes",
+          "detail": "A marked whole-name Copy argument invalidates its source binding in ownership analysis. Unmarked Copy passing remains nonconsuming. Keep all other call-mark restrictions.",
+          "code": "send(^^p) // consumes p\nprint(p) // rejected"
+        }
+      ],
+      "comparisons": [
+        {
+          "lang": "Rust",
+          "note": "Rust has no Jet-style explicit take mark: ordinary by-value passing copies a Copy type. Copy and Clone are separate. See https://doc.rust-lang.org/std/marker/trait.Copy.html.",
+          "code": "#[derive(Copy, Clone)] struct Point { x: i32 }\nfn send(_: Point) {}\nlet p = Point { x: 1 }; send(p); let _ = p;"
+        }
+      ],
+      "rec": "A",
+      "recommendation": {
+        "why": "Accept a redundant take mark without forcing edits when a type becomes Copy. This sacrifices a visible invalidation guarantee, not all ownership-related migration.",
+        "gains": [
+          "No redundant-mark edit when a type becomes Copy."
+        ],
+        "losses": [
+          {
+            "loss": "A marked Copy argument leaves the source usable.",
+            "mitigation": "Hover and ownership facts must state copy versus move; use C if source invalidation is the desired guarantee."
+          }
+        ],
+        "whyNot": [
+          {
+            "key": "B",
+            "reason": "B preserves the ratified ownership signal, but rejects a harmless redundant mark after Copy eligibility changes."
+          },
+          {
+            "key": "C",
+            "reason": "C gives the clearest consuming intent, but rejects safe later uses of a Copy binding."
+          }
+        ],
+        "tradeoff": "A permits redundant marks; it does not make changes to Copy eligibility nonbreaking."
+      },
+      "hybrid": null,
+      "ballotMode": "short",
+      "shortAuthorizedBy": null,
+      "ballotProcessVersion": 5,
+      "reviewPasses": null,
+      "checkInstructions": null,
+      "surface": {
+        "gist": "Should `^^p` on a value whose type copies structurally be accepted as a plain copy, instead of an error?",
+        "lesson": "The ratified call-mark rule rejects a take mark when the argument copies rather than moves. A explicitly amends that clause and accepts the mark as a copy. B keeps marks truthful to the current transfer. C gives the mark a uniform consuming meaning even for Copy values. None makes arbitrary layout changes API-neutral.",
+        "trio": {
+          "current": {
+            "note": "The older executable baseline rejects a take mark on Int; dev source retains that diagnostic branch.",
+            "code": "send: fn(p: ^^Int) { print(p) }\nrun: fn() { p: 2; send(^^p); print(p) }\n// rejected: Jet.UnusedPlaceMark"
+          },
+          "wild": {
+            "lang": "Rust",
+            "note": "Rust has no Jet-style explicit take mark: ordinary by-value passing copies a Copy type. Copy and Clone are separate. See https://doc.rust-lang.org/std/marker/trait.Copy.html.",
+            "code": "#[derive(Copy, Clone)] struct Point { x: i32 }\nfn send(_: Point) {}\nlet p = Point { x: 1 }; send(p); let _ = p;"
+          }
+        },
+        "options": [
+          {
+            "key": "A",
+            "name": "Accept ^^ as a copy",
+            "gist": "A take mark is accepted on a Copy value and leaves the name usable.",
+            "gains": [
+              "Removes redundant-mark errors when a type becomes Copy."
+            ],
+            "losses": [
+              "A visible take mark no longer promises source invalidation."
+            ],
+            "proposed": {
+              "code": "send(^^p) // Copy: accepted\nprint(p) // still usable"
+            }
+          },
+          {
+            "key": "B",
+            "name": "Keep copied-take rejection",
+            "gist": "Keep the ratified rule that a take mark must describe a real move.",
+            "gains": [
+              "The mark remains a trustworthy ownership signal."
+            ],
+            "losses": [
+              "Changing Copy eligibility may require removing existing marks."
+            ],
+            "proposed": {
+              "code": "send(^^p) // Copy: rejected\nsend(p) // copies"
+            }
+          },
+          {
+            "key": "C",
+            "name": "Explicit take always consumes",
+            "gist": "Accept a marked Copy argument but invalidate that source binding.",
+            "gains": [
+              "Uniform meaning for explicit take across layouts."
+            ],
+            "losses": [
+              "A harmless later use becomes an ownership error."
+            ],
+            "proposed": {
+              "code": "send(^^p) // Copy: accepted, p consumed\nprint(p) // rejected"
+            }
+          }
+        ],
+        "recommendation": {
+          "rec": "A",
+          "why": "Accept a redundant take mark without forcing edits when a type becomes Copy. This sacrifices a visible invalidation guarantee, not all ownership-related migration.",
+          "gains": [
+            "No redundant-mark edit when a type becomes Copy."
+          ],
+          "losses": [
+            {
+              "loss": "A marked Copy argument leaves the source usable.",
+              "mitigation": "Hover and ownership facts must state copy versus move; use C if source invalidation is the desired guarantee."
+            }
+          ],
+          "whyNot": [
+            {
+              "key": "B",
+              "reason": "B preserves the ratified ownership signal, but rejects a harmless redundant mark after Copy eligibility changes."
+            },
+            {
+              "key": "C",
+              "reason": "C gives the clearest consuming intent, but rejects safe later uses of a Copy binding."
+            }
+          ],
+          "tradeoff": "A permits redundant marks; it does not make changes to Copy eligibility nonbreaking."
+        }
+      },
+      "reports": [
+        {
+          "title": "Marks, conversions and type unification pre-build review",
+          "path": "Docs/Audits/2026-11-27-marks-conversions-type-unification-review.md",
+          "note": "Section 1.2 attack 2 and gaps ballot B4."
+        }
+      ],
+      "draftedBy": "Orchestrator",
+      "reviewedBy": "BallotReview4",
+      "draft": false,
+      "status": "open",
+      "created": "2026-11-28T04:32:24.057Z"
+    },
+    {
+      "id": "D-TAKE-AUTOCOPY1",
+      "cardId": "c0l6uetj",
+      "group": "memory",
+      "title": "A read value passed where ownership is taken is an error unless its type copies",
+      "situation": "",
+      "gist": "When a read-only value goes where a function takes ownership, should Jet copy it silently or ask for `.copy()`?",
+      "lesson": "The baseline already refuses moving a bare read parameter into a take slot. It still accepts an indexed read place there, implicitly materializing a copy. A closes that remaining gap for non-Copy values. Structural Copy arguments remain valid, and explicit copies retain their real effects and costs.",
+      "explainer": "",
+      "story": "Ravi passes a list he only reads into a function that keeps it. He does not notice the list is copied on every call.",
+      "inWild": "fn show(names: &Vec<String>) {\n    remember(names.clone()); // written out\n}",
+      "detail": "Compiler/JetSema/Source/Sema/Ownership/CopySites.jet describes read-place materialization at owning destinations. Its sema_copy_site_refuse_in_place_copy grades safe edits only with complete facts. Compiler/JetSema/Source/Sema/Ownership/Checks.jet separately refuses moving a bare borrowed parameter. The baseline rejects remember(names), but accepts remember(rows[0]) from a read parameter and prints 1. The original blanket claim that bare read parameters silently copy was false.\n\nA closes remaining implicit non-Copy read-place materializations into take slots, rather than claiming to introduce the existing bare-parameter error. Structural Copy still copies, and truly owned arguments still move. Explicit .copy() retains allocation, custom-copy effects and failure behavior; it is not a bitwise assertion.\n\nAuto-edit only when the same checked materialization happens once with preserved evaluation order, effects and failures. Otherwise explain the ownership change. B preserves the remaining automatic materialization for indexed places and its convenience, but hides that operation at the call site. Dev source and the older executable are separate evidence.",
+      "options": [
+        {
+          "key": "A",
+          "name": "Error with a copy fix",
+          "detail": "Refuse implicit non-Copy read-to-take materialization. Offer .copy() or an owning contract; auto-apply only a proved equivalent, single-evaluation copy edit.",
+          "code": "show: fn(rows: [[String]]) Never! { remember(rows[0].copy()) }"
+        },
+        {
+          "key": "B",
+          "name": "Keep the automatic copy",
+          "detail": "Keep today's rule.",
+          "code": "show: fn(rows: [[String]]) Never! { remember(rows[0]) }"
+        }
+      ],
+      "comparisons": [
+        {
+          "lang": "Rust",
+          "note": "Rust never clones implicitly; a borrowed value going to an owning parameter needs `.clone()`. See https://doc.rust-lang.org/std/clone/trait.Clone.html.",
+          "code": "fn show(names: &Vec<String>) {\n    remember(names.clone()); // written out\n}"
+        }
+      ],
+      "rec": "A",
+      "recommendation": {
+        "why": "A silent copy is a hidden cost in an ordinary-looking call. Asking for `.copy()` shows it where it happens, and `jet fix` writes it at every existing site.",
+        "gains": [
+          "No hidden copies at calls.",
+          "Same rule as non-cloneable values already follow."
+        ],
+        "losses": [
+          {
+            "loss": "Existing code gains `.copy()` calls.",
+            "mitigation": "`jet fix` inserts them, so programs behave the same after migration."
+          }
+        ],
+        "whyNot": [
+          {
+            "key": "B",
+            "reason": "B keeps a full copy hidden in an ordinary call."
+          }
+        ],
+        "tradeoff": "A few written `.copy()` calls make every copy visible."
+      },
+      "hybrid": null,
+      "ballotMode": "short",
+      "shortAuthorizedBy": null,
+      "ballotProcessVersion": 5,
+      "reviewPasses": null,
+      "checkInstructions": null,
+      "surface": {
+        "gist": "When a read-only value goes where a function takes ownership, should Jet copy it silently or ask for `.copy()`?",
+        "lesson": "The baseline already refuses moving a bare read parameter into a take slot. It still accepts an indexed read place there, implicitly materializing a copy. A closes that remaining gap for non-Copy values. Structural Copy arguments remain valid, and explicit copies retain their real effects and costs.",
+        "trio": {
+          "current": {
+            "note": "A bare read parameter is already refused; an indexed read place is still copied automatically.",
+            "code": "remember: fn(names: ^^[String]) Never! { print(names.len()) }\nshow: fn(rows: [[String]]) Never! { remember(rows[0]) }\n// baseline accepts the indexed read and prints 1"
+          },
+          "wild": {
+            "lang": "Rust",
+            "note": "Rust never clones implicitly; a borrowed value going to an owning parameter needs `.clone()`. See https://doc.rust-lang.org/std/clone/trait.Clone.html.",
+            "code": "fn show(names: &Vec<String>) {\n    remember(names.clone()); // written out\n}"
+          }
+        },
+        "options": [
+          {
+            "key": "A",
+            "name": "Error with a copy fix",
+            "gist": "A read value into an owning slot is an error unless its type copies; the fix is `.copy()`.",
+            "gains": [
+              "Every allocation at a call is visible.",
+              "One rule for all non-copy types."
+            ],
+            "losses": [
+              "Existing calls gain `.copy()`."
+            ],
+            "proposed": {
+              "code": "show: fn(rows: [[String]]) Never! {\n    remember(rows[0].copy())\n}"
+            }
+          },
+          {
+            "key": "B",
+            "name": "Keep the automatic copy",
+            "gist": "Cloneable read values keep being copied silently into owning slots.",
+            "gains": [
+              "No migration."
+            ],
+            "losses": [
+              "A full copy hides in an ordinary call."
+            ],
+            "proposed": {
+              "code": "show: fn(rows: [[String]]) Never! {\n    remember(rows[0])   // indexed read materializes\n}"
+            }
+          }
+        ],
+        "recommendation": {
+          "rec": "A",
+          "why": "A silent copy is a hidden cost in an ordinary-looking call. Asking for `.copy()` shows it where it happens, and `jet fix` writes it at every existing site.",
+          "gains": [
+            "No hidden copies at calls.",
+            "Same rule as non-cloneable values already follow."
+          ],
+          "losses": [
+            {
+              "loss": "Existing code gains `.copy()` calls.",
+              "mitigation": "`jet fix` inserts them, so programs behave the same after migration."
+            }
+          ],
+          "whyNot": [
+            {
+              "key": "B",
+              "reason": "B keeps a full copy hidden in an ordinary call."
+            }
+          ],
+          "tradeoff": "A few written `.copy()` calls make every copy visible."
+        }
+      },
+      "reports": [
+        {
+          "title": "Marks, conversions and type unification pre-build review",
+          "path": "Docs/Audits/2026-11-27-marks-conversions-type-unification-review.md",
+          "note": "Section 1.2 attack 2 and gaps ballot B3."
+        }
+      ],
+      "draftedBy": "Orchestrator",
+      "reviewedBy": "BallotReview4",
+      "draft": false,
+      "status": "open",
+      "created": "2026-11-28T04:32:26.787Z"
+    },
+    {
+      "id": "D-TYPE-ONE1",
+      "cardId": "c0l6uetj",
+      "group": "library",
+      "title": "TypeId folds into Type: one-word identity at run time, reflection at compile time only",
+      "situation": "",
+      "gist": "Should `TypeId` fold into `Type`, which becomes a one-word identity at run time with reflection members usable only at compile time?",
+      "lesson": "Jet has two type values today. Run-time `Type` compares path strings, and compile-time `TypeId` carries a full record. Folding them gives one `Type`. At run time it is one word, so equality and map keys are fast and leak no type tables. Members such as `.fields` work only at compile time.",
+      "explainer": "",
+      "story": "Uma keys a cache by `Type` and writes a macro that reads `.fields`. She has to learn two type values for what feels like one idea.",
+      "inWild": "let id = TypeId::of::<Point>();\nassert_eq!(id, TypeId::of::<Point>());",
+      "detail": "Current law. Core/Prelude/Prelude.jet declares Type (lines 189-204) as a struct holding a private path String, displayed as its module-qualified path. Its comment says two values are equal exactly when they name one type. TypeId is the compile-time reflection value. Compiler/JetFoundation/Data/Syntax/Spellings.jet lines 55-57 use it for meta.add_struct, meta.find_type and `TypeId{T}`. The baseline Type{Point} display printed its qualified name; that run establishes display, not equality cost.\n\nSee the marks, conversions and type unification review, section 3.2 item 5 (Docs/Audits/2026-11-27-marks-conversions-type-unification-review.md). Path-string equality can conflate two types whose paths collide, such as one module path from two package versions. A whole-tree count on this checkout found about 290 TypeId lines in 67 Jet files, about 235 of them under Compiler.\n\nA unifies the public type value as Type. Runtime identity is an opaque canonical one-word token for the resolved type, including its defining module and generic arguments. Independently loaded code in one program must agree on canonical identity. Equal printed names do not establish equality.\n\nRatified run-time reflection is unchanged. Type's own reflection members, such as `.fields`, are compile-time only. A program that calls reflect while running still keeps info for exactly the types it reflects, as already ratified; a Type key alone ships no type table.\n\nThe token is not a raw metadata pointer, serialized identifier or promised cross-process/cross-build value. Runtime equality and hashing use canonical identity; display metadata is retained only when a program prints a Type. B keeps the distinct runtime and compile-time APIs, avoiding that representation and compatibility cutover.",
+      "options": [
+        {
+          "key": "A",
+          "name": "One Type",
+          "detail": "Unify Type and TypeId. Use a canonical opaque runtime token, not path equality or an exposed AST pointer. Type's reflection members work only at compile time; the ratified run-time reflect call is unchanged. Preserve definition, module and generic identity, and do not promise token stability across processes or builds.",
+          "code": "t: Type{Point}\nsame: t == Type{Point}   // one-word compare\n// t.fields: compile time only"
+        },
+        {
+          "key": "B",
+          "name": "Keep both",
+          "detail": "Keep today's two representations.",
+          "code": "key: Type{Point}   // compares path strings"
+        }
+      ],
+      "comparisons": [
+        {
+          "lang": "Rust",
+          "note": "Rust's `TypeId` is an opaque identity with no reflection; compile-time type facts live elsewhere. See https://doc.rust-lang.org/std/any/struct.TypeId.html.",
+          "code": "let id = TypeId::of::<Point>();\nassert_eq!(id, TypeId::of::<Point>());"
+        }
+      ],
+      "rec": "A",
+      "recommendation": {
+        "why": "Two type values for one idea are a learning cost and a performance cost. One `Type` that is a single word at run time keeps maps fast and binaries free of type tables.",
+        "gains": [
+          "One type value.",
+          "Fast, collision-free type equality."
+        ],
+        "losses": [
+          {
+            "loss": "About 290 `TypeId` lines must migrate.",
+            "mitigation": "Most are in the compiler, and a mechanical rename covers the rest."
+          }
+        ],
+        "whyNot": [
+          {
+            "key": "B",
+            "reason": "B keeps two type values and string equality that can collide."
+          }
+        ],
+        "tradeoff": "One migration buys a single, cheap type identity."
+      },
+      "hybrid": null,
+      "ballotMode": "short",
+      "shortAuthorizedBy": null,
+      "ballotProcessVersion": 5,
+      "reviewPasses": null,
+      "checkInstructions": null,
+      "surface": {
+        "gist": "Should `TypeId` fold into `Type`, which becomes a one-word identity at run time with reflection members usable only at compile time?",
+        "lesson": "Jet has two type values today. Run-time `Type` compares path strings, and compile-time `TypeId` carries a full record. Folding them gives one `Type`. At run time it is one word, so equality and map keys are fast and leak no type tables. Members such as `.fields` work only at compile time.",
+        "trio": {
+          "current": {
+            "note": "Today run-time `Type` holds a path string; `TypeId` is a separate compile-time record.",
+            "code": "key: Type{Point}   // compares path strings\n// TypeId: identity, name, signature, kind…"
+          },
+          "wild": {
+            "lang": "Rust",
+            "note": "Rust's `TypeId` is an opaque identity with no reflection; compile-time type facts live elsewhere. See https://doc.rust-lang.org/std/any/struct.TypeId.html.",
+            "code": "let id = TypeId::of::<Point>();\nassert_eq!(id, TypeId::of::<Point>());"
+          }
+        },
+        "options": [
+          {
+            "key": "A",
+            "name": "One Type",
+            "gist": "Delete `TypeId`; `Type` is a one-word identity at run time and reflects at compile time.",
+            "gains": [
+              "One type value to learn.",
+              "Run-time type keys carry no strings."
+            ],
+            "losses": [
+              "`TypeId` code must migrate."
+            ],
+            "proposed": {
+              "code": "t: Type{Point}\nsame: t == Type{Point}   // one-word compare\n// t.fields: compile time only"
+            }
+          },
+          {
+            "key": "B",
+            "name": "Keep both",
+            "gist": "Keep run-time `Type` and compile-time `TypeId` separate.",
+            "gains": [
+              "No migration."
+            ],
+            "losses": [
+              "Two type values for one idea.",
+              "Path-string equality can collide."
+            ],
+            "proposed": {
+              "code": "key: Type{Point}   // compares path strings"
+            }
+          }
+        ],
+        "recommendation": {
+          "rec": "A",
+          "why": "Two type values for one idea are a learning cost and a performance cost. One `Type` that is a single word at run time keeps maps fast and binaries free of type tables.",
+          "gains": [
+            "One type value.",
+            "Fast, collision-free type equality."
+          ],
+          "losses": [
+            {
+              "loss": "About 290 `TypeId` lines must migrate.",
+              "mitigation": "Most are in the compiler, and a mechanical rename covers the rest."
+            }
+          ],
+          "whyNot": [
+            {
+              "key": "B",
+              "reason": "B keeps two type values and string equality that can collide."
+            }
+          ],
+          "tradeoff": "One migration buys a single, cheap type identity."
+        }
+      },
+      "reports": [
+        {
+          "title": "Marks, conversions and type unification pre-build review",
+          "path": "Docs/Audits/2026-11-27-marks-conversions-type-unification-review.md",
+          "note": "Part 3, sections 3.1 and 3.2."
+        }
+      ],
+      "draftedBy": "Orchestrator",
+      "reviewedBy": "BallotReview4",
+      "draft": false,
+      "status": "open",
+      "created": "2026-11-28T04:32:29.505Z"
+    },
+    {
+      "id": "D-CLOSURE-WRITE-ACCESS1",
+      "cardId": "c0l6uetj",
+      "group": "memory",
+      "title": "Calling a lambda that writes its captures needs ^ access; the hidden call lock goes",
+      "situation": "",
+      "gist": "Should calling a lambda that writes its captures need `^` access to it, replacing the hidden lock on every call?",
+      "lesson": "Reusable writing closures have invocation synchronization; task and Once bodies are excluded. A proposes exclusive call access instead, enforced through every direct, indirect and callback path. Serial adapters borrow the callback exclusively; parallel adapters need disjoint state or reject writing captures. This ownership rule is proposed, not demonstrated working syntax.",
+      "explainer": "",
+      "story": "Zoe counts items inside `xs.map`. She is surprised to learn that every call of her small lambda takes a lock.",
+      "inWild": "let mut count = 0;\nlet v: Vec<_> = xs.iter().map(|x| { count += 1; x * 2 }).collect();",
+      "detail": "Current law. Compiler/JetIR/Source/BuildExpr.jet, ir_lambda_locked (line 8992), locks a lambda whose capture facts need writing access; the lambda-entry path (line 9155) excludes task bodies and once bodies. The draft's every-call-except-task statement missed Once. Compiler/JetIR/Source/BuildCoreClosures.jet, IR_CLOSURE_LOCK (lines 131-138), stores the lock word every call holds. The source proves invocation synchronization, not that every implementation uses a contended operating-system mutex.\n\nA proposes exclusive call access for writing closures and removes their invocation lock only after ownership checks cover every call path. The `^` write convention on a function-typed parameter already exists. Compiler/JetSema/Source/Sema/Effects/Checks.jet lines 1567-1577 treat such a `^fn` parameter as one the body may swap. What A adds is the rule that a writing lambda fits only such a slot, not a new notation or effect.\n\nSerial map/filter/each accept exclusive callback access for iteration. Their callback must not escape or be invoked reentrantly; recursive and indirect calls retain exclusivity. Parallel adapters need disjoint callback state or reject writing captures. Task transfer, Once and ordinary reusable callbacks preserve their separate access laws.\n\nThe older executable did not run the illustrated writing-map case: it reported an internal compiler error for unlowered closure method MapMut. That baseline defect is not evidence against the proposed ownership law, nor proof that the newer dev compiler shares the defect. Migration needs checked call-site fixes and an API census; formatting alone cannot infer safe ownership. Rust FnMut invocation requires mutable access, while thread transfer separately depends on Send.",
+      "options": [
+        {
+          "key": "A",
+          "name": "^ access; serial callbacks take ^f",
+          "detail": "Apply R1 and delete the lock. Callbacks called one at a time, such as `map`, `filter` and `each`, take `^f`, so writing lambdas keep working there.",
+          "code": "// proposed Core signature: map takes f: ^fn(T) -> U\ndoubled: xs.map(fn(x) {\n    count += 1   // no lock\n    x * 2\n})"
+        },
+        {
+          "key": "B",
+          "name": "^ access; map keeps a read fn",
+          "detail": "Apply R1 and delete the lock, but leave Core callbacks as read `fn`. A writing lambda passed to them is a compile error naming the written capture.",
+          "code": "doubled: xs.map(fn(x) {\n    count += 1   // error: writes count\n    x * 2\n})"
+        },
+        {
+          "key": "C",
+          "name": "Keep the hidden lock",
+          "detail": "Keep today's run-time lock.",
+          "code": "doubled: xs.map(fn(x) {\n    count += 1   // each call locks\n    x * 2\n})"
+        }
+      ],
+      "comparisons": [
+        {
+          "lang": "Rust",
+          "note": "Rust FnMut requires mutable invocation access; thread transfer separately depends on Send. See https://doc.rust-lang.org/std/ops/trait.FnMut.html.",
+          "code": "let mut count = 0;\nlet v: Vec<_> = xs.iter().map(|x| { count += 1; x * 2 }).collect();"
+        }
+      ],
+      "rec": "A",
+      "recommendation": {
+        "why": "The lock is a hidden cost on every call, and `^` access proves the same safety at compile time. Letting serial callbacks take `^f` keeps everyday code like counting inside `map` working.",
+        "gains": [
+          "No hidden lock.",
+          "Writing lambdas keep working in serial callbacks."
+        ],
+        "losses": [
+          {
+            "loss": "Core callback signatures need a one-time review.",
+            "mitigation": "The card records the census of affected signatures before the build, and `jet fmt` writes call marks."
+          }
+        ],
+        "whyNot": [
+          {
+            "key": "B",
+            "reason": "B refuses ordinary counting inside `map`, which Rust and today's Jet allow."
+          },
+          {
+            "key": "C",
+            "reason": "C keeps invocation synchronization on ordinary reusable writing closures."
+          }
+        ],
+        "tradeoff": "A one-time signature review buys lock-free closures."
+      },
+      "hybrid": null,
+      "ballotMode": "short",
+      "shortAuthorizedBy": null,
+      "ballotProcessVersion": 5,
+      "reviewPasses": null,
+      "checkInstructions": null,
+      "surface": {
+        "gist": "Should calling a lambda that writes its captures need `^` access to it, replacing the hidden lock on every call?",
+        "lesson": "Ordinary reusable lambdas that write captures currently use an invocation lock. Task and once bodies have exceptions. A replaces that lock with exclusive call access, and serial Core callbacks accept it. Parallel callbacks must prove disjoint ownership rather than sharing mutable capture state.",
+        "trio": {
+          "current": {
+            "note": "Ordinary reusable writing lambdas use an invocation lock; task and once bodies are exceptions.",
+            "code": "^count: 0\ndoubled: xs.map(fn(x) {\n    count += 1   // each call locks\n    x * 2\n})"
+          },
+          "wild": {
+            "lang": "Rust",
+            "note": "Rust FnMut requires mutable invocation access; thread transfer separately depends on Send. See https://doc.rust-lang.org/std/ops/trait.FnMut.html.",
+            "code": "let mut count = 0;\nlet v: Vec<_> = xs.iter().map(|x| { count += 1; x * 2 }).collect();"
+          }
+        },
+        "options": [
+          {
+            "key": "A",
+            "name": "^ access; serial callbacks take ^f",
+            "gist": "A writing lambda fits only `^fn` slots; Core callbacks that run one at a time take `^f`.",
+            "gains": [
+              "No lock on any call.",
+              "Races on captures become compile errors."
+            ],
+            "losses": [
+              "Each Core callback signature must choose `fn` or `^fn`."
+            ],
+            "proposed": {
+              "code": "// proposed Core signature: map takes f: ^fn(T) -> U\ndoubled: xs.map(fn(x) {\n    count += 1   // no lock\n    x * 2\n})"
+            }
+          },
+          {
+            "key": "B",
+            "name": "^ access; map keeps a read fn",
+            "gist": "Same rule, but `map` keeps a read `fn`, so writing lambdas are refused there.",
+            "gains": [
+              "Core signatures barely change."
+            ],
+            "losses": [
+              "Counting inside `map` stops compiling."
+            ],
+            "proposed": {
+              "code": "doubled: xs.map(fn(x) {\n    count += 1   // error: writes count\n    x * 2\n})"
+            }
+          },
+          {
+            "key": "C",
+            "name": "Keep the hidden lock",
+            "gist": "Writing lambdas keep a lock taken on every call.",
+            "gains": [
+              "No migration."
+            ],
+            "losses": [
+              "Every call of a writing lambda pays for a lock.",
+              "The cost is invisible in the source."
+            ],
+            "proposed": {
+              "code": "doubled: xs.map(fn(x) {\n    count += 1   // each call locks\n    x * 2\n})"
+            }
+          }
+        ],
+        "recommendation": {
+          "rec": "A",
+          "why": "The lock is a hidden cost on every call, and `^` access proves the same safety at compile time. Letting serial callbacks take `^f` keeps everyday code like counting inside `map` working.",
+          "gains": [
+            "No hidden lock.",
+            "Writing lambdas keep working in serial callbacks."
+          ],
+          "losses": [
+            {
+              "loss": "Core callback signatures need a one-time review.",
+              "mitigation": "The card records the census of affected signatures before the build, and `jet fmt` writes call marks."
+            }
+          ],
+          "whyNot": [
+            {
+              "key": "B",
+              "reason": "B refuses ordinary counting inside `map`, which Rust and today's Jet allow."
+            },
+            {
+              "key": "C",
+              "reason": "C keeps invocation synchronization on ordinary reusable writing closures."
+            }
+          ],
+          "tradeoff": "A one-time signature review buys lock-free closures."
+        }
+      },
+      "reports": [
+        {
+          "title": "Marks, conversions and type unification pre-build review",
+          "path": "Docs/Audits/2026-11-27-marks-conversions-type-unification-review.md",
+          "note": "Section 1.3 and gaps ballot B2."
+        }
+      ],
+      "draftedBy": "Orchestrator",
+      "reviewedBy": "BallotReview4",
+      "draft": false,
+      "status": "open",
+      "created": "2026-11-28T04:32:33.929Z"
+    },
+    {
+      "id": "D-CLEANUP-FAIL1",
+      "cardId": "c08123r9",
+      "group": "language",
+      "title": "A failure inside any cleanup is masked, deadlined and reported, and the remaining cleanup runs",
+      "situation": "",
+      "gist": "When a cleanup body itself fails during unwinding, should Jet report it and keep cleaning up, or stop the process?",
+      "lesson": "The baseline continues after a rollback-hook panic and reports it beside the original panic. A plain deferred panic instead prevents later cleanup and reports the second panic. A would contain cleanup failures during unwinding, while keeping the first failure primary.",
+      "explainer": "",
+      "story": "Fay's cleanup closes a socket and the close panics while another panic is unwinding. She wants the rest of her cleanup to still run.",
+      "inWild": "defer cleanupA() // still runs\ndefer cleanupB() // panics",
+      "detail": "Current law. Compiler/JetIR/Source/BuildTransact.jet, ir_transaction_walk (line 123), guards rollback callbacks and continues the hook walk. Compiler/JetRuntime/Source/SharedTransactions.jet gives each hook its own deadline, TRANSACTION_HOOK_DEADLINE_MS of 5000 (lines 319-332), and appends a hook's failure as a secondary failure (line 347). This is not evidence that all cleanup always succeeds.\n\nBaseline probes on the older executable. Inside #Transact, an on_rollback hook that panicked after `panic(\"primary\")` was followed by the remaining hook, which printed. The stop report showed the primary panic, then \"while rolling back, this also failed\" with the hook's panic. With two plain defers, the panicking defer stopped the run: the remaining defer did not print, and the report named only the cleanup panic. The primary panic was not reported. These runs show the baseline, not dev parity.\n\nThe unified defer review (Docs/Audits/2026-11-27-unified-defer-marker-review.md, section 5, lines 279-288) frames this as ballot B2 and recommends adopting the rollback-hook law everywhere.\n\nA preserves an existing primary failure while attempting the remaining cleanup. If cleanup is the first failure on a normal exit, it begins the primary stop; later cleanup failures are secondary. Each protected attempt has its own five-second budget. Uncatchable aborts, host termination and failures outside the supported stop boundary remain excluded. A changes normal-exit failure handling explicitly rather than silently swallowing its first failure.\n\nB stops at a cleanup failure during unwinding and may leave later rollback steps unattempted. Neither spelling choice nor containment can promise that user rollback code restores a valid value. Reject any claim that masking is free on all normal cleanup paths.",
+      "options": [
+        {
+          "key": "A",
+          "name": "Report and continue",
+          "detail": "During unwinding, preserve the primary failure, protect each cleanup attempt with its own five-second budget, report secondary failures and continue. A first cleanup failure on normal exit becomes the primary stop. Host aborts remain excluded.",
+          "code": "#Defer { flush_log() }   // a panic here is reported\n// later cleanup still runs"
+        },
+        {
+          "key": "B",
+          "name": "Process-fatal everywhere",
+          "detail": "Stop at a cleanup failure during unwinding and do not promise that later cleanup or rollback steps run. Preserve this as an explicit reduction of transaction cleanup guarantees, not an implementation-only change.",
+          "code": "#Defer { flush_log() }   // second panic: process ends"
+        }
+      ],
+      "comparisons": [
+        {
+          "lang": "Go",
+          "note": "Go runs deferred functions while panicking; recover in a directly deferred function can stop that sequence. This does not establish Jet's primary/secondary reporting law. See https://go.dev/ref/spec#Handling_panics.",
+          "code": "defer cleanupA() // still runs\ndefer cleanupB() // panics"
+        }
+      ],
+      "rec": "A",
+      "recommendation": {
+        "why": "A preserves the original failure and attempts remaining cleanup, without claiming rollback always succeeds or protected boundaries are free.",
+        "gains": [
+          "One cleanup law.",
+          "Remaining rollback steps are attempted."
+        ],
+        "losses": [
+          {
+            "loss": "Protected cleanup needs a budget and secondary reporting.",
+            "mitigation": "Use a separate five-second budget per attempt and retain the primary failure."
+          }
+        ],
+        "whyNot": [
+          {
+            "key": "B",
+            "reason": "B lets one failing cleanup cut rollback short, breaking the transaction promise."
+          }
+        ],
+        "tradeoff": "Reported, not fatal, cleanup failures buy complete rollback."
+      },
+      "hybrid": null,
+      "ballotMode": "short",
+      "shortAuthorizedBy": null,
+      "ballotProcessVersion": 5,
+      "reviewPasses": null,
+      "checkInstructions": null,
+      "surface": {
+        "gist": "When a cleanup body itself fails during unwinding, should Jet report it and keep cleaning up, or stop the process?",
+        "lesson": "The baseline continues after a rollback-hook panic and reports it beside the original panic. A plain deferred panic instead prevents later cleanup and reports the second panic. A would contain cleanup failures during unwinding, while keeping the first failure primary.",
+        "trio": {
+          "current": {
+            "note": "In the older executable, a panicking defer skipped the later defer and only its own panic was reported; the first panic was lost.",
+            "code": "defer { print(\"remaining\") }\ndefer { panic(\"cleanup\") }\npanic(\"primary\")\n// reported: panic: cleanup only"
+          },
+          "wild": {
+            "lang": "Go",
+            "note": "In Go, a panic inside a deferred call replaces the current panic, and the remaining deferred calls still run. See https://go.dev/ref/spec#Handling_panics.",
+            "code": "defer cleanupA() // still runs\ndefer cleanupB() // panics"
+          }
+        },
+        "options": [
+          {
+            "key": "A",
+            "name": "Report and continue",
+            "gist": "Preserve the primary failure and report cleanup failures while attempting the remaining cleanup.",
+            "gains": [
+              "Remaining cleanup is attempted despite a recoverable cleanup failure.",
+              "A failing hook need not prevent later rollback attempts."
+            ],
+            "losses": [
+              "Unwinding needs protected cleanup boundaries."
+            ],
+            "proposed": {
+              "code": "#Defer { flush_log() }   // a panic here is reported\n// later cleanup still runs"
+            }
+          },
+          {
+            "key": "B",
+            "name": "Process-fatal everywhere",
+            "gist": "A failure inside any cleanup during a stop ends the process.",
+            "gains": [
+              "A broken cleanup is impossible to miss."
+            ],
+            "losses": [
+              "Rollback cleanup can be cut short."
+            ],
+            "proposed": {
+              "code": "#Defer { flush_log() }   // second panic: process ends"
+            }
+          }
+        ],
+        "recommendation": {
+          "rec": "A",
+          "why": "A preserves the original failure and attempts remaining cleanup. Protection has a cost; it does not make rollback infallible or recover host aborts.",
+          "gains": [
+            "One cleanup law.",
+            "Remaining rollback steps are attempted."
+          ],
+          "losses": [
+            {
+              "loss": "Unwind-time cleanup needs protected boundaries and diagnostics.",
+              "mitigation": "Use a separate five-second cleanup budget; report failure or expiry without replacing the primary failure."
+            }
+          ],
+          "whyNot": [
+            {
+              "key": "B",
+              "reason": "B is simpler, but one failing cleanup can prevent later rollback steps."
+            }
+          ],
+          "tradeoff": "Containment attempts more cleanup; it cannot guarantee successful rollback."
+        }
+      },
+      "reports": [
+        {
+          "title": "Unified #Defer marker pre-build review",
+          "path": "Docs/Audits/2026-11-27-unified-defer-marker-review.md",
+          "note": "Section 5 and section 9, ballot B2."
+        }
+      ],
+      "draftedBy": "Orchestrator",
+      "reviewedBy": "BallotReview4",
+      "draft": true,
+      "status": "open",
+      "created": "2026-11-28T04:32:37.955Z"
     }
   ],
   "questions": [
@@ -129772,6 +130981,181 @@
     }
   ],
   "events": [
+    {
+      "at": "2026-11-28T04:32:38.808Z",
+      "by": "BallotReview4",
+      "action": "decision.review",
+      "ref": "D-CLEANUP-FAIL1",
+      "note": "passed"
+    },
+    {
+      "at": "2026-11-28T04:32:37.955Z",
+      "by": "Orchestrator",
+      "action": "decision.add",
+      "ref": "D-CLEANUP-FAIL1",
+      "note": "A failure inside any cleanup is masked, deadlined and reported, and the remaining cleanup runs (draft)"
+    },
+    {
+      "at": "2026-11-28T04:32:36.745Z",
+      "by": "Orchestrator",
+      "action": "decision.post",
+      "ref": "D-CLOSURE-WRITE-ACCESS1",
+      "note": "reviewed by BallotReview4"
+    },
+    {
+      "at": "2026-11-28T04:32:35.349Z",
+      "by": "BallotReview4",
+      "action": "decision.review",
+      "ref": "D-CLOSURE-WRITE-ACCESS1",
+      "note": "passed"
+    },
+    {
+      "at": "2026-11-28T04:32:33.929Z",
+      "by": "Orchestrator",
+      "action": "decision.add",
+      "ref": "D-CLOSURE-WRITE-ACCESS1",
+      "note": "Calling a lambda that writes its captures needs ^ access; the hidden call lock goes (draft)"
+    },
+    {
+      "at": "2026-11-28T04:32:32.462Z",
+      "by": "Orchestrator",
+      "action": "decision.post",
+      "ref": "D-TYPE-ONE1",
+      "note": "reviewed by BallotReview4"
+    },
+    {
+      "at": "2026-11-28T04:32:30.969Z",
+      "by": "BallotReview4",
+      "action": "decision.review",
+      "ref": "D-TYPE-ONE1",
+      "note": "passed"
+    },
+    {
+      "at": "2026-11-28T04:32:29.505Z",
+      "by": "Orchestrator",
+      "action": "decision.add",
+      "ref": "D-TYPE-ONE1",
+      "note": "TypeId folds into Type: one-word identity at run time, reflection at compile time only (draft)"
+    },
+    {
+      "at": "2026-11-28T04:32:28.493Z",
+      "by": "Orchestrator",
+      "action": "decision.post",
+      "ref": "D-TAKE-AUTOCOPY1",
+      "note": "reviewed by BallotReview4"
+    },
+    {
+      "at": "2026-11-28T04:32:27.613Z",
+      "by": "BallotReview4",
+      "action": "decision.review",
+      "ref": "D-TAKE-AUTOCOPY1",
+      "note": "passed"
+    },
+    {
+      "at": "2026-11-28T04:32:26.787Z",
+      "by": "Orchestrator",
+      "action": "decision.add",
+      "ref": "D-TAKE-AUTOCOPY1",
+      "note": "A read value passed where ownership is taken is an error unless its type copies (draft)"
+    },
+    {
+      "at": "2026-11-28T04:32:25.778Z",
+      "by": "Orchestrator",
+      "action": "decision.post",
+      "ref": "D-TAKE-MARK-COPY1",
+      "note": "reviewed by BallotReview4"
+    },
+    {
+      "at": "2026-11-28T04:32:24.906Z",
+      "by": "BallotReview4",
+      "action": "decision.review",
+      "ref": "D-TAKE-MARK-COPY1",
+      "note": "passed"
+    },
+    {
+      "at": "2026-11-28T04:32:24.058Z",
+      "by": "Orchestrator",
+      "action": "decision.add",
+      "ref": "D-TAKE-MARK-COPY1",
+      "note": "A ^^ mark on a value that copies structurally is accepted as a copy (draft)"
+    },
+    {
+      "at": "2026-11-28T04:32:23.244Z",
+      "by": "Orchestrator",
+      "action": "decision.post",
+      "ref": "D-OVERFLOW-BLOCK1",
+      "note": "reviewed by BallotReview4"
+    },
+    {
+      "at": "2026-11-28T04:32:22.400Z",
+      "by": "BallotReview4",
+      "action": "decision.review",
+      "ref": "D-OVERFLOW-BLOCK1",
+      "note": "passed"
+    },
+    {
+      "at": "2026-11-28T04:32:21.570Z",
+      "by": "Orchestrator",
+      "action": "decision.add",
+      "ref": "D-OVERFLOW-BLOCK1",
+      "note": "#Overflow blocks leave the language; wrapping, saturating and checked mark each operation (draft)"
+    },
+    {
+      "at": "2026-11-28T04:32:20.669Z",
+      "by": "Orchestrator",
+      "action": "decision.post",
+      "ref": "D-NEW-RETURN1",
+      "note": "reviewed by BallotReview4"
+    },
+    {
+      "at": "2026-11-28T04:32:19.804Z",
+      "by": "BallotReview4",
+      "action": "decision.review",
+      "ref": "D-NEW-RETURN1",
+      "note": "passed"
+    },
+    {
+      "at": "2026-11-28T04:32:18.885Z",
+      "by": "Orchestrator",
+      "action": "decision.add",
+      "ref": "D-NEW-RETURN1",
+      "note": "A static method named new is an ordinary method; E0181 retires (draft)"
+    },
+    {
+      "at": "2026-11-28T04:32:18.003Z",
+      "by": "Orchestrator",
+      "action": "decision.post",
+      "ref": "D-COPIES-LINT1",
+      "note": "reviewed by BallotReview4"
+    },
+    {
+      "at": "2026-11-28T04:32:17.165Z",
+      "by": "BallotReview4",
+      "action": "decision.review",
+      "ref": "D-COPIES-LINT1",
+      "note": "passed"
+    },
+    {
+      "at": "2026-11-28T04:32:16.255Z",
+      "by": "Orchestrator",
+      "action": "decision.add",
+      "ref": "D-COPIES-LINT1",
+      "note": "#Policy(copies: .Explicit) becomes a lint a package can deny (draft)"
+    },
+    {
+      "at": "2026-11-28T04:32:15.445Z",
+      "by": "Orchestrator",
+      "action": "decision.post",
+      "ref": "D-ROW-CALLBACK1",
+      "note": "reviewed by BallotReview4"
+    },
+    {
+      "at": "2026-11-28T04:32:14.627Z",
+      "by": "BallotReview4",
+      "action": "decision.review",
+      "ref": "D-ROW-CALLBACK1",
+      "note": "passed"
+    },
     {
       "at": "2026-11-28T04:32:13.428Z",
       "by": "Orchestrator",
