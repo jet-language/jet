@@ -3,7 +3,7 @@
     "version": 4,
     "project": "Jet",
     "nextNum": 7071,
-    "rev": 115365,
+    "rev": 115375,
     "ui": {
       "toggled": [
         "dec-group:syntax",
@@ -64505,7 +64505,7 @@
       "parentId": null,
       "needsAcceptance": false,
       "created": "2026-11-27T20:04:52.447Z",
-      "updated": "2026-11-28T03:59:56.822Z",
+      "updated": "2026-11-28T04:32:13.428Z",
       "updatedBy": "Orchestrator",
       "criteriaLastN": 4
     },
@@ -127050,6 +127050,577 @@
       "draft": false,
       "status": "open",
       "created": "2026-11-28T04:01:03.643Z"
+    },
+    {
+      "id": "D-DEBUG-DENY1",
+      "cardId": "c0fwmv7h",
+      "group": "diagnostics",
+      "title": "A debug trace raises a dev warning, so --deny-warnings refuses it; E3405 stays for artifacts and release",
+      "situation": "",
+      "gist": "Should a leftover `debug` trace also warn, so `--deny-warnings` refuses it, or only fail artifact and release builds?",
+      "lesson": "A debug trace prints during development without a warning. Dev source rejects leftover traces in artifacts or release builds. A adds a development warning so the existing deny-warnings flag can reject traces in CI. B keeps trace checks separate from warning policy.",
+      "explainer": "",
+      "story": "Tom leaves a `debug(total)` call in a pull request. He wants CI, which runs with `--deny-warnings`, to catch it before merge.",
+      "inWild": "let total = dbg!(a + b); // warning: the `dbg!` macro is intended as a debugging tool",
+      "detail": "Compiler/JetSema/Source/Sema/Calls/Direct.jet handles debug traces and rejects them for artifact/release contexts. Compiler/JetCLI/Source/CLI/Front.jet parses deny-warnings. The baseline debug(1 + 2) returns 3 and prints its development trace; silent meant no warning, not no output.\n\nA adds a warning at each source trace while keeping artifact/release rejection. The unwrap fix must preserve one evaluation and the expression's value. B keeps development traces warning-free and removes the card's deny-warnings requirement. Neither option changes trace evaluation or treats the older executable as proof of parity with current dev.",
+      "options": [
+        {
+          "key": "A",
+          "name": "Dev warning plus E3405",
+          "detail": "Add a warning for every `debug` trace with the same unwrap fix. Artifact and release builds keep E3405.",
+          "code": "total: debug(a + b)   // warning in dev; E3405 in jet build"
+        },
+        {
+          "key": "B",
+          "name": "Only artifacts and release refuse",
+          "detail": "Keep today's behavior and reword card criterion 4 to drop `--deny-warnings`.",
+          "code": "total: debug(a + b)   // jet run: prints; jet build: E3405"
+        }
+      ],
+      "comparisons": [
+        {
+          "lang": "Rust",
+          "note": "Clippy's `dbg_macro` lint is off by default and warns once enabled, so `-D warnings` refuses it. See https://rust-lang.github.io/rust-clippy/master/index.html#dbg_macro.",
+          "code": "let total = dbg!(a + b); // warning: the `dbg!` macro is intended as a debugging tool"
+        }
+      ],
+      "rec": "A",
+      "recommendation": {
+        "why": "CI already runs with `--deny-warnings`, and a trace left in a pull request is exactly what it should catch. One dev warning per trace is a small cost while tracing.",
+        "gains": [
+          "Traces never reach a merge unnoticed.",
+          "No new flag or command."
+        ],
+        "losses": [
+          {
+            "loss": "Each trace adds a warning to dev output.",
+            "mitigation": "The warning carries the same unwrap fix, so `jet fix` clears every trace at once."
+          }
+        ],
+        "whyNot": [
+          {
+            "key": "B",
+            "reason": "B lets a trace pass any CI job that does not build the release profile."
+          }
+        ],
+        "tradeoff": "A warning per trace while debugging buys CI that refuses leftovers."
+      },
+      "hybrid": null,
+      "ballotMode": "short",
+      "shortAuthorizedBy": null,
+      "ballotProcessVersion": 5,
+      "reviewPasses": null,
+      "checkInstructions": null,
+      "surface": {
+        "gist": "Should a leftover `debug` trace also warn, so `--deny-warnings` refuses it, or only fail artifact and release builds?",
+        "lesson": "A debug trace prints during development without a warning. Dev source rejects leftover traces in artifacts or release builds. A adds a development warning so the existing deny-warnings flag can reject traces in CI. B keeps trace checks separate from warning policy.",
+        "trio": {
+          "current": {
+            "note": "Development traces print without a warning; dev source rejects them in artifacts or release builds.",
+            "code": "total: debug(a + b)   // jet run: prints; jet build: E3405"
+          },
+          "wild": {
+            "lang": "Rust",
+            "note": "Clippy's `dbg_macro` lint is off by default and warns once enabled, so `-D warnings` refuses it. See https://rust-lang.github.io/rust-clippy/master/index.html#dbg_macro.",
+            "code": "let total = dbg!(a + b); // warning: the `dbg!` macro is intended as a debugging tool"
+          }
+        },
+        "options": [
+          {
+            "key": "A",
+            "name": "Dev warning plus E3405",
+            "gist": "Each trace warns in dev, so `--deny-warnings` refuses it; E3405 stays for artifacts and release.",
+            "gains": [
+              "CI catches traces with the flag it already uses.",
+              "Matches the card as written."
+            ],
+            "losses": [
+              "Dev runs show one warning per trace."
+            ],
+            "proposed": {
+              "code": "total: debug(a + b)   // warning in dev; E3405 in jet build"
+            }
+          },
+          {
+            "key": "B",
+            "name": "Only artifacts and release refuse",
+            "gist": "Traces stay silent in dev; `--deny-warnings` ignores them.",
+            "gains": [
+              "Dev output stays quiet while tracing."
+            ],
+            "losses": [
+              "A trace passes CI that builds without the release profile."
+            ],
+            "proposed": {
+              "code": "total: debug(a + b)   // jet run: prints; jet build: E3405"
+            }
+          }
+        ],
+        "recommendation": {
+          "rec": "A",
+          "why": "CI already runs with `--deny-warnings`, and a trace left in a pull request is exactly what it should catch. One dev warning per trace is a small cost while tracing.",
+          "gains": [
+            "Traces never reach a merge unnoticed.",
+            "No new flag or command."
+          ],
+          "losses": [
+            {
+              "loss": "Each trace adds a warning to dev output.",
+              "mitigation": "The warning carries the same unwrap fix, so `jet fix` clears every trace at once."
+            }
+          ],
+          "whyNot": [
+            {
+              "key": "B",
+              "reason": "B lets a trace pass any CI job that does not build the release profile."
+            }
+          ],
+          "tradeoff": "A warning per trace while debugging buys CI that refuses leftovers."
+        }
+      },
+      "reports": [
+        {
+          "title": "Large-scale effect ergonomics pre-build review",
+          "path": "Docs/Audits/2026-11-27-large-scale-effect-ergonomics-review.md",
+          "note": "Section 7, question B6."
+        }
+      ],
+      "draftedBy": "Orchestrator",
+      "reviewedBy": "BallotReview4",
+      "draft": false,
+      "status": "open",
+      "created": "2026-11-28T04:32:05.043Z"
+    },
+    {
+      "id": "D-DYN-CEILING1",
+      "cardId": "c0fwmv7h",
+      "group": "effects",
+      "title": "Dynamic calls are bounded by a written method row or trait cap, not by the implementations a build happens to load",
+      "situation": "",
+      "gist": "Should a call through a trait value need a written effect bound, or may Jet infer it from known implementations?",
+      "lesson": "A trait value can hold any implementation, chosen at run time. Today, when the method and trait write no bound, Jet adds up the effects of every implementation it can see. A later package's implementation can then widen an earlier function's effects. A requires a written method row or trait cap. B still infers, but only for a sealed set of implementations.",
+      "explainer": "",
+      "story": "Lena's library calls `source.text()` on any Source. A new Source in a downstream app prints to the screen, and her library's recorded effects change without any edit to her code.",
+      "inWild": "interface Source { String text() throws IOException; }\n// an implementation may not throw more checked exceptions",
+      "detail": "Current law. In Compiler/JetSema/Source/Sema/Effects/Checks.jet, sema_effect_record_dispatch (lines 4810-4849) first uses the method's declared row. Next it uses the trait's #FX cap. Otherwise it takes the union of every implementation of the method in the program. With no implementation it records an open dispatch, which is E0743 under a ceiling (sema_error at line 6592).\n\nTrait caps are current surface: Docs/Spec/spec.md line 3210 lists a trait among #FX sites, and Tests/UI/Effects/trait_value_call_takes_trait_cap_ceiling_ok.jet exercises one.\n\nBaseline probes on the older supplied executable: with no row or cap, a `-[]>` function calling `source.text()` failed Jet.ImpureCallInPureContext only because the one implementation printed. With a bare #FX cap above the trait, or a `-[]>` row on the method, the same call passed the effect check. These runs show the baseline union and bounds; they do not show newer dev parity.\n\nWhy a ballot. The large-scale effect ergonomics review (Docs/Audits/2026-11-27-large-scale-effect-ergonomics-review.md, section 2 and question B5) shows that the union depends on which packages are loaded. A downstream implementation can therefore widen an upstream function's recorded row. Its B5 lists method row or trait cap only (A), a new row on the trait-object type checked at boxing (B), and a visible-implementation union (C).\n\nChanges from the audit. The audit's B needs a new spelling that it explicitly does not propose, so it is not a complete option here; any consumer-written trait-object bound needs its own syntax ballot. The audit's C is unsound under separate compilation and is replaced by B, which allows a union only for an enforced sealed set. The audit gave a GO only if a consumer spelling were ratified. This ballot instead recommends A with wrapping as the consumer's fix, and says so openly.\n\nShared work under either answer: remove the fallbacks that union in generic and associated-type paths, and route a trait-object type argument to the dynamic bound. Then sweep every unbounded trait-value call in the repository in one batch.",
+      "options": [
+        {
+          "key": "A",
+          "name": "Written bound required",
+          "detail": "A call through a trait value is bounded by the trait method's declared row, else by an #FX cap above the trait. Both spellings exist today. With neither, the call is an error under any ceiling, and the program-wide implementation union is removed. E0743 is reworded to this one meaning rather than kept beside a new code. Implementations are checked against the bound before they are boxed. An already-boxed value of an unbounded trait cannot be given a bound after the fact.",
+          "code": "#FX(Net)\nSource: trait { text: fn(self) -> String }"
+        },
+        {
+          "key": "B",
+          "name": "Sealed-set inference",
+          "detail": "Permit the union only when the implementation set is complete and recorded, and the compiler and linker reject any implementation outside it. Merely visible implementations are not enough. Open traits still need A's written bound.",
+          "code": "// union only over a recorded, sealed implementation set"
+        }
+      ],
+      "comparisons": [
+        {
+          "lang": "Java",
+          "note": "Java checks a method's throws clause against the method it overrides or implements: the implementation may not throw a checked exception the interface method does not allow. The interface method's clause is the written bound, as in A. See https://docs.oracle.com/javase/specs/jls/se21/html/jls-8.html#jls-8.4.8.3.",
+          "code": "interface Source {\n    String text() throws IOException;\n}"
+        },
+        {
+          "lang": "Rust",
+          "note": "Rust trait objects are bounded by the trait's written method signatures, and a sealed-trait pattern is a library convention, not a compiler guarantee the effect checker could rely on. See https://rust-lang.github.io/api-guidelines/future-proofing.html#sealed-traits-protect-against-downstream-implementations-c-sealed.",
+          "code": "pub trait Source: private::Sealed {\n    fn text(&self) -> String;\n}"
+        }
+      ],
+      "rec": "A",
+      "recommendation": {
+        "why": "A bounds every trait-value call by text the trait author wrote, so a downstream implementation cannot change an upstream function's effects.",
+        "gains": [
+          "Modular, stable effect rows for dynamic calls."
+        ],
+        "losses": [
+          {
+            "loss": "More wrapping for unbounded third-party traits.",
+            "mitigation": "Wrap known concrete types in a local bounded trait before boxing; the diagnostic points at the missing method row."
+          }
+        ],
+        "whyNot": [
+          {
+            "key": "B",
+            "reason": "Sound sealed-set inference needs new compiler and linker enforcement for a narrow gain."
+          }
+        ],
+        "tradeoff": "Written bounds cost a row or cap; effects stop drifting."
+      },
+      "hybrid": null,
+      "ballotMode": "short",
+      "shortAuthorizedBy": null,
+      "ballotProcessVersion": 5,
+      "reviewPasses": null,
+      "checkInstructions": null,
+      "surface": {
+        "gist": "Should a call through a trait value need a written effect bound?",
+        "lesson": "Today an unbounded trait call takes the effects of every implementation in the build. A requires a method row or a trait cap. B allows inference only for a sealed implementation set.",
+        "trio": {
+          "current": {
+            "note": "With no row or cap, the older executable judged this call by the implementations it saw.",
+            "code": "Source: trait { text: fn(self) -> String }\nshow: fn(source: Source) -[]> String {\n    source.text() // error only if some impl prints\n}"
+          },
+          "wild": {
+            "lang": "Java",
+            "note": "An implementing method may not throw checked exceptions the interface method does not allow.",
+            "code": "interface Source {\n    String text() throws IOException;\n}"
+          }
+        },
+        "options": [
+          {
+            "key": "A",
+            "name": "Written bound required",
+            "gist": "A trait-value call needs a method row or a trait cap.",
+            "gains": [
+              "Effects never change because of another package.",
+              "Uses spellings Jet already has."
+            ],
+            "losses": [
+              "Users of an unbounded third-party trait wrap known types."
+            ],
+            "proposed": {
+              "code": "Source: trait { text: fn(self) -[]> String }\n// or: #FX above the trait\nshow: fn(source: Source) -[]> String {\n    source.text()\n}"
+            }
+          },
+          {
+            "key": "B",
+            "name": "Sealed-set inference",
+            "gist": "Infer only when no other implementation can ever be added.",
+            "gains": [
+              "Closed programs write fewer rows."
+            ],
+            "losses": [
+              "Compiler and linker must enforce the seal.",
+              "Open traits still need A's bound."
+            ],
+            "proposed": {
+              "code": "Source: trait { text: fn(self) -> String }\n// allowed only if Source is sealed;\n// any outside impl is an error"
+            }
+          }
+        ],
+        "recommendation": {
+          "rec": "A",
+          "why": "A makes each library's effects depend only on its own code, using row and cap spellings that already work.",
+          "gains": [
+            "Stable effects under separate compilation."
+          ],
+          "losses": [
+            {
+              "loss": "A consumer of an unbounded third-party trait cannot add the bound itself.",
+              "mitigation": "The error names the method; the consumer wraps known concrete types in its own bounded trait before boxing."
+            }
+          ],
+          "whyNot": [
+            {
+              "key": "B",
+              "reason": "B needs a new sealing guarantee and still leaves open traits with A's rule."
+            }
+          ],
+          "tradeoff": "Written bounds in exchange for effects that never drift."
+        }
+      },
+      "reports": [
+        {
+          "title": "Large-scale effect ergonomics pre-build review",
+          "path": "Docs/Audits/2026-11-27-large-scale-effect-ergonomics-review.md",
+          "note": "Section 2 and B5; this ballot recommends method row or trait cap and replaces the unsound visible-union option."
+        }
+      ],
+      "draftedBy": "Orchestrator",
+      "reviewedBy": "BallotReview4",
+      "draft": false,
+      "status": "open",
+      "created": "2026-11-28T04:32:07.718Z"
+    },
+    {
+      "id": "D-FNFIELD-ROW1",
+      "cardId": "c0fwmv7h",
+      "group": "effects",
+      "title": "A stored function field writes its effect row, and jet fix inserts it",
+      "situation": "",
+      "gist": "Should a stored `fn` field state its effect row in writing, filled in by `jet fix`, instead of a hidden per-instance row?",
+      "lesson": "A writes a stable callback bound on the field. B tracks effects per immutable instance. Neither can soundly infer a closed row from only the constructors visible in one package.",
+      "explainer": "",
+      "story": "Ben stores a render callback in a widget struct. He wants calls through it to report the right effects without learning a hidden rule.",
+      "inWild": "struct widget<e>\n  render: (int) -> e string",
+      "detail": "Compiler/JetSema/Source/Sema/Effects/Checks.jet, sema_effect_check_callback_bounds:4769-4808, checks written function bounds against callback facts. Examples/ErrorsAndEffects/Effects/EffectLevers.jet uses a written pure callback type in transform. A retains rowless fields as unbounded; it does not ban declarations that never need a bound.\n\nThe audit recommends written bounds over hidden per-instance rows. Review agrees with A but rejects its automatic-fix promise for open-world fields. A fix may insert a row only when analysis has a complete set of possible stored values and a finite justified bound. Public, mutable, imported or escaping construction may prevent that proof. Then show known effects and request a declared contract; never assume unseen constructors are pure. Check every future store against the field's contract.\n\nB infers per immutable instance, joins rows at merges and falls back to unbounded when mutation, sharing or erasure loses facts. It must publish those facts across package boundaries rather than depending on the current program's implementations. Explicit generic row syntax is not yet specified and is not implied by the existing open-row floor notation.",
+      "options": [
+        {
+          "key": "A",
+          "name": "Written row on the field",
+          "detail": "Rowless fields remain unbounded. Check bound-requiring calls against a written field row. Suggest an inferred fix only with complete stored-value facts; otherwise require an author-selected contract.",
+          "code": "Widget: struct {\n    render: fn(Int) -[IO]> String,\n}"
+        },
+        {
+          "key": "B",
+          "name": "Hidden per-instance row",
+          "detail": "As the card wrote it: the compiler tracks a hidden row per instance. It is limited to immutable, unshared, non-dynamic values, and other instances fall back to unbounded.",
+          "code": "Widget: struct {\n    render: fn(Int) -> String,   // row inferred per instance\n}"
+        }
+      ],
+      "comparisons": [
+        {
+          "lang": "Koka",
+          "note": "Koka writes an effect parameter on a data type whose field holds an effectful function. See https://koka-lang.github.io/koka/doc/book.html#sec-polymorphic-effects.",
+          "code": "struct widget<e>\n  render: (int) -> e string"
+        }
+      ],
+      "rec": "A",
+      "recommendation": {
+        "why": "A written field row is a stable public contract. A complete stored-value proof can suggest it; open-world usage cannot justify an automatic ceiling.",
+        "gains": [
+          "Field types state their limits.",
+          "No hidden generic parameters."
+        ],
+        "losses": [
+          {
+            "loss": "Field types grow by one row.",
+            "mitigation": "Offer fixes only with a complete stored-value proof; otherwise show candidates for an author-selected contract."
+          }
+        ],
+        "whyNot": [
+          {
+            "key": "B",
+            "reason": "B hides a type parameter on the struct and covers only immutable, unshared instances."
+          }
+        ],
+        "tradeoff": "A longer field type buys a struct whose limits are visible."
+      },
+      "hybrid": null,
+      "ballotMode": "short",
+      "shortAuthorizedBy": null,
+      "ballotProcessVersion": 5,
+      "reviewPasses": null,
+      "checkInstructions": null,
+      "surface": {
+        "gist": "Should a stored `fn` field state its effect row in writing, filled in by `jet fix`, instead of a hidden per-instance row?",
+        "lesson": "A stored callback needs a bound wherever callers require one. A writes that bound on the field. B tracks effects per immutable instance and loses precision when values merge or escape. An inferred fix is safe only when every possible stored callback is known; otherwise the author must choose the contract.",
+        "trio": {
+          "current": {
+            "note": "Today a rowless function value reaches every effect, so a call through the field is unbounded.",
+            "code": "Widget: struct {\n    render: fn(Int) -> String,\n}"
+          },
+          "wild": {
+            "lang": "Koka",
+            "note": "Koka writes an effect parameter on a data type whose field holds an effectful function. See https://koka-lang.github.io/koka/doc/book.html#sec-polymorphic-effects.",
+            "code": "struct widget<e>\n  render: (int) -> e string"
+          }
+        },
+        "options": [
+          {
+            "key": "A",
+            "name": "Written row on the field",
+            "gist": "A stored `fn` field writes its row; `jet fix` inserts the inferred one.",
+            "gains": [
+              "No new concept.",
+              "The struct type says what calls through it may do."
+            ],
+            "losses": [
+              "Field types get longer."
+            ],
+            "proposed": {
+              "code": "Widget: struct {\n    render: fn(Int) -[IO]> String,\n}"
+            }
+          },
+          {
+            "key": "B",
+            "name": "Hidden per-instance row",
+            "gist": "Each instance gets an inferred row parameter, for immutable, unshared, non-dynamic instances.",
+            "gains": [
+              "No row to write."
+            ],
+            "losses": [
+              "A hidden generic parameter on the struct.",
+              "Works only for immutable, unshared instances."
+            ],
+            "proposed": {
+              "code": "Widget: struct {\n    render: fn(Int) -> String,   // row inferred per instance\n}"
+            }
+          }
+        ],
+        "recommendation": {
+          "rec": "A",
+          "why": "A written field row is a stable contract without hidden instance parameters. Fixes can propose it only when complete stored-value facts justify the bound.",
+          "gains": [
+            "Field types state their limits.",
+            "No hidden generic parameters."
+          ],
+          "losses": [
+            {
+              "loss": "Field types grow by one row.",
+              "mitigation": "Offer a fix when all stored callbacks are bounded; otherwise show candidates and ask the author to choose."
+            }
+          ],
+          "whyNot": [
+            {
+              "key": "B",
+              "reason": "B hides a type parameter on the struct and covers only immutable, unshared instances."
+            }
+          ],
+          "tradeoff": "A longer field type buys a struct whose limits are visible."
+        }
+      },
+      "reports": [
+        {
+          "title": "Large-scale effect ergonomics pre-build review",
+          "path": "Docs/Audits/2026-11-27-large-scale-effect-ergonomics-review.md",
+          "note": "Section 7, question B4."
+        }
+      ],
+      "draftedBy": "Orchestrator",
+      "reviewedBy": "BallotReview4",
+      "draft": false,
+      "status": "open",
+      "created": "2026-11-28T04:32:10.732Z"
+    },
+    {
+      "id": "D-ROW-CALLBACK1",
+      "cardId": "c0fwmv7h",
+      "group": "effects",
+      "title": "A declared row covers the function's own work; a rowless callback's effects are charged where it is passed",
+      "situation": "",
+      "gist": "When a function writes an effect row and takes a callback with no row, does the row also limit the callback?",
+      "lesson": "An effect row lists the outside actions a function may take, such as printing. A callback is a function passed in by the caller. A lets the row cover the function's own work, while each caller pays for the callback it passes. B makes the row a total limit, so the callback parameter must carry its own row.",
+      "explainer": "",
+      "story": "Mei writes `twice`, marked `-[IO]>`, which runs a callback two times. One caller passes a pure step, another passes one that writes a file. Mei wants both to work without an extra contract.",
+      "inWild": "fun twice(f : int -> e int) : <console|e> int\n  println(\"twice\")\n  f(f(1))",
+      "detail": "Review change. The earlier draft recommended the total limit, now B. Review found three facts against it, so the recommended pass-through answer is now A.\n\nFirst, the older supplied executable already behaves like A. `twice: fn(f: fn(Int) -> Int Never!) -[]> Int Never! { f(f(1)) }` compiled and printed 3 with a pure lambda, although the function is marked pure. With `-[IO]>`, a lambda that printed also ran. When a `-[]>` caller passed a printing lambda, the error named that caller (Jet.ImpureCallInPureContext). These are baseline observations; newer dev may differ.\n\nThe audit (Docs/Audits/2026-11-27-large-scale-effect-ergonomics-review.md, lines 123-128 and question B3) says today's rowless callback under a declared row is Maximal, giving E0740. The baseline did not show that error, and dev was not built for this review, so that status-quo claim is unconfirmed.\n\nSecond, the open via-fate ballot recommends deleting `-[via f]>`, and its fix removes via entries while keeping other entries. A mixed `-[via f, IO]>` becomes `-[IO]>`. Under B that result is rejected; under A it keeps its meaning. B pairs coherently only with that ballot's keep-via answers.\n\nThird, a total limit makes every helper with a written row effect-specific. Java's checked exceptions show the cost: functional interfaces cannot pass exceptions through, so callback-heavy code avoids checked exceptions.\n\nSource. Compiler/JetSema/Source/Sema/Effects/Checks.jet: the IndirectCall arm (lines 5672-5685) marks via callbacks so each caller pays for what it passes. sema_effect_callback_row (lines 4637-4664) separates closed rows from absent or open ones. sema_effect_check_callback_bounds (lines 4769-4808) checks arguments against written callback rows.\n\nEscape rule. Under A, pass-through covers only callbacks that are called or forwarded, per the audit's escape table (lines 108-119). Stored, returned and escaping callbacks are not inferred; calling them under a written row needs a callback row. A module, type or trait cap above the helper is re-checked at each instantiation, as the audit notes.",
+      "options": [
+        {
+          "key": "A",
+          "name": "Row plus the callback",
+          "detail": "A written row bounds the function's own direct effects and calls. A rowless callback parameter that is only called or forwarded contributes its argument's effects at each call site. The caller's own row, cap or denial is checked there. A callback that is stored, returned or captured by an escaping lambda is not passed through. Calling it under a written row needs a callback row, as today's escape rule requires.",
+          "code": "twice: fn(f: fn(Int) -> Int) -[IO]> Int { f(f(1)) }"
+        },
+        {
+          "key": "B",
+          "name": "Row is a total limit",
+          "detail": "A written row bounds everything the body reaches. A call through a rowless callback parameter is unbounded and is an error at the definition. The author adds a row to the callback parameter type.",
+          "code": "twice: fn(f: fn(Int) -[IO]> Int) -[IO]> Int { f(f(1)) }"
+        }
+      ],
+      "comparisons": [
+        {
+          "lang": "Koka",
+          "note": "Koka types a higher-order function with its own effects plus the callback's effect variable, so one function accepts callbacks with any effect and callers see the combined row. See https://koka-lang.github.io/koka/doc/book.html#sec-polymorphic-effects.",
+          "code": "fun twice(f : int -> e int) : <console|e> int"
+        },
+        {
+          "lang": "Java",
+          "note": "Java checks a lambda body against its functional interface's throws clause, so a Runnable cannot throw IOException. Methods that take callbacks therefore cannot pass checked exceptions through, a long-standing complaint about streams. See https://docs.oracle.com/javase/specs/jls/se21/html/jls-11.html#jls-11.2.3.",
+          "code": "void each(Runnable f) throws IOException {\n    f.run(); // run() cannot throw IOException\n}"
+        }
+      ],
+      "rec": "A",
+      "recommendation": {
+        "why": "Review reverses the draft's recommendation. Pass-through keeps written rows usable on effect-generic helpers, matches the observed baseline, and is the only answer that stays valid after the recommended via removal.",
+        "gains": [
+          "Written rows on helpers stay possible.",
+          "Via removal keeps working code."
+        ],
+        "losses": [
+          {
+            "loss": "Some errors appear at the caller, not the definition.",
+            "mitigation": "The diagnostic names the helper, the argument and the forbidden effect; hover shows the helper's own row and the passed-through part."
+          }
+        ],
+        "whyNot": [
+          {
+            "key": "B",
+            "reason": "B makes every rowed helper effect-specific and breaks rows that drop via under the recommended via answer."
+          }
+        ],
+        "tradeoff": "Caller-side errors in exchange for effect-generic helpers with honest rows."
+      },
+      "hybrid": null,
+      "ballotMode": "short",
+      "shortAuthorizedBy": null,
+      "ballotProcessVersion": 5,
+      "reviewPasses": null,
+      "checkInstructions": null,
+      "surface": {
+        "gist": "Does a function's written effect row also limit a callback that has no row?",
+        "lesson": "A: the row covers the function's own work, and each caller pays for its callback. B: the row is a total limit, so the callback parameter needs its own row.",
+        "trio": {
+          "current": {
+            "note": "The older executable accepted this pure-marked function and charged the lambda's printing to the caller.",
+            "code": "twice: fn(f: fn(Int) -> Int Never!) -[]> Int Never! { f(f(1)) }\nrun: fn() { print(twice(fn(x) { x + 1 })) } // 3"
+          },
+          "wild": {
+            "lang": "Koka",
+            "note": "Koka writes the function's own effect plus the callback's effect variable.",
+            "code": "fun twice(f : int -> e int) : <console|e> int"
+          }
+        },
+        "options": [
+          {
+            "key": "A",
+            "name": "Row plus the callback",
+            "gist": "The row covers the body; callers pay for their callbacks.",
+            "gains": [
+              "One helper serves pure and effectful callbacks.",
+              "Matches the older executable."
+            ],
+            "losses": [
+              "A too-strong callback is reported at the caller."
+            ],
+            "proposed": {
+              "code": "twice: fn(f: fn(Int) -> Int) -[IO]> Int {\n    f(f(1))\n}\n// caller pays IO plus its callback's effects"
+            }
+          },
+          {
+            "key": "B",
+            "name": "Row is a total limit",
+            "gist": "The row bounds everything, so the callback needs a row.",
+            "gains": [
+              "The row states the whole limit.",
+              "Errors appear at the definition."
+            ],
+            "losses": [
+              "Helpers with a row cannot accept other callback effects."
+            ],
+            "proposed": {
+              "code": "twice: fn(f: fn(Int) -[IO]> Int) -[IO]> Int {\n    f(f(1))\n}"
+            }
+          }
+        ],
+        "recommendation": {
+          "rec": "A",
+          "why": "A keeps one helper useful for every callback and keeps the row honest about the helper's own work. It is also what removing the via spelling needs.",
+          "gains": [
+            "Effect-generic helpers can still write a row.",
+            "No extra contract to learn."
+          ],
+          "losses": [
+            {
+              "loss": "A caller's error mentions a callback it chose.",
+              "mitigation": "The error names the helper, the argument and the effect the caller's own row forbids."
+            }
+          ],
+          "whyNot": [
+            {
+              "key": "B",
+              "reason": "B forces every helper with a row to fix its callback's effects, the known Java checked-exception trap."
+            }
+          ],
+          "tradeoff": "Errors move to the caller who chose the callback."
+        }
+      },
+      "reports": [
+        {
+          "title": "Large-scale effect ergonomics pre-build review",
+          "path": "Docs/Audits/2026-11-27-large-scale-effect-ergonomics-review.md",
+          "note": "Section 7, question B3; review reverses the original recommendation."
+        }
+      ],
+      "draftedBy": "Orchestrator",
+      "reviewedBy": null,
+      "draft": true,
+      "status": "open",
+      "created": "2026-11-28T04:32:13.428Z"
     }
   ],
   "questions": [
@@ -129201,6 +129772,76 @@
     }
   ],
   "events": [
+    {
+      "at": "2026-11-28T04:32:13.428Z",
+      "by": "Orchestrator",
+      "action": "decision.add",
+      "ref": "D-ROW-CALLBACK1",
+      "note": "A declared row covers the function's own work; a rowless callback's effects are charged where it is passed (draft)"
+    },
+    {
+      "at": "2026-11-28T04:32:12.486Z",
+      "by": "Orchestrator",
+      "action": "decision.post",
+      "ref": "D-FNFIELD-ROW1",
+      "note": "reviewed by BallotReview4"
+    },
+    {
+      "at": "2026-11-28T04:32:11.541Z",
+      "by": "BallotReview4",
+      "action": "decision.review",
+      "ref": "D-FNFIELD-ROW1",
+      "note": "passed"
+    },
+    {
+      "at": "2026-11-28T04:32:10.732Z",
+      "by": "Orchestrator",
+      "action": "decision.add",
+      "ref": "D-FNFIELD-ROW1",
+      "note": "A stored function field writes its effect row, and jet fix inserts it (draft)"
+    },
+    {
+      "at": "2026-11-28T04:32:09.841Z",
+      "by": "Orchestrator",
+      "action": "decision.post",
+      "ref": "D-DYN-CEILING1",
+      "note": "reviewed by BallotReview4"
+    },
+    {
+      "at": "2026-11-28T04:32:08.803Z",
+      "by": "BallotReview4",
+      "action": "decision.review",
+      "ref": "D-DYN-CEILING1",
+      "note": "passed"
+    },
+    {
+      "at": "2026-11-28T04:32:07.718Z",
+      "by": "Orchestrator",
+      "action": "decision.add",
+      "ref": "D-DYN-CEILING1",
+      "note": "Dynamic calls are bounded by a written method row or trait cap, not by the implementations a build happens to load (draft)"
+    },
+    {
+      "at": "2026-11-28T04:32:06.887Z",
+      "by": "Orchestrator",
+      "action": "decision.post",
+      "ref": "D-DEBUG-DENY1",
+      "note": "reviewed by BallotReview4"
+    },
+    {
+      "at": "2026-11-28T04:32:06.040Z",
+      "by": "BallotReview4",
+      "action": "decision.review",
+      "ref": "D-DEBUG-DENY1",
+      "note": "passed"
+    },
+    {
+      "at": "2026-11-28T04:32:05.043Z",
+      "by": "Orchestrator",
+      "action": "decision.add",
+      "ref": "D-DEBUG-DENY1",
+      "note": "A debug trace raises a dev warning, so --deny-warnings refuses it; E3405 stays for artifacts and release (draft)"
+    },
     {
       "at": "2026-11-28T04:09:20.067Z",
       "by": "Orchestrator",
