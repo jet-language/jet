@@ -3,7 +3,7 @@
     "version": 4,
     "project": "Jet",
     "nextNum": 7071,
-    "rev": 115425,
+    "rev": 115449,
     "ui": {
       "toggled": [
         "dec-group:syntax",
@@ -64838,7 +64838,7 @@
       "parentId": null,
       "needsAcceptance": false,
       "created": "2026-11-27T21:28:09.469Z",
-      "updated": "2026-11-28T04:00:47.479Z",
+      "updated": "2026-11-28T04:33:15.035Z",
       "updatedBy": "Orchestrator",
       "criteriaLastN": 4
     },
@@ -64900,7 +64900,7 @@
       "parentId": null,
       "needsAcceptance": false,
       "created": "2026-11-27T21:28:10.503Z",
-      "updated": "2026-11-28T04:00:56.860Z",
+      "updated": "2026-11-28T04:33:29.542Z",
       "updatedBy": "Orchestrator",
       "criteriaLastN": 3
     },
@@ -130049,6 +130049,1197 @@
       "draft": false,
       "status": "open",
       "created": "2026-11-28T04:33:01.438Z"
+    },
+    {
+      "id": "D-MOVEONLY-OPTOUT1",
+      "cardId": "c01iyhud",
+      "group": "language",
+      "title": "Keep the hard #MoveOnly fact rather than equating it with a Copy derive opt-out",
+      "situation": "",
+      "gist": "Once `Copy` derives, should `#!Copy` replace `#MoveOnly`, with `#SingleUse` kept rather than renamed `#Linear`?",
+      "lesson": "The audit recommended removing #MoveOnly in favor of #!Copy. Review disagrees: structural Copy and explicit cloning are different capabilities, while #MoveOnly forbids both and propagates through holders. A keeps that hard fact. B deliberately strengthens the negative Copy marker to preserve it; C also renames exactly-once SingleUse to Linear.",
+      "explainer": "",
+      "story": "Eli has a handle type that must never be copied. He wants one way to say it, the same way he opts out of any derived trait.",
+      "inWild": "#[derive(Clone)] // no Copy: moves only\nstruct Ticket { id: i32 }",
+      "detail": "Review changes the recommendation explicitly. The audit recommended removal, originally A; reviewed A promotes the original keep-marker direction to satisfy recommendation-first ordering. This is not owner ratification.\n\nRatified D-DECL-FACTS1=A made #MoveOnly the declaration marker for a type that moves and never copies; a holder of one takes the fact too. Compiler/Prelude/Markers.jet lines 438-445 declare it. Docs/Spec/spec.md lines 2567-2573 make x.copy() the one copy spelling and copying a MoveOnly value, or a holder, E0211.\n\nCompiler/JetSema/Source/Sema/Ownership/Copy.jet, sema_copy_nominal_combine (from line 918), separates copyable and cloneable. Line 959 disables explicit copying for MoveOnly; line 961 separately excludes structural Copy. Nested fields feed both facts. Lacking structural Copy does not forbid an explicit copy. A derive opt-out alone would therefore skip only automatic derivation, not the hard fact.\n\nA keeps the hard prohibition. Negative Copy controls derivation only and does not replace it. B explicitly strengthens negative Copy to forbid implicit copies, explicit copies, contradictory manual implementations and copies of holders containing the value. Preserve E0211 and the holder/copy matrix before deleting MoveOnly. Only then may a fact-based fix replace the marker.\n\nC makes B's amendment and renames SingleUse while preserving its exactly-once obligation. Droppable move-only values must not merge with linear duties. The older binary predates dev structural-copy work; marker acceptance would not prove equivalence. The source distinction is why review rejects the audit's simplification.",
+      "options": [
+        {
+          "key": "A",
+          "name": "Keep the hard #MoveOnly fact",
+          "detail": "Retain the ratified hard never-copy declaration fact, which also refuses explicit copies, and its propagation through holders. Negative Copy remains a derive opt-out, not a substitute for this fact.",
+          "code": "#MoveOnly\nTicket: struct { id: Int }"
+        },
+        {
+          "key": "B",
+          "name": "Strengthen #!Copy and remove #MoveOnly",
+          "detail": "Explicitly amend #!Copy to mean the existing hard never-copy fact, explicit copies included, with manual implementations and holder propagation; only then migrate and remove #MoveOnly. This is stronger than the audit's ordinary opt-out.",
+          "code": "#!Copy\nTicket: struct { id: Int }"
+        },
+        {
+          "key": "C",
+          "name": "Strengthened opt-out plus #Linear",
+          "detail": "Use B's stronger no-copy amendment and rename only #SingleUse to #Linear, preserving exactly-once use as a separate fact.",
+          "code": "#Linear\nTicket: struct { id: Int } // exactly once, not merely move-only"
+        }
+      ],
+      "comparisons": [
+        {
+          "lang": "Rust",
+          "note": "Rust types are move-only unless they derive `Copy`. See https://doc.rust-lang.org/std/marker/trait.Copy.html.",
+          "code": "#[derive(Clone)] // implicit passing moves; explicit clone remains available\nstruct Ticket { id: i32 }"
+        }
+      ],
+      "rec": "A",
+      "recommendation": {
+        "why": "The ratified hard no-copy fact is stronger than opting out of structural Copy. Keep that distinction instead of silently weakening resource ownership.",
+        "gains": [
+          "Preserves copying and cloning prohibitions.",
+          "Keeps affine and exactly-once use distinct."
+        ],
+        "losses": [
+          {
+            "loss": "One dedicated marker remains.",
+            "mitigation": "Use it only for the hard no-copy fact; derive opt-outs continue to control generation, not lifetime duties."
+          }
+        ],
+        "whyNot": [
+          {
+            "key": "B",
+            "reason": "B can preserve behavior only by explicitly strengthening #!Copy beyond an ordinary derive opt-out."
+          },
+          {
+            "key": "C",
+            "reason": "C can be coherent, but it also renames the separate exactly-once guarantee."
+          }
+        ],
+        "tradeoff": "A retains a marker to keep a stronger ownership fact explicit."
+      },
+      "hybrid": null,
+      "ballotMode": "short",
+      "shortAuthorizedBy": null,
+      "ballotProcessVersion": 5,
+      "reviewPasses": null,
+      "checkInstructions": null,
+      "surface": {
+        "gist": "Once `Copy` derives, should `#!Copy` replace `#MoveOnly`, with `#SingleUse` kept rather than renamed `#Linear`?",
+        "lesson": "The audit recommended removing #MoveOnly in favor of #!Copy. Review disagrees: structural Copy and explicit cloning are different capabilities, while #MoveOnly forbids both and propagates through holders. A keeps that hard fact. B deliberately strengthens the negative Copy marker to preserve it; C also renames exactly-once SingleUse to Linear.",
+        "trio": {
+          "current": {
+            "note": "Today a type that never copies carries its own marker.",
+            "code": "#MoveOnly\nTicket: struct { id: Int }"
+          },
+          "wild": {
+            "lang": "Rust",
+            "note": "Rust types are move-only unless they derive `Copy`. See https://doc.rust-lang.org/std/marker/trait.Copy.html.",
+            "code": "#[derive(Clone)] // implicit passing moves; explicit clone remains available\nstruct Ticket { id: i32 }"
+          }
+        },
+        "options": [
+          {
+            "key": "A",
+            "name": "Keep the hard #MoveOnly fact",
+            "gist": "Keep #MoveOnly for never-copy values and #SingleUse for exactly-once values.",
+            "gains": [
+              "Preserves the ratified never-copy fact, explicit copies included.",
+              "Does not overload a derive opt-out."
+            ],
+            "losses": [
+              "Retains a dedicated declaration fact marker."
+            ],
+            "proposed": {
+              "code": "#MoveOnly\nTicket: struct { id: Int }"
+            }
+          },
+          {
+            "key": "B",
+            "name": "Strengthen #!Copy and remove #MoveOnly",
+            "gist": "Amend negative Copy to forbid implicit copies, explicit clones and copying holders.",
+            "gains": [
+              "One no-copy spelling after migration."
+            ],
+            "losses": [
+              "Changes an opt-out into a stronger hard ownership fact."
+            ],
+            "proposed": {
+              "code": "#!Copy\nTicket: struct { id: Int }"
+            }
+          },
+          {
+            "key": "C",
+            "name": "Strengthened opt-out plus #Linear",
+            "gist": "Use B for no-copy, and rename only #SingleUse to #Linear.",
+            "gains": [
+              "Uses the usual theory term for exactly-once use."
+            ],
+            "losses": [
+              "Adds a rename without removing the exactly-once fact."
+            ],
+            "proposed": {
+              "code": "#Linear\nTicket: struct { id: Int } // exactly once, not merely move-only"
+            }
+          }
+        ],
+        "recommendation": {
+          "rec": "A",
+          "why": "The ratified hard no-copy fact is stronger than opting out of structural Copy. Keep that distinction instead of silently weakening resource ownership.",
+          "gains": [
+            "Preserves copying and cloning prohibitions.",
+            "Keeps affine and exactly-once use distinct."
+          ],
+          "losses": [
+            {
+              "loss": "One dedicated marker remains.",
+              "mitigation": "Use it only for the hard no-copy fact; derive opt-outs continue to control generation, not lifetime duties."
+            }
+          ],
+          "whyNot": [
+            {
+              "key": "B",
+              "reason": "B can preserve behavior only by explicitly strengthening #!Copy beyond an ordinary derive opt-out."
+            },
+            {
+              "key": "C",
+              "reason": "C can be coherent, but it also renames the separate exactly-once guarantee."
+            }
+          ],
+          "tradeoff": "A retains a marker to keep a stronger ownership fact explicit."
+        }
+      },
+      "reports": [
+        {
+          "title": "Traits, markers, modules and units pre-build review",
+          "path": "Docs/Audits/2026-11-27-traits-markers-modules-units-review.md",
+          "note": "Part 2, attack 3, and owner ballot 5."
+        }
+      ],
+      "draftedBy": "Orchestrator",
+      "reviewedBy": "BallotReview4",
+      "draft": false,
+      "status": "open",
+      "created": "2026-11-28T04:33:06.495Z"
+    },
+    {
+      "id": "D-REPLAYABLE-DROP1",
+      "cardId": "c01iyhud",
+      "group": "language",
+      "title": "Keep replayability separate from repeatability",
+      "situation": "",
+      "gist": "Should replayability remain a separate checked contract?",
+      "lesson": "Replayability excludes ambient inputs that make a replay diverge. Repeatability says repeating work leaves kept data unchanged after the first call. Neither law implies the other. Review rejects the audit's claim that Replayable is dead.",
+      "explainer": "",
+      "story": "Noor marks her physics step replayable so a recorded run replays exactly. The step may update kept state every time, so it is not repeatable.",
+      "inWild": "// Rust distinguishes Copy from Clone rather than merging distinct contracts.",
+      "detail": "The audit recommended deleting a supposedly unchecked marker. Review disagrees and promotes retention to A. Compiler/JetSema/Source/Sema/Effects/Checks.jet, sema_effect_replayable_diagnostic:3403-3406 and the node.is_replayable check at 8210-8219, enforce E0725. Compiler/JetFoundation/Data/Syntax/PackageFiles.jet, MARKER_REPLAYABLE:176-179, documents the ambient-effect restriction. Compiler/Prelude/Markers.jet declares Replayable at 229-233 and documents Repeatable's different kept-data law at 235-247. A missing marker comment did not establish dead semantics.\n\nThe older executable rejected a #Replayable function that prints: Jet.ReplayableReachesAmbientEffect, `trace` is `#Replayable` but reaches `IO`. Both names are ratified: D-REPLAY2=A chose #Replayable for replay soundness, and D-EFFECT-CLASS1=A chose checked #Repeatable. B and C therefore reverse D-REPLAY2.\n\nA retains both names because their meanings differ, so it does not add a second mechanism for one meaning. B explicitly removes replayability checking; it is not a harmless dead-code deletion. C imposes repeatability on migrated uses and discards their replayability assertion. No source fix may silently exchange those laws.",
+      "options": [
+        {
+          "key": "A",
+          "name": "Keep both laws",
+          "detail": "Retain Replayable and Repeatable with separate checks and documentation.",
+          "code": "#Replayable\nsimulate: fn() { /* deterministic work */ }"
+        },
+        {
+          "key": "B",
+          "name": "Delete replayability",
+          "detail": "Explicitly remove E0725 and replayability checking, not just the declaration.",
+          "code": "trace: fn() { print(\"ambient\") }"
+        },
+        {
+          "key": "C",
+          "name": "Replace with repeatability",
+          "detail": "Explicitly change the law at each site; diagnose nonrepeatable work rather than claiming equivalence.",
+          "code": "#Repeatable\nsync: fn() { /* checked repeatable work */ }"
+        }
+      ],
+      "comparisons": [
+        {
+          "lang": "Rust",
+          "note": "Copy and Clone are distinct contracts. See https://doc.rust-lang.org/std/marker/trait.Copy.html.",
+          "code": "#[derive(Clone)]\nstruct Item(String);"
+        }
+      ],
+      "rec": "A",
+      "recommendation": {
+        "why": "Review changes the audit recommendation: a live replayability check must not be deleted as dead code.",
+        "gains": [
+          "Preserves both distinct laws."
+        ],
+        "losses": [
+          {
+            "loss": "Two names remain.",
+            "mitigation": "Document their distinct guarantees together."
+          }
+        ],
+        "whyNot": [
+          {
+            "key": "B",
+            "reason": "Removes a live guarantee."
+          },
+          {
+            "key": "C",
+            "reason": "Changes rather than preserves the guarantee."
+          }
+        ],
+        "tradeoff": "Keep two names for two meanings."
+      },
+      "hybrid": null,
+      "ballotMode": "short",
+      "shortAuthorizedBy": null,
+      "ballotProcessVersion": 5,
+      "reviewPasses": null,
+      "checkInstructions": null,
+      "surface": {
+        "gist": "Should replayability remain a separate checked contract?",
+        "lesson": "Replayability excludes ambient inputs. Repeatability concerns repeated changes to kept data. These are different promises; merging them loses one and adds another.",
+        "trio": {
+          "current": {
+            "note": "Dev has an E0725 replayability check.",
+            "code": "#Replayable\ntrace: fn() { print(\"ambient\") }"
+          },
+          "wild": {
+            "lang": "Rust",
+            "note": "Rust keeps Copy and Clone distinct. See https://doc.rust-lang.org/std/marker/trait.Copy.html.",
+            "code": "#[derive(Clone)]\nstruct Item(String);"
+          }
+        },
+        "options": [
+          {
+            "key": "A",
+            "name": "Keep both laws",
+            "gist": "Retain the distinct checked contracts.",
+            "gains": [
+              "Neither promise is lost."
+            ],
+            "losses": [
+              "Two names remain."
+            ],
+            "proposed": {
+              "code": "#Replayable\nsimulate: fn() { /* deterministic work */ }"
+            }
+          },
+          {
+            "key": "B",
+            "name": "Delete replayability",
+            "gist": "Remove the ambient-input restriction and its marker.",
+            "gains": [
+              "One fewer marker."
+            ],
+            "losses": [
+              "Replayability assertions disappear."
+            ],
+            "proposed": {
+              "code": "trace: fn() { print(\"ambient\") }"
+            }
+          },
+          {
+            "key": "C",
+            "name": "Replace with repeatability",
+            "gist": "Require the different kept-data promise instead.",
+            "gains": [
+              "One marker vocabulary."
+            ],
+            "losses": [
+              "Changes the promised law."
+            ],
+            "proposed": {
+              "code": "#Repeatable\nsync: fn() { /* checked repeatable work */ }"
+            }
+          }
+        ],
+        "recommendation": {
+          "rec": "A",
+          "why": "The contracts differ and both have live checks. Deletion was based on a false dead-code finding.",
+          "gains": [
+            "Preserves both contracts."
+          ],
+          "losses": [
+            {
+              "loss": "Two names remain.",
+              "mitigation": "Document one deterministic-input example and one kept-data example side by side."
+            }
+          ],
+          "whyNot": [
+            {
+              "key": "B",
+              "reason": "B removes a live guarantee."
+            },
+            {
+              "key": "C",
+              "reason": "C substitutes a different guarantee."
+            }
+          ],
+          "tradeoff": "Keep two names for two meanings."
+        }
+      },
+      "reports": [
+        {
+          "title": "Traits, markers, modules and units pre-build review",
+          "path": "Docs/Audits/2026-11-27-traits-markers-modules-units-review.md",
+          "note": "Part 2, attack 4; dead-code conclusion rejected by review."
+        }
+      ],
+      "draftedBy": "Orchestrator",
+      "reviewedBy": "BallotReview4",
+      "draft": false,
+      "status": "open",
+      "created": "2026-11-28T04:33:09.983Z"
+    },
+    {
+      "id": "D-UNITFAMILY-FORM1",
+      "cardId": "c01iyhud",
+      "group": "language",
+      "title": "Keep the unit-family model, or also generate a sealed Unit trait?",
+      "situation": "",
+      "gist": "Should unit families keep today's model, or also be exposed as distinct numbers with a sealed generated Unit trait, keeping the dimension checker?",
+      "lesson": "The dimension checker must preserve scaling, derived dimensions and affine rules. Generic code already names a dimension through compiler-known quantity bounds. A new Unit trait would be a second public description of the same fact.",
+      "explainer": "",
+      "story": "Ravi adds milliseconds to seconds and wants that to keep working, while adding a length to a time remains an error.",
+      "inWild": "[<Measure>] type m\nlet d = 5.0<m>",
+      "detail": "Current law. Compiler/Prelude/Units.jet declares families with #UnitFamily, for example Length at line 5 and Time at lines 73-82 with base ns and members up to week. Docs/Spec/spec.md lines 2419-2437: sema owns dimension identity, exponent algebra and closed affine algebra; a mismatch is E0359. Imported Quantity<Dimension, Kind> keeps its concrete unit through checking and lowering. The older executable rejected 1meter + 1s with Jet.DimensionMismatch.\n\nRatified D-QUANTITY-TYPE1=A already decided how generic public code names a dimension: compiler-known Quantity<Dimension, Kind> bounds. Compiler/JetSema carries a Type.Quantity variant (for example Sema/Calls/Binder.jet line 143). A sealed, memberless Unit trait would add a second public way to say a type is a unit. That is why the recommendation moved off the earlier draft's trait option.\n\nA keeps the UnitFamily declarations, the checker and the public family model unchanged, with no new trait. B retains the declarations and compiler-owned dimension and scale facts. It exposes each family as one distinct numeric type, shared by its scale suffixes, plus a sealed compiler-generated Unit marker trait. The trait has no public methods and cannot be implemented manually to forge dimensional facts.\n\nB must preserve representation, exact and symbolic scale facts, affine offsets, conversions, operators, literal inference and diagnostics. It does not hand trait implementations control over unit algebra. The traits review (Docs/Audits/2026-11-27-traits-markers-modules-units-review.md, Part 4, lines 422-431) proposed B's elaboration form. It did not weigh the ratified quantity bounds. The full trait rewrite had no complete algebra and is not offered.",
+      "options": [
+        {
+          "key": "A",
+          "name": "Keep the current family model",
+          "detail": "Keep the declaration, checker and public family model unchanged; no new Unit trait. Generic code keeps using quantity bounds.",
+          "code": "#UnitFamily(Length, dimension, base: meter) { meter }"
+        },
+        {
+          "key": "B",
+          "name": "Add a sealed Unit trait",
+          "detail": "Generate one distinct family type and a sealed memberless Unit impl. Keep all scale and dimension facts compiler-owned and preserve operator, conversion and inference behavior.",
+          "code": "#UnitFamily(Length, dimension, base: meter) { meter }\n// proposed: Length also gets a sealed Unit impl"
+        }
+      ],
+      "comparisons": [
+        {
+          "lang": "F#",
+          "note": "Units of measure are compiler-checked. See https://learn.microsoft.com/dotnet/fsharp/language-reference/units-of-measure.",
+          "code": "[<Measure>] type m\nlet d = 5.0<m>"
+        }
+      ],
+      "rec": "A",
+      "recommendation": {
+        "why": "Ratified quantity bounds already let generic code name a dimension. A sealed Unit trait would add a second public description of the same fact, with no new checking power.",
+        "gains": [
+          "No type-model churn.",
+          "One description of a unit for generic code."
+        ],
+        "losses": [
+          {
+            "loss": "Units remain their own declaration kind rather than ordinary distinct numbers.",
+            "mitigation": "The declaration maps to one syntax node, and the closed checker stays in sema."
+          }
+        ],
+        "whyNot": [
+          {
+            "key": "B",
+            "reason": "B adds a Unit trait beside the ratified quantity bounds, two ways to describe one fact."
+          }
+        ],
+        "tradeoff": "A dedicated declaration kind keeps one unit description."
+      },
+      "hybrid": null,
+      "ballotMode": "short",
+      "shortAuthorizedBy": null,
+      "ballotProcessVersion": 5,
+      "reviewPasses": null,
+      "checkInstructions": null,
+      "surface": {
+        "gist": "Keep today's unit-family model, or add a generated Unit trait to each family?",
+        "lesson": "Both options keep the compiler's dimension checker. A changes nothing. B also gives each family a sealed Unit trait, beside the quantity bounds generic code already uses.",
+        "trio": {
+          "current": {
+            "note": "A declared Length plus a Time is rejected; families are checked by the compiler.",
+            "code": "#UnitFamily(Length, dimension, base: meter) { meter }\nrun: fn() { print(1meter + 1s) }"
+          },
+          "wild": {
+            "lang": "F#",
+            "note": "F# checks units of measure and normalizes dimension products. See https://learn.microsoft.com/dotnet/fsharp/language-reference/units-of-measure.",
+            "code": "[<Measure>] type m\nlet d = 5.0<m>"
+          }
+        },
+        "options": [
+          {
+            "key": "A",
+            "name": "Keep the current family model",
+            "gist": "Keep the family declaration, checker and public model as they are.",
+            "gains": [
+              "No type-model migration.",
+              "One way for generic code to name a dimension."
+            ],
+            "losses": [
+              "Units remain their own declaration kind."
+            ],
+            "proposed": {
+              "code": "#UnitFamily(Length, dimension, base: meter) { meter }"
+            }
+          },
+          {
+            "key": "B",
+            "name": "Add a sealed Unit trait",
+            "gist": "Expose each family as a distinct number with a sealed generated Unit trait.",
+            "gains": [
+              "Units read as ordinary distinct numbers."
+            ],
+            "losses": [
+              "A second way to say a type is a unit, beside quantity bounds."
+            ],
+            "proposed": {
+              "code": "#UnitFamily(Length, dimension, base: meter) { meter }\n// proposed: Length also gets a sealed Unit impl"
+            }
+          }
+        ],
+        "recommendation": {
+          "rec": "A",
+          "why": "Generic code already names dimensions through ratified quantity bounds. A Unit trait would describe the same fact a second way.",
+          "gains": [
+            "No type-model churn.",
+            "One description of a unit for generic code."
+          ],
+          "losses": [
+            {
+              "loss": "Units remain their own declaration kind.",
+              "mitigation": "The declaration is one surface with one node, and the checker stays closed."
+            }
+          ],
+          "whyNot": [
+            {
+              "key": "B",
+              "reason": "B adds a second public description of unit types beside the ratified quantity bounds."
+            }
+          ],
+          "tradeoff": "A dedicated declaration kind keeps one unit description."
+        }
+      },
+      "reports": [
+        {
+          "title": "Traits, markers, modules and units pre-build review",
+          "path": "Docs/Audits/2026-11-27-traits-markers-modules-units-review.md",
+          "note": "Part 4 and owner ballot 7. This ballot recommends keeping the current model, not the review's elaboration form."
+        }
+      ],
+      "draftedBy": "Orchestrator",
+      "reviewedBy": "BallotReview4",
+      "draft": false,
+      "status": "open",
+      "created": "2026-11-28T04:33:12.992Z"
+    },
+    {
+      "id": "D-CONSTTIME-HOME1",
+      "cardId": "c0im9zg7",
+      "group": "language",
+      "title": "Where should mandatory fixed-timing validation live?",
+      "situation": "",
+      "gist": "Keep fixed-timing validators integrated, or isolate a compiler-versioned mandatory validator component?",
+      "lesson": "Fixed-timing checks reject specified secret-dependent operations. They do not prove identical wall-clock time on arbitrary hardware. The choice is code organization, not optional enforcement or a new public plugin trait.",
+      "explainer": "",
+      "story": "Pia wants a secret-dependent branch refused without depending on whether a project installed an optional crypto plugin.",
+      "inWild": "let eq = a.ct_eq(&b); // returns Choice",
+      "detail": "Compiler/JetSema/Source/Sema/Taint.jet, sema_taint_fixed_tags (line 1552), includes Secret among fixed-timing tags. sema_taint_e0737_diagnostic (line 1603) rejects unsafe secret-dependent control flow. sema_taint_e0738 (line 1609) rejects fixed-tag Int/Float holders. The older executable rejected a printing branch in check_key: fn(key: #Secret U8) with Jet.FixedTimingSteer.\n\nThe DSL extraction review is Docs/Audits/2026-11-27-dsl-library-ffi-extraction-review.md. Its section 3.1 (lines 331-351) keeps the E0737-E0739 rules, their walk, masking, the fixed-slot IR data and selection gating in the compiler. Only the ICE-only validators could move, under about 500 lines, and the user-facing concept count does not change.\n\nA keeps the validators integrated and moves detailed reference text out of the short language overview. B keeps front-end tag propagation in the compiler but isolates later validation behind a toolchain-internal, compiler-versioned component. It receives checked IR and target-selection facts and returns structured rule/span findings. It is mandatory, version-matched and fails closed if unavailable or unsupported; it is not a project-installed public plugin API.\n\nThe original B assumed an inevitably frozen public IR API and measurable per-pass cost without evidence. Those are not necessary consequences of modularization. Neither option promises protection against every hardware or system side channel. Both preserve the same specified checks, diagnostics and target refusal policy.",
+      "options": [
+        {
+          "key": "A",
+          "name": "Integrated validators",
+          "detail": "Keep every checking layer integrated and move detailed reference prose. Preserve enforcement and diagnostics.",
+          "code": "// fixed-timing enforcement remains mandatory"
+        },
+        {
+          "key": "B",
+          "name": "Versioned internal component",
+          "detail": "Keep front-end tag propagation; provide checked IR/target facts to a mandatory version-matched component returning structured violations. Missing support is an error, not unchecked output.",
+          "code": "// compiler-owned component; no new public plugin trait"
+        }
+      ],
+      "comparisons": [
+        {
+          "lang": "Rust",
+          "note": "subtle describes best-effort Choice-based protection, not a universal hardware guarantee. See https://docs.rs/subtle/latest/subtle/.",
+          "code": "let eq = a.ct_eq(&b); // Choice"
+        }
+      ],
+      "rec": "A",
+      "recommendation": {
+        "why": "Moving the validators changes no user-facing concept: fixed timing, masking, E0737-E0739 and scrubbing all stay in the compiler. A keeps enforcement direct and still moves the long reference prose.",
+        "gains": [
+          "One direct enforcement owner."
+        ],
+        "losses": [
+          {
+            "loss": "The last-line validators stay compiler code.",
+            "mitigation": "They are a few hundred lines of internal checks; organize them internally."
+          }
+        ],
+        "whyNot": [
+          {
+            "key": "B",
+            "reason": "B adds a mandatory internal handoff and version boundary to move a few hundred lines, and removes no user concept."
+          }
+        ],
+        "tradeoff": "Direct enforcement versus internal modularization."
+      },
+      "hybrid": null,
+      "ballotMode": "short",
+      "shortAuthorizedBy": null,
+      "ballotProcessVersion": 5,
+      "reviewPasses": null,
+      "checkInstructions": null,
+      "surface": {
+        "gist": "Integrated checks or a mandatory toolchain-internal validator component?",
+        "lesson": "Both enforce the same fixed-timing rules. Neither promises a universal wall-clock timing proof or lets projects disable the checker.",
+        "trio": {
+          "current": {
+            "note": "The baseline rejects this printing branch as FixedTimingSteer.",
+            "code": "check_key: fn(key: #Secret U8) {\n    if key == U8{1} { print(\"leak\") }\n}"
+          },
+          "wild": {
+            "lang": "Rust",
+            "note": "subtle provides Choice-based operations and explicitly limits its side-channel claims. See https://docs.rs/subtle/latest/subtle/.",
+            "code": "let eq = a.ct_eq(&b); // Choice"
+          }
+        },
+        "options": [
+          {
+            "key": "A",
+            "name": "Integrated validators",
+            "gist": "Keep validation in compiler passes; move long reference text.",
+            "gains": [
+              "No component boundary to maintain."
+            ],
+            "losses": [
+              "Validator implementation stays in the compiler."
+            ],
+            "proposed": {
+              "code": "// same mandatory fixed-timing checks in compiler passes"
+            }
+          },
+          {
+            "key": "B",
+            "name": "Versioned internal component",
+            "gist": "Isolate later validation behind a mandatory compiler-owned interface.",
+            "gains": [
+              "A clearer internal maintenance boundary."
+            ],
+            "losses": [
+              "The toolchain must maintain IR/fact handoff and version matching."
+            ],
+            "proposed": {
+              "code": "// checked IR + target facts -> structured rule/span findings"
+            }
+          }
+        ],
+        "recommendation": {
+          "rec": "A",
+          "why": "A keeps enforcement direct and obtains the documentation improvement without adding a component boundary.",
+          "gains": [
+            "Simple ownership of mandatory checks."
+          ],
+          "losses": [
+            {
+              "loss": "Validation remains compiler implementation.",
+              "mitigation": "Keep its rules and reference documentation organized."
+            }
+          ],
+          "whyNot": [
+            {
+              "key": "B",
+              "reason": "B is viable, but adds a mandatory internal handoff and version boundary."
+            }
+          ],
+          "tradeoff": "Direct enforcement versus internal modularization."
+        }
+      },
+      "reports": [
+        {
+          "title": "DSL, library and FFI extraction pre-build review",
+          "path": "Docs/Audits/2026-11-27-dsl-library-ffi-extraction-review.md",
+          "note": "Section 3 and ballot B5."
+        }
+      ],
+      "draftedBy": "Orchestrator",
+      "reviewedBy": "BallotReview4",
+      "draft": false,
+      "status": "open",
+      "created": "2026-11-28T04:33:16.030Z"
+    },
+    {
+      "id": "D-FFI-FIRSTPARTY1",
+      "cardId": "c0im9zg7",
+      "group": "ffi",
+      "title": "Which foreign binders ship with the official toolchain?",
+      "situation": "",
+      "gist": "Should official distributions include both C and Rust binder packages, C alone, or neither?",
+      "lesson": "The ratified binder law already makes each language reader an ordinary package using the common import surface. This vote chooses distribution and support, not a second binding mechanism. Compiler-owned ABI, ownership and safety checks remain in every option.",
+      "explainer": "",
+      "story": "Kim imports a C library and a Rust crate and wants to know which readers an official installation supplies.",
+      "inWild": "const c = @cImport(@cInclude(\"stdio.h\"));",
+      "detail": "Compiler/JetDriver/Source/Driver/RustForeign.jet, JetDriverRustForeignPlan (line 49) and jet_driver_rust_foreign_empty (line 71), establishes the native Rust helper path. Its legacy descriptor is implementation evidence, not permission to retain the retired extern-rust spelling. Compiler/JetFoundation/Data/Syntax/Spellings.jet, MARKER_IMPORT (line 147), names the common import marker.\n\nRatified D-FFI-LANG1=A makes each foreign language a package implementing the Core trait Language, with no per-language compiler code. Ratified D-FFI-RUSTIMPORT1=A gives Rust and C one hand-written import form. These govern all three options. First-party here can only mean officially shipped packages, not a compiler-only reader for C or Rust. Package identity, versions, locks, checking and trust stay common.\n\nThe DSL extraction review (Docs/Audits/2026-11-27-dsl-library-ffi-extraction-review.md, section 4.1, lines 435-450) notes the card contradicts its source finding, which says Core ships C and Rust. Most binders are already package code; the compiler keeps link orchestration, lowering and the callback runtime. First-party status does not bypass the unsafe boundary or promise platform support that a bridge cannot provide.\n\nA ships supported C and Rust reader packages with official distributions. B obtains every reader separately. C ships C alone. Core keeps target layout, calling conventions, checked declarations, link requests, callbacks and the safety/effect boundary in every case. Extraction must preserve those contracts, not merely move source files.",
+      "options": [
+        {
+          "key": "A",
+          "name": "Ship C and Rust packages",
+          "detail": "Supply and support both ordinary binder packages; no privileged reader mechanism or retired extern-rust surface.",
+          "code": "// C and Rust readers ship with official distributions"
+        },
+        {
+          "key": "B",
+          "name": "Obtain all readers separately",
+          "detail": "Keep the checked ABI boundary; obtain all language readers through ordinary packages.",
+          "code": "// no reader packages are bundled"
+        },
+        {
+          "key": "C",
+          "name": "Ship C alone",
+          "detail": "Bundle and support the C reader; obtain Rust and all others separately through the same interface.",
+          "code": "// only the C reader is bundled"
+        }
+      ],
+      "comparisons": [
+        {
+          "lang": "Zig",
+          "note": "C import is an explicit compiler facility in Zig. See https://ziglang.org/documentation/master/#cImport.",
+          "code": "const c = @cImport(@cInclude(\"stdio.h\"));"
+        }
+      ],
+      "rec": "A",
+      "recommendation": {
+        "why": "The source finding behind the card says Core ships C and Rust. Shipping both readers as ordinary packages honors it while keeping the ratified one-mechanism binder law.",
+        "gains": [
+          "One binder mechanism.",
+          "C and Rust work without extra setup."
+        ],
+        "losses": [
+          {
+            "loss": "Official support covers two readers.",
+            "mitigation": "Use the common versioned package checks."
+          }
+        ],
+        "whyNot": [
+          {
+            "key": "B",
+            "reason": "B adds a reader fetch to every C and Rust project."
+          },
+          {
+            "key": "C",
+            "reason": "C drops the supplied Rust reader that the source finding promised."
+          }
+        ],
+        "tradeoff": "Support scope, not language syntax, differs."
+      },
+      "hybrid": null,
+      "ballotMode": "short",
+      "shortAuthorizedBy": null,
+      "ballotProcessVersion": 5,
+      "reviewPasses": null,
+      "checkInstructions": null,
+      "surface": {
+        "gist": "Which binder packages should official installations supply?",
+        "lesson": "All readers use the ratified ordinary-package interface. First-party means supplied and supported, not privileged compiler syntax.",
+        "trio": {
+          "current": {
+            "note": "Dev source contains a native Rust helper plan; its legacy syntax is not the ratified destination.",
+            "code": "// RustForeign.jet: JetDriverRustForeignPlan"
+          },
+          "wild": {
+            "lang": "Zig",
+            "note": "Zig exposes C imports through @cImport. See https://ziglang.org/documentation/master/#cImport.",
+            "code": "const c = @cImport(@cInclude(\"stdio.h\"));"
+          }
+        },
+        "options": [
+          {
+            "key": "A",
+            "name": "Ship C and Rust packages",
+            "gist": "Supply and support both through the common package interface.",
+            "gains": [
+              "No separate reader installation for either language."
+            ],
+            "losses": [
+              "Official releases must maintain both readers."
+            ],
+            "proposed": {
+              "code": "// official distribution supplies the C and Rust binder packages"
+            }
+          },
+          {
+            "key": "B",
+            "name": "Obtain all readers separately",
+            "gist": "Ship the checked ABI boundary, but no language reader packages.",
+            "gains": [
+              "Smaller official distribution and support commitment."
+            ],
+            "losses": [
+              "C and Rust users must select reader packages."
+            ],
+            "proposed": {
+              "code": "// each project obtains its language reader as a package"
+            }
+          },
+          {
+            "key": "C",
+            "name": "Ship C alone",
+            "gist": "Supply C; obtain Rust and other readers separately.",
+            "gains": [
+              "A narrower official support commitment."
+            ],
+            "losses": [
+              "Rust integration needs a separate reader package."
+            ],
+            "proposed": {
+              "code": "// official distribution supplies C; Rust is a separate package"
+            }
+          }
+        ],
+        "recommendation": {
+          "rec": "A",
+          "why": "The source finding behind the card says Core ships C and Rust. Shipping both readers as ordinary packages honors that and keeps one binding mechanism.",
+          "gains": [
+            "Common binding mechanism and supplied readers."
+          ],
+          "losses": [
+            {
+              "loss": "Both readers need official maintenance.",
+              "mitigation": "Version and test them through the same package contracts as other binders."
+            }
+          ],
+          "whyNot": [
+            {
+              "key": "B",
+              "reason": "B makes every C and Rust project fetch a reader before its first foreign call."
+            },
+            {
+              "key": "C",
+              "reason": "C leaves Rust users to find a reader the source finding promised."
+            }
+          ],
+          "tradeoff": "More official maintenance buys supplied C and Rust readers."
+        }
+      },
+      "reports": [
+        {
+          "title": "DSL, library and FFI extraction pre-build review",
+          "path": "Docs/Audits/2026-11-27-dsl-library-ffi-extraction-review.md",
+          "note": "Sections 4.1 and 4.2, and ballot B6."
+        }
+      ],
+      "draftedBy": "Orchestrator",
+      "reviewedBy": "BallotReview4",
+      "draft": false,
+      "status": "open",
+      "created": "2026-11-28T04:33:18.558Z"
+    },
+    {
+      "id": "D-MIGRATION-SHAPE1",
+      "cardId": "c0im9zg7",
+      "group": "language",
+      "title": "Keep checked migration blocks, or write version conversions directly?",
+      "situation": "",
+      "gist": "Should published schemas retain migration blocks and snapshot checks, or use explicit versioned types and conversions?",
+      "lesson": "A checked migration compares historical fields with the current schema. The historical facts must remain checked wherever the conversion code lives. A library is not inherently unable to check history, but it needs an actual checked history interface; this draft does not invent one.",
+      "explainer": "",
+      "story": "Ola renames a published field and wants old records to decode without accepting a misspelled historical name.",
+      "inWild": "migrations.RenameField(\"user\", \"name\", \"display_name\")",
+      "detail": "Compiler/JetSema/Source/Sema/SchemaMigration.jet, check_schema_migrations (line 41), compares SchemaSnapshot fields with current fields and checks declared operations. Core/Prelude/Prelude.jet, FieldRef (line 211), describes current fields rather than a historical schema. The older executable runs Examples/Data/DecodeMigration.jet and prints name: Ada, verified: false for an old record.\n\nRatified D-DATA-EVOLVE1=A makes one migration block the only description of a type's history, used for stored data, messages, live reload, database rows and service handoff. Ratified D-MIGRATE4=A applies migration blocks at decode time. B reverses D-DATA-EVOLVE1 and every consumer built on it.\n\nA retains the migration grammar and compiler-owned snapshot checking. Moving implementation code behind a checked interface could preserve those guarantees; the draft's claim that a library can never check old names was too strong. No such complete replacement interface is specified here.\n\nB removes automatic published-schema migration checking and uses named historical record types, explicit ordinary conversions and version-directed decoding. Old types are checked as ordinary types, but tools no longer compare a published snapshot automatically. That is a real loss, not an impossible design. Unspecified marker vocabularies and a future DSL handshake are not ready ballot options.",
+      "options": [
+        {
+          "key": "A",
+          "name": "Keep checked migration blocks",
+          "detail": "Keep the parser, snapshots and checked operations. Documentation cleanup must not delete an operation's only specified meaning.",
+          "code": "migration UserRecord { rename name -> display_name }"
+        },
+        {
+          "key": "B",
+          "name": "Explicit versioned conversions",
+          "detail": "Retain ordinary type checking; remove automatic published-schema migration checks and implement historical version dispatch and conversion explicitly.",
+          "code": "// old/new types plus explicit conversions and version dispatch"
+        }
+      ],
+      "comparisons": [
+        {
+          "lang": "Python",
+          "note": "Django retains historical model state for migrations. See https://docs.djangoproject.com/en/stable/topics/migrations/.",
+          "code": "migrations.RenameField(\"user\", \"name\", \"display_name\")"
+        }
+      ],
+      "rec": "A",
+      "recommendation": {
+        "why": "The migration block is already the single ratified history description for stored data, messages, reload, database rows and service handoff. A keeps that one description and its automatic snapshot checks.",
+        "gains": [
+          "Automatic historical validation.",
+          "One history description for every consumer."
+        ],
+        "losses": [
+          {
+            "loss": "The grammar remains.",
+            "mitigation": "Keep it small and checked."
+          }
+        ],
+        "whyNot": [
+          {
+            "key": "B",
+            "reason": "B makes authors write version dispatch by hand and drops the one history description other features rely on."
+          }
+        ],
+        "tradeoff": "Automatic checking versus explicit version maintenance."
+      },
+      "hybrid": null,
+      "ballotMode": "short",
+      "shortAuthorizedBy": null,
+      "ballotProcessVersion": 5,
+      "reviewPasses": null,
+      "checkInstructions": null,
+      "surface": {
+        "gist": "Keep checked migration blocks or write versioned conversions directly?",
+        "lesson": "A keeps automatic checks against stored history. B uses ordinary old/new types and explicit conversions, without automatic published-snapshot diff checking.",
+        "trio": {
+          "current": {
+            "note": "The baseline migration example decodes the historical field name.",
+            "code": "migration UserRecord {\n    rename name -> display_name\n    add verified: Bool = false\n}"
+          },
+          "wild": {
+            "lang": "Python",
+            "note": "Django migrations retain historical model state. See https://docs.djangoproject.com/en/stable/topics/migrations/.",
+            "code": "migrations.RenameField(\"user\", \"name\", \"display_name\")"
+          }
+        },
+        "options": [
+          {
+            "key": "A",
+            "name": "Keep checked migration blocks",
+            "gist": "Retain grammar, historical snapshots and operation checks.",
+            "gains": [
+              "Automatic published-schema diff checking remains."
+            ],
+            "losses": [
+              "The dedicated grammar remains."
+            ],
+            "proposed": {
+              "code": "migration UserRecord {\n    rename name -> display_name\n}"
+            }
+          },
+          {
+            "key": "B",
+            "name": "Explicit versioned conversions",
+            "gist": "Write old/new types, conversions and decode-version dispatch directly.",
+            "gains": [
+              "No migration-specific grammar."
+            ],
+            "losses": [
+              "No automatic comparison against published snapshots."
+            ],
+            "proposed": {
+              "code": "// ordinary historical/current record types and explicit conversion"
+            }
+          }
+        ],
+        "recommendation": {
+          "rec": "A",
+          "why": "A preserves checked history without adding an unspecified reflection or generator interface.",
+          "gains": [
+            "Automatic historical checks."
+          ],
+          "losses": [
+            {
+              "loss": "Dedicated grammar stays.",
+              "mitigation": "Keep its operation set small and source-mapped."
+            }
+          ],
+          "whyNot": [
+            {
+              "key": "B",
+              "reason": "B is viable, but authors assume responsibility for version dispatch and historical coverage."
+            }
+          ],
+          "tradeoff": "A small grammar buys automatic history checks."
+        }
+      },
+      "reports": [
+        {
+          "title": "DSL, library and FFI extraction pre-build review",
+          "path": "Docs/Audits/2026-11-27-dsl-library-ffi-extraction-review.md",
+          "note": "Section 2.2 and ballot B2."
+        }
+      ],
+      "draftedBy": "Orchestrator",
+      "reviewedBy": "BallotReview4",
+      "draft": false,
+      "status": "open",
+      "created": "2026-11-28T04:33:21.756Z"
+    },
+    {
+      "id": "D-PROTOCOL-HOME1",
+      "cardId": "c0im9zg7",
+      "group": "language",
+      "title": "Keep protocol expansion, or write the endpoint types directly?",
+      "situation": "",
+      "gist": "Should protocol declarations retain compiler expansion, or should authors write their SingleUse typestate endpoints directly?",
+      "lesson": "A protocol declaration saves repeated endpoint and state declarations. Its expansion uses existing SingleUse and typestate machinery. Removing the declaration need not add a macro system: writing the endpoint types directly is a strong, less convenient alternative.",
+      "explainer": "",
+      "story": "Tom wants an ordered checkout API and useful errors when he sends a message in the wrong state.",
+      "inWild": "type Server = Recv<i64, Send<bool, Eps>>;",
+      "detail": "Compiler/JetSema/Source/Sema/Registration/Protocols.jet, sema_protocols_expand (line 25) and sema_protocol_source (line 104), generates SingleUse Client/Server types and methods for successive states. The older executable runs Examples/Concurrency/Protocol.jet and prints payment complete. The generated send/receive methods currently carry a token and state transitions; that run does not prove message transport or delivery.\n\nRatified D-PROTO2=A chose the protocol declaration as the surface for ordered request/response exchanges, with generated typed handles and typestate errors for out-of-order sends. A keeps that ruling. B reverses it.\n\nA keeps this declaration expansion and improves source mapping for expansion errors. B removes the protocol grammar and writes the equivalent ordinary endpoint/state types and methods directly. Both retain ownership and state checking. Neither option treats token-only generated methods as a finished communication implementation.\n\nThe draft's unspecified item generator and recursive session-list language are removed as ballot options. A future extraction could use an independently ratified complete generator interface, but this vote does not invent one. The Rust comparison demonstrates a different library design, not syntax Jet supports or inevitably bad diagnostics.",
+      "options": [
+        {
+          "key": "A",
+          "name": "Keep compiler expansion",
+          "detail": "Retain protocol expansion and map errors to the failing declaration/message. Do not claim the current generated stubs provide transport.",
+          "code": "protocol Payment { client: Hello(version: Int) }"
+        },
+        {
+          "key": "B",
+          "name": "Write endpoint types directly",
+          "detail": "Delete the shorthand; migrate its declarations to ordinary SingleUse typestate endpoints without adding a macro or session-list language.",
+          "code": "// equivalent endpoint and state types are written directly"
+        }
+      ],
+      "comparisons": [
+        {
+          "lang": "Rust",
+          "note": "session_types uses nested generic session types. See https://docs.rs/session_types/latest/session_types/.",
+          "code": "type Server = Recv<i64, Send<bool, Eps>>;"
+        }
+      ],
+      "rec": "A",
+      "recommendation": {
+        "why": "One exchange declaration generates both endpoint APIs from the existing SingleUse and typestate machinery, as already ratified. Writing both sides by hand repeats each message and lets the two drift.",
+        "gains": [
+          "One exchange declaration."
+        ],
+        "losses": [
+          {
+            "loss": "A compiler shorthand stays.",
+            "mitigation": "Keep its expansion and source mapping explicit."
+          }
+        ],
+        "whyNot": [
+          {
+            "key": "B",
+            "reason": "B adds no mechanism, but authors repeat every message on both endpoints and keep them in step by hand."
+          }
+        ],
+        "tradeoff": "Convenience versus a smaller grammar."
+      },
+      "hybrid": null,
+      "ballotMode": "short",
+      "shortAuthorizedBy": null,
+      "ballotProcessVersion": 5,
+      "reviewPasses": null,
+      "checkInstructions": null,
+      "surface": {
+        "gist": "Keep protocol declarations or write their endpoint types directly?",
+        "lesson": "The convenience is declaration generation. Ownership and typestate are shared machinery; current generated stubs are not evidence of working transport.",
+        "trio": {
+          "current": {
+            "note": "The baseline example compiles and runs its state transitions.",
+            "code": "protocol Payment {\n    client: Hello(version: Int)\n    server: Ack(session: Int)\n}"
+          },
+          "wild": {
+            "lang": "Rust",
+            "note": "session_types encodes a session with nested types. See https://docs.rs/session_types/latest/session_types/.",
+            "code": "type Server = Recv<i64, Send<bool, Eps>>;"
+          }
+        },
+        "options": [
+          {
+            "key": "A",
+            "name": "Keep compiler expansion",
+            "gist": "Retain the checked declaration shorthand.",
+            "gains": [
+              "One exchange declaration generates both endpoint APIs."
+            ],
+            "losses": [
+              "The compiler retains protocol grammar."
+            ],
+            "proposed": {
+              "code": "protocol Payment {\n    client: Hello(version: Int)\n    server: Ack(session: Int)\n}"
+            }
+          },
+          {
+            "key": "B",
+            "name": "Write endpoint types directly",
+            "gist": "Remove the shorthand and use ordinary SingleUse state types.",
+            "gains": [
+              "No protocol grammar or new generator mechanism."
+            ],
+            "losses": [
+              "Authors maintain both endpoint APIs."
+            ],
+            "proposed": {
+              "code": "// write the existing SingleUse endpoint/state declarations directly"
+            }
+          }
+        ],
+        "recommendation": {
+          "rec": "A",
+          "why": "A retains a useful checked shorthand without adding a new generator mechanism.",
+          "gains": [
+            "Less repeated endpoint code."
+          ],
+          "losses": [
+            {
+              "loss": "Compiler grammar remains.",
+              "mitigation": "Keep expansion source-mapped to the declaration."
+            }
+          ],
+          "whyNot": [
+            {
+              "key": "B",
+              "reason": "B is viable and simpler in core, but repeats endpoint/state declarations."
+            }
+          ],
+          "tradeoff": "One declaration form saves repeated endpoint code."
+        }
+      },
+      "reports": [
+        {
+          "title": "DSL, library and FFI extraction pre-build review",
+          "path": "Docs/Audits/2026-11-27-dsl-library-ffi-extraction-review.md",
+          "note": "Section 2.3 and ballot B3."
+        }
+      ],
+      "draftedBy": "Orchestrator",
+      "reviewedBy": "BallotReview4",
+      "draft": false,
+      "status": "open",
+      "created": "2026-11-28T04:33:24.271Z"
+    },
+    {
+      "id": "D-VALIDATE-ERRLIST1",
+      "cardId": "c0im9zg7",
+      "group": "library",
+      "title": "The Validate trait keeps the accumulated [FieldError] list, not a single ValidationError",
+      "situation": "",
+      "gist": "Should the new `Validate` trait report every failing field as today's `[FieldError]` list, rather than a single `ValidationError`?",
+      "lesson": "A keeps the accumulated FieldError list. B names a wrapper around that list. Neither requires first-failure validation.",
+      "explainer": "",
+      "story": "Ida submits a form with three bad fields and needs to see all three together.",
+      "inWild": "let errs: ValidationErrors = form.validate().unwrap_err();",
+      "detail": "The audit proposes preserving accumulated FieldError results during the Validate-trait cutover. Compiler/JetFoundation/Data/Syntax/PackageFiles.jet, TYPE_VALIDATE and TYPE_VALIDATE_BUILDER:203-205, records the existing builder names. Examples/Data/Validate.jet shows every failing check accumulating into one [FieldError] list. The older executable ran the Order example with qty 0 and printed 1 problem(s).\n\nRatified D-VALIDATE-DECODE1=B makes decode return the accumulated FieldError list directly. A keeps that one error type for decode and validation. B would migrate both to a wrapper, amending that ruling.\n\nReview rejects the inference that one named ValidationError necessarily loses accumulation: an ordinary struct can contain the entire list, as the cited Rust validator design does.\n\nA keeps the list representation and requires an empty effect row on the trait method. B defines ValidationError{fields: [FieldError]} and migrates decode and validation to the same wrapper; no second accumulation algorithm is added. Field paths, stable check order and all failures remain under either answer. The name/home ballot is independent: substitute its selected public trait name here. Shown signatures are proposed trait APIs, not executable baseline support.",
+      "options": [
+        {
+          "key": "A",
+          "name": "Keep [FieldError]",
+          "detail": "The trait method keeps today's result, the value or its `[FieldError]` list, with an empty effect row.",
+          "code": "// proposed pure trait method\nvalidate: fn(self) -[]> Self ![FieldError]"
+        },
+        {
+          "key": "B",
+          "name": "Named error-list wrapper",
+          "detail": "Add ValidationError with fields: [FieldError], preserving accumulation. Migrate decode and validation together and require an empty row.",
+          "code": "ValidationError: struct { fields: [FieldError] }"
+        }
+      ],
+      "comparisons": [
+        {
+          "lang": "Rust",
+          "note": "The `validator` crate returns all field failures in one `ValidationErrors` value. See https://docs.rs/validator/latest/validator/.",
+          "code": "let errs: ValidationErrors = form.validate().unwrap_err();"
+        }
+      ],
+      "rec": "A",
+      "recommendation": {
+        "why": "Decode already returns the accumulated FieldError list under a ratified ruling. Keeping the same list for the trait gives decode and validation one error type with no wrapper migration.",
+        "gains": [
+          "No diagnostic regression.",
+          "One error type for decode and validate."
+        ],
+        "losses": [
+          {
+            "loss": "The card text needs rewording.",
+            "mitigation": "Only the criterion's signature changes; the trait idea stands."
+          }
+        ],
+        "whyNot": [
+          {
+            "key": "B",
+            "reason": "B preserves all failures but moves decode and validation to a new wrapper, amending the ratified decode error shape."
+          }
+        ],
+        "tradeoff": "A list type keeps all errors visible."
+      },
+      "hybrid": null,
+      "ballotMode": "short",
+      "shortAuthorizedBy": null,
+      "ballotProcessVersion": 5,
+      "reviewPasses": null,
+      "checkInstructions": null,
+      "surface": {
+        "gist": "Should the new `Validate` trait report every failing field as today's `[FieldError]` list, rather than a single `ValidationError`?",
+        "lesson": "Validation can report every failed field at once. A keeps the existing error list. B wraps that list in one named error value; one value need not mean only one failed field. Both preserve accumulation and pure validation.",
+        "trio": {
+          "current": {
+            "note": "Today every failed check adds a `FieldError` to one list.",
+            "code": "Order: struct {\n    qty: Int,\n    validate {\n        check(qty > 0, at: qty, \"must be positive\")\n    }\n}"
+          },
+          "wild": {
+            "lang": "Rust",
+            "note": "The `validator` crate returns all field failures in one `ValidationErrors` value. See https://docs.rs/validator/latest/validator/.",
+            "code": "let errs: ValidationErrors = form.validate().unwrap_err();"
+          }
+        },
+        "options": [
+          {
+            "key": "A",
+            "name": "Keep [FieldError]",
+            "gist": "The trait returns today's accumulated `[FieldError]` list.",
+            "gains": [
+              "Users see every failure at once.",
+              "Decode keeps one error type."
+            ],
+            "losses": [
+              "The card's signature changes."
+            ],
+            "proposed": {
+              "code": "impl Order.Validate {\n    validate: fn(self) -> Self ![FieldError] { … }\n}"
+            }
+          },
+          {
+            "key": "B",
+            "name": "Named error-list wrapper",
+            "gist": "ValidationError contains the accumulated FieldError list.",
+            "gains": [
+              "One named place for error-list methods."
+            ],
+            "losses": [
+              "Decode and validation need a coordinated wrapper migration."
+            ],
+            "proposed": {
+              "code": "// proposed ordinary wrapper\nValidationError: struct { fields: [FieldError] }"
+            }
+          }
+        ],
+        "recommendation": {
+          "rec": "A",
+          "why": "A preserves the existing list without an extra wrapper or decode migration. B can equally report every field.",
+          "gains": [
+            "No diagnostic regression.",
+            "One error type for decode and validate."
+          ],
+          "losses": [
+            {
+              "loss": "The card text needs rewording.",
+              "mitigation": "Only the criterion's signature changes; the trait idea stands."
+            }
+          ],
+          "whyNot": [
+            {
+              "key": "B",
+              "reason": "B preserves accumulation but adds a wrapper and a coordinated decode migration."
+            }
+          ],
+          "tradeoff": "A list type keeps all errors visible."
+        }
+      },
+      "reports": [
+        {
+          "title": "DSL, library and FFI extraction pre-build review",
+          "path": "Docs/Audits/2026-11-27-dsl-library-ffi-extraction-review.md",
+          "note": "Section 2.1, attack 2."
+        }
+      ],
+      "draftedBy": "Orchestrator",
+      "reviewedBy": "BallotReview4",
+      "draft": false,
+      "status": "open",
+      "created": "2026-11-28T04:33:27.196Z"
     }
   ],
   "questions": [
@@ -132200,6 +133391,174 @@
     }
   ],
   "events": [
+    {
+      "at": "2026-11-28T04:33:29.542Z",
+      "by": "Orchestrator",
+      "action": "decision.post",
+      "ref": "D-VALIDATE-ERRLIST1",
+      "note": "reviewed by BallotReview4"
+    },
+    {
+      "at": "2026-11-28T04:33:28.401Z",
+      "by": "BallotReview4",
+      "action": "decision.review",
+      "ref": "D-VALIDATE-ERRLIST1",
+      "note": "passed"
+    },
+    {
+      "at": "2026-11-28T04:33:27.196Z",
+      "by": "Orchestrator",
+      "action": "decision.add",
+      "ref": "D-VALIDATE-ERRLIST1",
+      "note": "The Validate trait keeps the accumulated [FieldError] list, not a single ValidationError (draft)"
+    },
+    {
+      "at": "2026-11-28T04:33:26.098Z",
+      "by": "Orchestrator",
+      "action": "decision.post",
+      "ref": "D-PROTOCOL-HOME1",
+      "note": "reviewed by BallotReview4"
+    },
+    {
+      "at": "2026-11-28T04:33:25.134Z",
+      "by": "BallotReview4",
+      "action": "decision.review",
+      "ref": "D-PROTOCOL-HOME1",
+      "note": "passed"
+    },
+    {
+      "at": "2026-11-28T04:33:24.271Z",
+      "by": "Orchestrator",
+      "action": "decision.add",
+      "ref": "D-PROTOCOL-HOME1",
+      "note": "Keep protocol expansion, or write the endpoint types directly? (draft)"
+    },
+    {
+      "at": "2026-11-28T04:33:23.429Z",
+      "by": "Orchestrator",
+      "action": "decision.post",
+      "ref": "D-MIGRATION-SHAPE1",
+      "note": "reviewed by BallotReview4"
+    },
+    {
+      "at": "2026-11-28T04:33:22.589Z",
+      "by": "BallotReview4",
+      "action": "decision.review",
+      "ref": "D-MIGRATION-SHAPE1",
+      "note": "passed"
+    },
+    {
+      "at": "2026-11-28T04:33:21.756Z",
+      "by": "Orchestrator",
+      "action": "decision.add",
+      "ref": "D-MIGRATION-SHAPE1",
+      "note": "Keep checked migration blocks, or write version conversions directly? (draft)"
+    },
+    {
+      "at": "2026-11-28T04:33:20.908Z",
+      "by": "Orchestrator",
+      "action": "decision.post",
+      "ref": "D-FFI-FIRSTPARTY1",
+      "note": "reviewed by BallotReview4"
+    },
+    {
+      "at": "2026-11-28T04:33:19.411Z",
+      "by": "BallotReview4",
+      "action": "decision.review",
+      "ref": "D-FFI-FIRSTPARTY1",
+      "note": "passed"
+    },
+    {
+      "at": "2026-11-28T04:33:18.558Z",
+      "by": "Orchestrator",
+      "action": "decision.add",
+      "ref": "D-FFI-FIRSTPARTY1",
+      "note": "Which foreign binders ship with the official toolchain? (draft)"
+    },
+    {
+      "at": "2026-11-28T04:33:17.686Z",
+      "by": "Orchestrator",
+      "action": "decision.post",
+      "ref": "D-CONSTTIME-HOME1",
+      "note": "reviewed by BallotReview4"
+    },
+    {
+      "at": "2026-11-28T04:33:16.870Z",
+      "by": "BallotReview4",
+      "action": "decision.review",
+      "ref": "D-CONSTTIME-HOME1",
+      "note": "passed"
+    },
+    {
+      "at": "2026-11-28T04:33:16.030Z",
+      "by": "Orchestrator",
+      "action": "decision.add",
+      "ref": "D-CONSTTIME-HOME1",
+      "note": "Where should mandatory fixed-timing validation live? (draft)"
+    },
+    {
+      "at": "2026-11-28T04:33:15.036Z",
+      "by": "Orchestrator",
+      "action": "decision.post",
+      "ref": "D-UNITFAMILY-FORM1",
+      "note": "reviewed by BallotReview4"
+    },
+    {
+      "at": "2026-11-28T04:33:14.081Z",
+      "by": "BallotReview4",
+      "action": "decision.review",
+      "ref": "D-UNITFAMILY-FORM1",
+      "note": "passed"
+    },
+    {
+      "at": "2026-11-28T04:33:12.992Z",
+      "by": "Orchestrator",
+      "action": "decision.add",
+      "ref": "D-UNITFAMILY-FORM1",
+      "note": "Keep the unit-family model, or also generate a sealed Unit trait? (draft)"
+    },
+    {
+      "at": "2026-11-28T04:33:12.018Z",
+      "by": "Orchestrator",
+      "action": "decision.post",
+      "ref": "D-REPLAYABLE-DROP1",
+      "note": "reviewed by BallotReview4"
+    },
+    {
+      "at": "2026-11-28T04:33:11.096Z",
+      "by": "BallotReview4",
+      "action": "decision.review",
+      "ref": "D-REPLAYABLE-DROP1",
+      "note": "passed"
+    },
+    {
+      "at": "2026-11-28T04:33:09.983Z",
+      "by": "Orchestrator",
+      "action": "decision.add",
+      "ref": "D-REPLAYABLE-DROP1",
+      "note": "Keep replayability separate from repeatability (draft)"
+    },
+    {
+      "at": "2026-11-28T04:33:09.056Z",
+      "by": "Orchestrator",
+      "action": "decision.post",
+      "ref": "D-MOVEONLY-OPTOUT1",
+      "note": "reviewed by BallotReview4"
+    },
+    {
+      "at": "2026-11-28T04:33:07.820Z",
+      "by": "BallotReview4",
+      "action": "decision.review",
+      "ref": "D-MOVEONLY-OPTOUT1",
+      "note": "passed"
+    },
+    {
+      "at": "2026-11-28T04:33:06.495Z",
+      "by": "Orchestrator",
+      "action": "decision.add",
+      "ref": "D-MOVEONLY-OPTOUT1",
+      "note": "Keep the hard #MoveOnly fact rather than equating it with a Copy derive opt-out (draft)"
+    },
     {
       "at": "2026-11-28T04:33:04.475Z",
       "by": "Orchestrator",
@@ -135605,713 +136964,6 @@
       "action": "card.criteria-meet",
       "ref": "c0g2flly",
       "note": "#5"
-    },
-    {
-      "at": "2026-11-26T23:44:47.096Z",
-      "by": "orchestrator",
-      "action": "card.criteria-meet",
-      "ref": "c0g2flly",
-      "note": "#4"
-    },
-    {
-      "at": "2026-11-26T23:44:45.665Z",
-      "by": "orchestrator",
-      "action": "card.criteria-meet",
-      "ref": "c0g2flly",
-      "note": "#3"
-    },
-    {
-      "at": "2026-11-26T23:44:44.341Z",
-      "by": "orchestrator",
-      "action": "card.criteria-meet",
-      "ref": "c0g2flly",
-      "note": "#2"
-    },
-    {
-      "at": "2026-11-26T23:44:43.170Z",
-      "by": "orchestrator",
-      "action": "card.criteria-meet",
-      "ref": "c0g2flly",
-      "note": "#1"
-    },
-    {
-      "at": "2026-11-26T23:44:41.797Z",
-      "by": "orchestrator",
-      "action": "card.update",
-      "ref": "c0nwrfck",
-      "note": "phase,logEntry"
-    },
-    {
-      "at": "2026-11-26T23:44:26.417Z",
-      "by": "orchestrator",
-      "action": "card.criteria-meet",
-      "ref": "c0nwrfck",
-      "note": "#119"
-    },
-    {
-      "at": "2026-11-26T23:44:24.660Z",
-      "by": "orchestrator",
-      "action": "card.criteria-meet",
-      "ref": "c0nwrfck",
-      "note": "#108"
-    },
-    {
-      "at": "2026-11-26T23:44:23.423Z",
-      "by": "orchestrator",
-      "action": "card.criteria-meet",
-      "ref": "c0nwrfck",
-      "note": "#39"
-    },
-    {
-      "at": "2026-11-26T21:30:41.169Z",
-      "by": "orchestrator",
-      "action": "card.update",
-      "ref": "c0blttm0",
-      "note": "phase,logEntry"
-    },
-    {
-      "at": "2026-11-26T21:30:38.987Z",
-      "by": "orchestrator",
-      "action": "card.criteria-meet",
-      "ref": "c0blttm0",
-      "note": "#5"
-    },
-    {
-      "at": "2026-11-26T21:30:38.030Z",
-      "by": "orchestrator",
-      "action": "card.criteria-meet",
-      "ref": "c0blttm0",
-      "note": "#4"
-    },
-    {
-      "at": "2026-11-26T21:30:37.068Z",
-      "by": "orchestrator",
-      "action": "card.criteria-meet",
-      "ref": "c0blttm0",
-      "note": "#2"
-    },
-    {
-      "at": "2026-11-26T21:26:15.404Z",
-      "by": "owner",
-      "action": "decision.ratify",
-      "ref": "D-FAIL-VISIBLE2",
-      "note": "A"
-    },
-    {
-      "at": "2026-11-26T21:26:15.404Z",
-      "by": "owner",
-      "action": "decision.ratify",
-      "ref": "D-YIELD-EMIT1",
-      "note": "A"
-    },
-    {
-      "at": "2026-11-26T21:26:15.404Z",
-      "by": "owner",
-      "action": "decision.ratify",
-      "ref": "D-EFFECT-TRAIT1",
-      "note": "A"
-    },
-    {
-      "at": "2026-11-26T21:25:32.611Z",
-      "by": "owner",
-      "action": "decision.ratify",
-      "ref": "D-MEM-POOL-NAME1",
-      "note": "B"
-    },
-    {
-      "at": "2026-11-26T21:22:32.377Z",
-      "by": "owner",
-      "action": "done.clear",
-      "ref": null,
-      "note": "2026-11-26T21:22:32.377Z"
-    },
-    {
-      "at": "2026-11-26T21:21:18.301Z",
-      "by": "orchestrator",
-      "action": "card.update",
-      "ref": "c02i9l7p",
-      "note": "phase,logEntry"
-    },
-    {
-      "at": "2026-11-26T21:21:16.304Z",
-      "by": "orchestrator",
-      "action": "card.criteria-meet",
-      "ref": "c02i9l7p",
-      "note": "#4"
-    },
-    {
-      "at": "2026-11-26T21:21:15.113Z",
-      "by": "orchestrator",
-      "action": "card.criteria-meet",
-      "ref": "c02i9l7p",
-      "note": "#3"
-    },
-    {
-      "at": "2026-11-26T21:21:14.057Z",
-      "by": "orchestrator",
-      "action": "card.criteria-meet",
-      "ref": "c02i9l7p",
-      "note": "#2"
-    },
-    {
-      "at": "2026-11-26T21:21:13.061Z",
-      "by": "orchestrator",
-      "action": "card.criteria-meet",
-      "ref": "c02i9l7p",
-      "note": "#1"
-    },
-    {
-      "at": "2026-11-26T21:21:12.067Z",
-      "by": "orchestrator",
-      "action": "card.update",
-      "ref": "c0ljw5xu",
-      "note": "phase,logEntry"
-    },
-    {
-      "at": "2026-11-26T21:21:09.666Z",
-      "by": "orchestrator",
-      "action": "card.criteria-meet",
-      "ref": "c0ljw5xu",
-      "note": "#4"
-    },
-    {
-      "at": "2026-11-26T21:21:08.498Z",
-      "by": "orchestrator",
-      "action": "card.criteria-meet",
-      "ref": "c0ljw5xu",
-      "note": "#3"
-    },
-    {
-      "at": "2026-11-26T21:21:07.295Z",
-      "by": "orchestrator",
-      "action": "card.criteria-meet",
-      "ref": "c0ljw5xu",
-      "note": "#2"
-    },
-    {
-      "at": "2026-11-26T21:21:05.709Z",
-      "by": "orchestrator",
-      "action": "card.criteria-meet",
-      "ref": "c0ljw5xu",
-      "note": "#1"
-    },
-    {
-      "at": "2026-11-26T21:21:04.642Z",
-      "by": "orchestrator",
-      "action": "card.update",
-      "ref": "c0in2dft",
-      "note": "phase,logEntry"
-    },
-    {
-      "at": "2026-11-26T21:21:01.776Z",
-      "by": "orchestrator",
-      "action": "card.criteria-meet",
-      "ref": "c0in2dft",
-      "note": "#1"
-    },
-    {
-      "at": "2026-11-26T21:21:00.765Z",
-      "by": "orchestrator",
-      "action": "card.update",
-      "ref": "c054h5qp",
-      "note": "phase,logEntry"
-    },
-    {
-      "at": "2026-11-26T21:20:58.686Z",
-      "by": "orchestrator",
-      "action": "card.criteria-meet",
-      "ref": "c054h5qp",
-      "note": "#4"
-    },
-    {
-      "at": "2026-11-26T21:20:57.417Z",
-      "by": "orchestrator",
-      "action": "card.criteria-meet",
-      "ref": "c054h5qp",
-      "note": "#1"
-    },
-    {
-      "at": "2026-11-26T21:20:55.916Z",
-      "by": "orchestrator",
-      "action": "card.update",
-      "ref": "c0t3jsi0",
-      "note": "phase,logEntry"
-    },
-    {
-      "at": "2026-11-26T21:20:53.036Z",
-      "by": "orchestrator",
-      "action": "card.criteria-meet",
-      "ref": "c0t3jsi0",
-      "note": "#5"
-    },
-    {
-      "at": "2026-11-26T21:20:51.758Z",
-      "by": "orchestrator",
-      "action": "card.criteria-meet",
-      "ref": "c0t3jsi0",
-      "note": "#3"
-    },
-    {
-      "at": "2026-11-26T21:20:50.423Z",
-      "by": "orchestrator",
-      "action": "card.update",
-      "ref": "c0mhrplj",
-      "note": "phase,logEntry"
-    },
-    {
-      "at": "2026-11-26T21:20:45.603Z",
-      "by": "orchestrator",
-      "action": "card.criteria-meet",
-      "ref": "c0mhrplj",
-      "note": "#6"
-    },
-    {
-      "at": "2026-11-26T18:40:37.105Z",
-      "by": "Orchestrator",
-      "action": "card.update",
-      "ref": "c0xphd0i",
-      "note": "logEntry"
-    },
-    {
-      "at": "2026-11-26T18:40:35.401Z",
-      "by": "Orchestrator",
-      "action": "card.update",
-      "ref": "c0jxsy7l",
-      "note": "logEntry"
-    },
-    {
-      "at": "2026-11-26T16:25:52.709Z",
-      "by": "owner",
-      "action": "done.clear",
-      "ref": null,
-      "note": "2026-11-26T16:25:52.709Z"
-    },
-    {
-      "at": "2026-11-26T16:25:13.306Z",
-      "by": "owner",
-      "action": "card.update",
-      "ref": "c0171611",
-      "note": "phase,logEntry"
-    },
-    {
-      "at": "2026-11-26T16:24:30.576Z",
-      "by": "Orchestrator",
-      "action": "card.criteria-meet",
-      "ref": "c0171611",
-      "note": "#8"
-    },
-    {
-      "at": "2026-11-26T16:16:30.422Z",
-      "by": "Orchestrator",
-      "action": "card.update",
-      "ref": "c0e6znz4",
-      "note": "logEntry"
-    },
-    {
-      "at": "2026-11-26T16:16:05.941Z",
-      "by": "Orchestrator",
-      "action": "card.update",
-      "ref": "c054h5qp",
-      "note": "phase,logEntry"
-    },
-    {
-      "at": "2026-11-26T16:16:04.422Z",
-      "by": "Orchestrator",
-      "action": "card.criteria-reopen",
-      "ref": "c054h5qp",
-      "note": "#4: Audit Part A: review written after build; Docs/Spec/Reference/syntax-surface.jet needs update."
-    },
-    {
-      "at": "2026-11-26T16:16:03.536Z",
-      "by": "Orchestrator",
-      "action": "card.criteria-reopen",
-      "ref": "c054h5qp",
-      "note": "#1: Audit Part A: review written after build; Docs/Spec/Reference/syntax-surface.jet needs update."
-    },
-    {
-      "at": "2026-11-26T16:16:02.694Z",
-      "by": "Orchestrator",
-      "action": "card.update",
-      "ref": "c0pi4dar",
-      "note": "phase,logEntry"
-    },
-    {
-      "at": "2026-11-26T16:16:01.156Z",
-      "by": "Orchestrator",
-      "action": "card.criteria-reopen",
-      "ref": "c0pi4dar",
-      "note": "#4: Audit Part A: commit 7c186ef7d9d leaked jet-ffi-callbacks temp dirs & .o/.a files at repo root, 1-line BlockFootprint.out, 1199-line duplicate SemIndex/Footprint.jet missing effect facts, editor hover missing range & Extract produces top-level _extracted."
-    },
-    {
-      "at": "2026-11-26T16:16:00.008Z",
-      "by": "Orchestrator",
-      "action": "card.criteria-reopen",
-      "ref": "c0pi4dar",
-      "note": "#3: Audit Part A: commit 7c186ef7d9d leaked jet-ffi-callbacks temp dirs & .o/.a files at repo root, 1-line BlockFootprint.out, 1199-line duplicate SemIndex/Footprint.jet missing effect facts, editor hover missing range & Extract produces top-level _extracted."
-    },
-    {
-      "at": "2026-11-26T16:15:59.135Z",
-      "by": "Orchestrator",
-      "action": "card.criteria-reopen",
-      "ref": "c0pi4dar",
-      "note": "#2: Audit Part A: commit 7c186ef7d9d leaked jet-ffi-callbacks temp dirs & .o/.a files at repo root, 1-line BlockFootprint.out, 1199-line duplicate SemIndex/Footprint.jet missing effect facts, editor hover missing range & Extract produces top-level _extracted."
-    },
-    {
-      "at": "2026-11-26T16:15:58.267Z",
-      "by": "Orchestrator",
-      "action": "card.criteria-reopen",
-      "ref": "c0pi4dar",
-      "note": "#1: Audit Part A: commit 7c186ef7d9d leaked jet-ffi-callbacks temp dirs & .o/.a files at repo root, 1-line BlockFootprint.out, 1199-line duplicate SemIndex/Footprint.jet missing effect facts, editor hover missing range & Extract produces top-level _extracted."
-    },
-    {
-      "at": "2026-11-26T16:15:57.417Z",
-      "by": "Orchestrator",
-      "action": "card.update",
-      "ref": "c0ljryls",
-      "note": "phase,logEntry"
-    },
-    {
-      "at": "2026-11-26T16:15:55.934Z",
-      "by": "Orchestrator",
-      "action": "card.criteria-reopen",
-      "ref": "c0ljryls",
-      "note": "#5: Audit Part A: PowerAssert.out is 1 line ('power assert ok') showing no report, post-close unballoted narrowing in BuildAssert.jet:102-160, missing web/comptime evidence, review cites nonexistent AssertDiff.jet & added 3rd diff routine without consolidating or filing residual gaps."
-    },
-    {
-      "at": "2026-11-26T16:15:55.084Z",
-      "by": "Orchestrator",
-      "action": "card.criteria-reopen",
-      "ref": "c0ljryls",
-      "note": "#3: Audit Part A: PowerAssert.out is 1 line ('power assert ok') showing no report, post-close unballoted narrowing in BuildAssert.jet:102-160, missing web/comptime evidence, review cites nonexistent AssertDiff.jet & added 3rd diff routine without consolidating or filing residual gaps."
-    },
-    {
-      "at": "2026-11-26T16:15:54.215Z",
-      "by": "Orchestrator",
-      "action": "card.criteria-reopen",
-      "ref": "c0ljryls",
-      "note": "#2: Audit Part A: PowerAssert.out is 1 line ('power assert ok') showing no report, post-close unballoted narrowing in BuildAssert.jet:102-160, missing web/comptime evidence, review cites nonexistent AssertDiff.jet & added 3rd diff routine without consolidating or filing residual gaps."
-    },
-    {
-      "at": "2026-11-26T16:15:53.341Z",
-      "by": "Orchestrator",
-      "action": "card.criteria-reopen",
-      "ref": "c0ljryls",
-      "note": "#1: Audit Part A: PowerAssert.out is 1 line ('power assert ok') showing no report, post-close unballoted narrowing in BuildAssert.jet:102-160, missing web/comptime evidence, review cites nonexistent AssertDiff.jet & added 3rd diff routine without consolidating or filing residual gaps."
-    },
-    {
-      "at": "2026-11-26T16:15:52.518Z",
-      "by": "Orchestrator",
-      "action": "card.update",
-      "ref": "c0qnrbr0",
-      "note": "phase,logEntry"
-    },
-    {
-      "at": "2026-11-26T16:15:51.001Z",
-      "by": "Orchestrator",
-      "action": "card.criteria-reopen",
-      "ref": "c0qnrbr0",
-      "note": "#1: Audit Part A: OpenSSL substituted for vendored mbedtls DTLS peers without owner decision, OpenSSL case skips silently when openssl missing, fragmented_server_flight does not assert a message split."
-    },
-    {
-      "at": "2026-11-26T16:15:50.182Z",
-      "by": "Orchestrator",
-      "action": "card.update",
-      "ref": "c0on083p",
-      "note": "phase,logEntry"
-    },
-    {
-      "at": "2026-11-26T16:15:48.685Z",
-      "by": "Orchestrator",
-      "action": "card.criteria-reopen",
-      "ref": "c0on083p",
-      "note": "#4: Audit Part A: c4 corpus proof ran narrower filters instead of exact --filter Encoding, --filter data, and --filter time."
-    },
-    {
-      "at": "2026-11-26T16:15:47.791Z",
-      "by": "Orchestrator",
-      "action": "card.update",
-      "ref": "c0t3jsi0",
-      "note": "phase,logEntry"
-    },
-    {
-      "at": "2026-11-26T16:15:46.316Z",
-      "by": "Orchestrator",
-      "action": "card.criteria-reopen",
-      "ref": "c0t3jsi0",
-      "note": "#5: Audit Part A: 3 UI snapshots still expect := text + stale E0514 ledger row; Docs/Spec/syntax-decisions.md:20-21 still lists name := value and LexicalLedger --write was not committed."
-    },
-    {
-      "at": "2026-11-26T16:15:45.477Z",
-      "by": "Orchestrator",
-      "action": "card.criteria-reopen",
-      "ref": "c0t3jsi0",
-      "note": "#3: Audit Part A: 3 UI snapshots still expect := text + stale E0514 ledger row; Docs/Spec/syntax-decisions.md:20-21 still lists name := value and LexicalLedger --write was not committed."
-    },
-    {
-      "at": "2026-11-26T16:15:44.625Z",
-      "by": "Orchestrator",
-      "action": "card.update",
-      "ref": "c0in2dft",
-      "note": "phase,logEntry"
-    },
-    {
-      "at": "2026-11-26T16:15:43.167Z",
-      "by": "Orchestrator",
-      "action": "card.criteria-reopen",
-      "ref": "c0in2dft",
-      "note": "#1: Audit Part A: c1 has no comptime-vs-runtime equality comparison and ctvalue_render_pretty_nested.case:4 says Not ported."
-    },
-    {
-      "at": "2026-11-26T16:15:42.336Z",
-      "by": "Orchestrator",
-      "action": "card.update",
-      "ref": "c02i9l7p",
-      "note": "phase,logEntry"
-    },
-    {
-      "at": "2026-11-26T16:15:40.807Z",
-      "by": "Orchestrator",
-      "action": "card.criteria-reopen",
-      "ref": "c02i9l7p",
-      "note": "#4: Audit Part A: review committed with build/no prior art/no deletions (3 split meanings + duplicate SplitMix64 in Testing.jet), integer keys (chunk.x, chunk.y) deferred without fix, missing web-tier coverage."
-    },
-    {
-      "at": "2026-11-26T16:15:39.952Z",
-      "by": "Orchestrator",
-      "action": "card.criteria-reopen",
-      "ref": "c02i9l7p",
-      "note": "#3: Audit Part A: review committed with build/no prior art/no deletions (3 split meanings + duplicate SplitMix64 in Testing.jet), integer keys (chunk.x, chunk.y) deferred without fix, missing web-tier coverage."
-    },
-    {
-      "at": "2026-11-26T16:15:39.121Z",
-      "by": "Orchestrator",
-      "action": "card.criteria-reopen",
-      "ref": "c02i9l7p",
-      "note": "#2: Audit Part A: review committed with build/no prior art/no deletions (3 split meanings + duplicate SplitMix64 in Testing.jet), integer keys (chunk.x, chunk.y) deferred without fix, missing web-tier coverage."
-    },
-    {
-      "at": "2026-11-26T16:15:38.255Z",
-      "by": "Orchestrator",
-      "action": "card.criteria-reopen",
-      "ref": "c02i9l7p",
-      "note": "#1: Audit Part A: review committed with build/no prior art/no deletions (3 split meanings + duplicate SplitMix64 in Testing.jet), integer keys (chunk.x, chunk.y) deferred without fix, missing web-tier coverage."
-    },
-    {
-      "at": "2026-11-26T16:15:37.412Z",
-      "by": "Orchestrator",
-      "action": "card.update",
-      "ref": "c0blttm0",
-      "note": "phase,logEntry"
-    },
-    {
-      "at": "2026-11-26T16:15:35.871Z",
-      "by": "Orchestrator",
-      "action": "card.criteria-reopen",
-      "ref": "c0blttm0",
-      "note": "#5: Audit Part A: broken Gauntlet callers (PerformanceSurface.jet:1423, Optimization/run.jet:58), LocalDate.format probe cut instead of pinned, c4 missing empty-TZDIR/JET_TZDB_DIR zone-DB test, c5 missing web tier & single-identity check."
-    },
-    {
-      "at": "2026-11-26T16:15:35.034Z",
-      "by": "Orchestrator",
-      "action": "card.criteria-reopen",
-      "ref": "c0blttm0",
-      "note": "#4: Audit Part A: broken Gauntlet callers (PerformanceSurface.jet:1423, Optimization/run.jet:58), LocalDate.format probe cut instead of pinned, c4 missing empty-TZDIR/JET_TZDB_DIR zone-DB test, c5 missing web tier & single-identity check."
-    },
-    {
-      "at": "2026-11-26T16:15:33.673Z",
-      "by": "Orchestrator",
-      "action": "card.criteria-reopen",
-      "ref": "c0blttm0",
-      "note": "#2: Audit Part A: broken Gauntlet callers (PerformanceSurface.jet:1423, Optimization/run.jet:58), LocalDate.format probe cut instead of pinned, c4 missing empty-TZDIR/JET_TZDB_DIR zone-DB test, c5 missing web tier & single-identity check."
-    },
-    {
-      "at": "2026-11-26T16:15:32.681Z",
-      "by": "Orchestrator",
-      "action": "card.update",
-      "ref": "c0hgn7y3",
-      "note": "phase,logEntry"
-    },
-    {
-      "at": "2026-11-26T16:15:31.089Z",
-      "by": "Orchestrator",
-      "action": "card.criteria-reopen",
-      "ref": "c0hgn7y3",
-      "note": "#6: Audit Part A: review committed with build & unballoted record syntax replacing approved layers list, second checker E1012/core_layers not folded into one mechanism, 25 drifting manifest layer copies (JetCLI omits 4 layers)."
-    },
-    {
-      "at": "2026-11-26T16:15:30.220Z",
-      "by": "Orchestrator",
-      "action": "card.criteria-reopen",
-      "ref": "c0hgn7y3",
-      "note": "#5: Audit Part A: review committed with build & unballoted record syntax replacing approved layers list, second checker E1012/core_layers not folded into one mechanism, 25 drifting manifest layer copies (JetCLI omits 4 layers)."
-    },
-    {
-      "at": "2026-11-26T16:15:29.418Z",
-      "by": "Orchestrator",
-      "action": "card.criteria-reopen",
-      "ref": "c0hgn7y3",
-      "note": "#2: Audit Part A: review committed with build & unballoted record syntax replacing approved layers list, second checker E1012/core_layers not folded into one mechanism, 25 drifting manifest layer copies (JetCLI omits 4 layers)."
-    },
-    {
-      "at": "2026-11-26T16:15:28.614Z",
-      "by": "Orchestrator",
-      "action": "card.criteria-reopen",
-      "ref": "c0hgn7y3",
-      "note": "#1: Audit Part A: review committed with build & unballoted record syntax replacing approved layers list, second checker E1012/core_layers not folded into one mechanism, 25 drifting manifest layer copies (JetCLI omits 4 layers)."
-    },
-    {
-      "at": "2026-11-26T16:15:27.786Z",
-      "by": "Orchestrator",
-      "action": "card.update",
-      "ref": "c01wqict",
-      "note": "phase,logEntry"
-    },
-    {
-      "at": "2026-11-26T16:15:26.245Z",
-      "by": "Orchestrator",
-      "action": "card.criteria-reopen",
-      "ref": "c01wqict",
-      "note": "#6: Audit Part A: missing separate-process parallel tests (NativeTests.jet:575), #Export(c) reuses E3203 instead of own code, E3401/E0938 not reworded, missing UI snapshots, incomplete sweep (18 Core lifetime sites, OutputCallable cases, syntax-decisions, Cases/UI/fixtures), no executable O0/O1/O2 test-reset proof."
-    },
-    {
-      "at": "2026-11-26T16:15:25.386Z",
-      "by": "Orchestrator",
-      "action": "card.criteria-reopen",
-      "ref": "c01wqict",
-      "note": "#5: Audit Part A: missing separate-process parallel tests (NativeTests.jet:575), #Export(c) reuses E3203 instead of own code, E3401/E0938 not reworded, missing UI snapshots, incomplete sweep (18 Core lifetime sites, OutputCallable cases, syntax-decisions, Cases/UI/fixtures), no executable O0/O1/O2 test-reset proof."
-    },
-    {
-      "at": "2026-11-26T16:15:24.570Z",
-      "by": "Orchestrator",
-      "action": "card.criteria-reopen",
-      "ref": "c01wqict",
-      "note": "#4: Audit Part A: missing separate-process parallel tests (NativeTests.jet:575), #Export(c) reuses E3203 instead of own code, E3401/E0938 not reworded, missing UI snapshots, incomplete sweep (18 Core lifetime sites, OutputCallable cases, syntax-decisions, Cases/UI/fixtures), no executable O0/O1/O2 test-reset proof."
-    },
-    {
-      "at": "2026-11-26T16:15:23.733Z",
-      "by": "Orchestrator",
-      "action": "card.criteria-reopen",
-      "ref": "c01wqict",
-      "note": "#3: Audit Part A: missing separate-process parallel tests (NativeTests.jet:575), #Export(c) reuses E3203 instead of own code, E3401/E0938 not reworded, missing UI snapshots, incomplete sweep (18 Core lifetime sites, OutputCallable cases, syntax-decisions, Cases/UI/fixtures), no executable O0/O1/O2 test-reset proof."
-    },
-    {
-      "at": "2026-11-26T16:15:22.886Z",
-      "by": "Orchestrator",
-      "action": "card.criteria-reopen",
-      "ref": "c01wqict",
-      "note": "#2: Audit Part A: missing separate-process parallel tests (NativeTests.jet:575), #Export(c) reuses E3203 instead of own code, E3401/E0938 not reworded, missing UI snapshots, incomplete sweep (18 Core lifetime sites, OutputCallable cases, syntax-decisions, Cases/UI/fixtures), no executable O0/O1/O2 test-reset proof."
-    },
-    {
-      "at": "2026-11-26T16:15:22.049Z",
-      "by": "Orchestrator",
-      "action": "card.update",
-      "ref": "c0ljw5xu",
-      "note": "phase,logEntry"
-    },
-    {
-      "at": "2026-11-26T16:15:20.530Z",
-      "by": "Orchestrator",
-      "action": "card.criteria-reopen",
-      "ref": "c0ljw5xu",
-      "note": "#4: Audit Part A: probable authority hole in CompilerFS.jet (checks relative path vs real cwd while opening vs context.dir), duplicate wrappers not deleted (Files.jet rmdir/unlink/getcwd/chdir/delete/rm/pwd, Sys.jet getenv), E0761/E0762 missing dir/env, jet_rt_test_spawn not actually parallel, review committed with build as plan."
-    },
-    {
-      "at": "2026-11-26T16:15:19.665Z",
-      "by": "Orchestrator",
-      "action": "card.criteria-reopen",
-      "ref": "c0ljw5xu",
-      "note": "#3: Audit Part A: probable authority hole in CompilerFS.jet (checks relative path vs real cwd while opening vs context.dir), duplicate wrappers not deleted (Files.jet rmdir/unlink/getcwd/chdir/delete/rm/pwd, Sys.jet getenv), E0761/E0762 missing dir/env, jet_rt_test_spawn not actually parallel, review committed with build as plan."
-    },
-    {
-      "at": "2026-11-26T16:15:18.811Z",
-      "by": "Orchestrator",
-      "action": "card.criteria-reopen",
-      "ref": "c0ljw5xu",
-      "note": "#2: Audit Part A: probable authority hole in CompilerFS.jet (checks relative path vs real cwd while opening vs context.dir), duplicate wrappers not deleted (Files.jet rmdir/unlink/getcwd/chdir/delete/rm/pwd, Sys.jet getenv), E0761/E0762 missing dir/env, jet_rt_test_spawn not actually parallel, review committed with build as plan."
-    },
-    {
-      "at": "2026-11-26T16:15:17.963Z",
-      "by": "Orchestrator",
-      "action": "card.criteria-reopen",
-      "ref": "c0ljw5xu",
-      "note": "#1: Audit Part A: probable authority hole in CompilerFS.jet (checks relative path vs real cwd while opening vs context.dir), duplicate wrappers not deleted (Files.jet rmdir/unlink/getcwd/chdir/delete/rm/pwd, Sys.jet getenv), E0761/E0762 missing dir/env, jet_rt_test_spawn not actually parallel, review committed with build as plan."
-    },
-    {
-      "at": "2026-11-26T16:15:17.120Z",
-      "by": "Orchestrator",
-      "action": "card.update",
-      "ref": "c0kgt885",
-      "note": "phase,logEntry"
-    },
-    {
-      "at": "2026-11-26T16:15:15.611Z",
-      "by": "Orchestrator",
-      "action": "card.criteria-reopen",
-      "ref": "c0kgt885",
-      "note": "#2: Audit Part A: c2 refusal logic exists only in toy fixture not real db_crash_reopen harness; network-FS refusal & TRUNCATE/PERSIST/NORMAL/EXTRA modes unverified vs docs; always-on guard_edit() lock at OS.jet:1372 & public Store.trace_vfs."
-    },
-    {
-      "at": "2026-11-26T16:15:14.770Z",
-      "by": "Orchestrator",
-      "action": "card.criteria-reopen",
-      "ref": "c0kgt885",
-      "note": "#1: Audit Part A: c2 refusal logic exists only in toy fixture not real db_crash_reopen harness; network-FS refusal & TRUNCATE/PERSIST/NORMAL/EXTRA modes unverified vs docs; always-on guard_edit() lock at OS.jet:1372 & public Store.trace_vfs."
-    },
-    {
-      "at": "2026-11-26T16:15:13.961Z",
-      "by": "Orchestrator",
-      "action": "card.update",
-      "ref": "c0kkogun",
-      "note": "phase,logEntry"
-    },
-    {
-      "at": "2026-11-26T16:15:12.443Z",
-      "by": "Orchestrator",
-      "action": "card.criteria-reopen",
-      "ref": "c0kkogun",
-      "note": "#4: Audit Part A: c4 still has known-failing cffi_card436_c_abi_shapes_round_trip.case; Calls/Checking.jet:737 skips E3203/E3218 foreign-thread callback checks for managed transport."
-    },
-    {
-      "at": "2026-11-26T16:15:11.590Z",
-      "by": "Orchestrator",
-      "action": "card.criteria-reopen",
-      "ref": "c0kkogun",
-      "note": "#2: Audit Part A: c4 still has known-failing cffi_card436_c_abi_shapes_round_trip.case; Calls/Checking.jet:737 skips E3203/E3218 foreign-thread callback checks for managed transport."
-    },
-    {
-      "at": "2026-11-26T16:15:10.751Z",
-      "by": "Orchestrator",
-      "action": "card.update",
-      "ref": "c01xuayj",
-      "note": "phase,logEntry"
-    },
-    {
-      "at": "2026-11-26T16:15:09.195Z",
-      "by": "Orchestrator",
-      "action": "card.criteria-reopen",
-      "ref": "c01xuayj",
-      "note": "#5: Audit Part A: CLI/Jobs/MCP opt-in helpers have 0 production callers, ErrReport untouched, Web 500 leak at Web.jet:3038 & unrecorded 500s, ~74/114 Core error types missing Describe, Notice.public leaks raw errors, review missing prior art & promised deletions (service_error_show, error_response), spec overclaims & incomplete HTTP 500 test."
-    },
-    {
-      "at": "2026-11-26T16:15:07.986Z",
-      "by": "Orchestrator",
-      "action": "card.criteria-reopen",
-      "ref": "c01xuayj",
-      "note": "#4: Audit Part A: CLI/Jobs/MCP opt-in helpers have 0 production callers, ErrReport untouched, Web 500 leak at Web.jet:3038 & unrecorded 500s, ~74/114 Core error types missing Describe, Notice.public leaks raw errors, review missing prior art & promised deletions (service_error_show, error_response), spec overclaims & incomplete HTTP 500 test."
-    },
-    {
-      "at": "2026-11-26T16:15:07.133Z",
-      "by": "Orchestrator",
-      "action": "card.criteria-reopen",
-      "ref": "c01xuayj",
-      "note": "#3: Audit Part A: CLI/Jobs/MCP opt-in helpers have 0 production callers, ErrReport untouched, Web 500 leak at Web.jet:3038 & unrecorded 500s, ~74/114 Core error types missing Describe, Notice.public leaks raw errors, review missing prior art & promised deletions (service_error_show, error_response), spec overclaims & incomplete HTTP 500 test."
-    },
-    {
-      "at": "2026-11-26T16:15:06.291Z",
-      "by": "Orchestrator",
-      "action": "card.criteria-reopen",
-      "ref": "c01xuayj",
-      "note": "#1: Audit Part A: CLI/Jobs/MCP opt-in helpers have 0 production callers, ErrReport untouched, Web 500 leak at Web.jet:3038 & unrecorded 500s, ~74/114 Core error types missing Describe, Notice.public leaks raw errors, review missing prior art & promised deletions (service_error_show, error_response), spec overclaims & incomplete HTTP 500 test."
     }
   ],
   "nextNum": 368,
