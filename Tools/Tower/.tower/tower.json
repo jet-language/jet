@@ -3,7 +3,7 @@
     "version": 4,
     "project": "Jet",
     "nextNum": 7070,
-    "rev": 115275,
+    "rev": 115276,
     "ui": {
       "toggled": [
         "dec-group:syntax",
@@ -64340,6 +64340,11 @@
         {
           "at": "2026-11-28",
           "by": "Orchestrator",
+          "text": "c2 part 2 landed on dev 81400545a65: a String view that is copied or made owned now shares its root text instead of copying; byte_slice is a runtime route that shares bytes on character-boundary cuts and otherwise makes one repaired copy with no temporary; the web/native HiddenCopyInLoop reason no longer fires for owned views. Paired benchmarks (median of 7, peak RSS) vs Rust 1.99 -O3 and Go 1.26.7: views 46 ms/47 MB (before 62/72) vs Rust 20/24 and Go 30/62; slices 48/47 (before 63/73); short strings 293 ms/410 MB unchanged vs Rust 181/167 and Go 171/205; push 307 ms vs Rust 115 and Go 63. Jet is still 1.4-4.9x slower per cell, so the peer floor is not met; short strings need layout A (plan in the audit, section 10). Still open in c2: layout A, thread-local counts (left out because the crossing census also has to cover runtime-internal hand-offs), and the push cost."
+        },
+        {
+          "at": "2026-11-28",
+          "by": "Orchestrator",
           "text": "c2 layout A (24-byte String with inline text, audit 2.1) measured on dev 79d8e1002e8: 104 #Export(c) text entries pass String as one word, 777 rt_text_data and 770 rt_text_len reads across 131 runtime files, 452 IRRouteCarrier.Text uses, 97 ir_string_row uses in 22 IR files; every String-returning runtime export needs an sret cell, [String] columns move to stride 24, Option<String> loses its null niche, and web, C FFI and X64 inline clone/drop all change, then a self-hosting S2==S3. Kept A as the target (the audit rejects B unless A is prohibitive; this is large, not prohibitive) and scheduled it as its own staged lane after the #7047 sweep lands. This pass: non-ASCII byte_slice without a temporary, web HiddenCopyInLoop reason removed, heap text blocks sized to the text, benchmarks on the current layout."
         },
         {
@@ -64429,7 +64434,7 @@
       "parentId": null,
       "needsAcceptance": false,
       "created": "2026-11-27T19:19:25.407Z",
-      "updated": "2026-11-28T02:30:36.972Z",
+      "updated": "2026-11-28T02:55:19.577Z",
       "updatedBy": "Orchestrator",
       "criteriaLastN": 6
     },
@@ -124996,6 +125001,13 @@
     }
   ],
   "events": [
+    {
+      "at": "2026-11-28T02:55:19.577Z",
+      "by": "Orchestrator",
+      "action": "card.update",
+      "ref": "c0nnf642",
+      "note": "logEntry"
+    },
     {
       "at": "2026-11-28T02:49:28.342Z",
       "by": "Orchestrator",
