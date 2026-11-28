@@ -3,7 +3,7 @@
     "version": 4,
     "project": "Jet",
     "nextNum": 7071,
-    "rev": 115300,
+    "rev": 115325,
     "ui": {
       "toggled": [
         "dec-group:syntax",
@@ -64702,7 +64702,7 @@
       "parentId": null,
       "needsAcceptance": false,
       "created": "2026-11-27T21:28:07.686Z",
-      "updated": "2026-11-27T21:48:37.461Z",
+      "updated": "2026-11-28T04:00:14.590Z",
       "updatedBy": "Orchestrator",
       "criteriaLastN": 3
     },
@@ -64773,7 +64773,7 @@
       "parentId": null,
       "needsAcceptance": false,
       "created": "2026-11-27T21:28:08.583Z",
-      "updated": "2026-11-28T01:44:12.233Z",
+      "updated": "2026-11-28T04:00:28.179Z",
       "updatedBy": "Orchestrator",
       "criteriaLastN": 4
     },
@@ -123831,6 +123831,1466 @@
       "draft": false,
       "status": "open",
       "created": "2026-11-28T04:00:03.853Z"
+    },
+    {
+      "id": "D-CLOSE-MARKER1",
+      "cardId": "c08123r9",
+      "group": "ffi",
+      "title": "The #Close marker retires; binders emit impl Close on foreign handle types",
+      "situation": "",
+      "gist": "Should foreign binders emit ordinary Close implementations instead of the Close marker?",
+      "lesson": "Foreign cleanup still needs checked ownership. A has binders emit the same consuming, infallible Close contract as other resources. B keeps the marker only as sugar for that contract. Moving syntax out of the Prelude alone does not remove the compiler's ownership obligations.",
+      "explainer": "",
+      "story": "Jun wants an owned foreign handle released exactly once, without hiding release failures inside scope cleanup.",
+      "inWild": "// an owning foreign wrapper implements Drop; raw release stays internal",
+      "detail": "Compiler/Prelude/Traits.jet, Close, declares close: fn(^^self) Never!. Compiler/JetSema/Source/Sema/Registration/Checked.jet, sema_checked_foreign_close, checks matching single move-handle release signatures and emits E0702. Docs/Spec/spec.md:5782-5805 records the foreign declaration law. The ratified cleanup law is consuming and infallible; observable fallible shutdown remains an explicit operation, not a fallible destructor.\n\nThe older baseline accepts the marker declaration but rejects close(handle) in the foreign-close fixture with Jet.TraitNotImplemented. This is not proof that the newer dev compiler has the same gap. Neither option relies on baseline marker-to-trait parity.\n\nA must preserve an owned opaque handle wrapper, prevent copying ownership or using it after consumption, and release exactly once on every supported cleanup edge. A raw pointer with a generated method is not by itself such a proof. Vetted release internals retain the existing unsafe/foreign boundary; generation must not pretend they are pure. Borrowed handles must not gain ownership cleanup.\n\nMultiple acquisitions, conflicting release functions and existing manual Close impls require resolution, not duplicate impls. B is a viable shorthand for this same contract, not a separate cleanup mechanism. Libraries can provide wrappers, while the compiler still checks ordinary ownership and traits. This ballot does not relax those checks or promise a universal automatic rewrite.",
+      "options": [
+        {
+          "key": "A",
+          "name": "Binders emit ordinary Close",
+          "detail": "Remove the marker after binder and hand-binding migration to checked owning wrappers and ordinary Close. Preserve consuming Never! cleanup, effect boundaries and explicit fallible shutdown.",
+          "code": "// proposed generated wrapper implements close: fn(^^self) Never!"
+        },
+        {
+          "key": "B",
+          "name": "Keep marker sugar",
+          "detail": "Retain marker syntax solely as lowering to the same wrapper and Close semantics, with identical ownership, release and effect checks.",
+          "code": "// proposed: #Close(release) lowers to the ordinary Close contract"
+        }
+      ],
+      "comparisons": [
+        {
+          "lang": "Rust",
+          "note": "The Rustonomicon's destructors section says ownership handed off by foreign libraries requires destructor-based release. It does not establish Jet ownership or infallibility. https://doc.rust-lang.org/nomicon/ffi.html#destructors",
+          "code": "// an owning foreign wrapper implements Drop; raw release stays internal"
+        }
+      ],
+      "rec": "A",
+      "recommendation": {
+        "why": "Generation can use the ordinary cleanup contract without a dedicated marker.",
+        "gains": [
+          "One visible cleanup declaration."
+        ],
+        "losses": [
+          {
+            "loss": "Not every existing marker can be migrated automatically.",
+            "mitigation": "Generate an edit only after proving ownership, release identity and effect compatibility; flag conflicting releases or manual wrappers for review."
+          }
+        ],
+        "whyNot": [
+          {
+            "key": "B",
+            "reason": "B can be sound as sugar, but retains another surface declaration for the same meaning."
+          }
+        ],
+        "tradeoff": "More generated wrapper code buys one cleanup spelling."
+      },
+      "hybrid": null,
+      "ballotMode": "short",
+      "shortAuthorizedBy": null,
+      "ballotProcessVersion": 5,
+      "reviewPasses": null,
+      "checkInstructions": null,
+      "surface": {
+        "gist": "Should foreign binders emit ordinary Close implementations instead of the Close marker?",
+        "lesson": "Foreign cleanup still needs checked ownership. A has binders emit the same consuming, infallible Close contract as other resources. B keeps the marker only as sugar for that contract. Moving syntax out of the Prelude alone does not remove the compiler's ownership obligations.",
+        "trio": {
+          "current": {
+            "note": "The marker names a release function for a returned foreign resource.",
+            "code": "// foreign acquisition declaration carries #Close(release)\n// release must consume the matching handle"
+          },
+          "wild": {
+            "lang": "Rust",
+            "note": "The Rustonomicon recommends destructors for owned foreign resources.",
+            "code": "// an owning wrapper implements Drop; raw release stays internal"
+          }
+        },
+        "options": [
+          {
+            "key": "A",
+            "name": "Binders emit ordinary Close",
+            "gist": "Remove the marker and generate a checked owning wrapper with a Close implementation.",
+            "gains": [
+              "One cleanup contract without special marker syntax."
+            ],
+            "losses": [
+              "Bindings and ownership metadata need migration."
+            ],
+            "proposed": {
+              "code": "// proposed generated wrapper implements close: fn(^^self) Never!"
+            }
+          },
+          {
+            "key": "B",
+            "name": "Keep marker sugar",
+            "gist": "Keep the marker as shorthand that lowers to the same checked wrapper and Close contract.",
+            "gains": [
+              "Compact hand-written bindings."
+            ],
+            "losses": [
+              "Two surface spellings for the same cleanup contract."
+            ],
+            "proposed": {
+              "code": "// proposed: #Close(release) lowers to the ordinary Close contract"
+            }
+          }
+        ],
+        "recommendation": {
+          "rec": "A",
+          "why": "Generation can use the ordinary cleanup contract without a dedicated marker.",
+          "gains": [
+            "One visible cleanup declaration."
+          ],
+          "losses": [
+            {
+              "loss": "Not every existing marker can be migrated automatically.",
+              "mitigation": "Generate an edit only after proving ownership, release identity and effect compatibility; flag conflicting releases or manual wrappers for review."
+            }
+          ],
+          "whyNot": [
+            {
+              "key": "B",
+              "reason": "B can be sound as sugar, but retains another surface declaration for the same meaning."
+            }
+          ],
+          "tradeoff": "More generated wrapper code buys one cleanup spelling."
+        }
+      },
+      "reports": [
+        {
+          "title": "Unified #Defer marker pre-build review",
+          "path": "Docs/Audits/2026-11-27-unified-defer-marker-review.md",
+          "note": "Section 7 and section 9, ballot B5."
+        }
+      ],
+      "draftedBy": "Orchestrator",
+      "reviewedBy": "BallotReview3",
+      "draft": false,
+      "status": "open",
+      "created": "2026-11-28T04:00:07.765Z"
+    },
+    {
+      "id": "D-DEFER-SPELL1",
+      "cardId": "c08123r9",
+      "group": "syntax",
+      "title": "#Defer takes a when case first and a scope: case from a fixed menu",
+      "situation": "The proposed cleanup marker chooses an outcome and a target scope. We recommend block and function targets without loop-label targets, accepting that moving cleanup outward is not always equivalent. Ratify this ballot together with transaction targeting: that ballot independently determines the transaction target under every answer here. All shown #Defer syntax is proposed, not an already-working compiler feature.",
+      "gist": "Should proposed #Defer support fixed scope targets only, an explicit loop-target case, or bare loop labels?",
+      "lesson": "The proposed marker defaults to `.Always` at `.Block`; `.Ok` and `.Err` select outcomes, and `.Fn` selects function exit. This ballot chooses only whether and how loop labels are supported. The paired transaction ballot independently supplies its transaction-target form. A loses direct cleanup registration against an outer loop from a nested block.",
+      "explainer": "",
+      "story": "Pat writes cleanup inside a nested loop and wants it to run when the outer loop's pass ends.",
+      "inWild": "defer f.close();\nerrdefer rollback();",
+      "detail": "Compiler/JetIR/Source/BuildTransact.jet, ir_defer:252-262, stores a deferred body and reads visible locals at exit. A baseline deferred a local, changed it from 1 to 2, and printed 2. This older executable does not establish that proposed #Defer works in newer dev.\n\nEvery option introduces #Defer with defaults when=.Always and scope=.Block. For ordinary block/function targets, Ok means normal departure, including return, break and skip; Err means failure or stop. Transaction targets use their own commit/rollback outcome. Registration is conditional on reaching the marker. Ratify with the capture-law and cleanup-order ballots. Capture A transfers inner owned locals at block end, B rejects early-dying captures, and C snapshots them at registration. Never suggest moving registration without proving equivalent control flow and capture facts.\n\nRatify with transaction targeting. This ballot selects no loop targets (A), .Loop(label) (B), or bare lexical loop labels (C). Its companion independently selects .Transact (A), .Transact(name) with retained names (B), or contextual .Block (C). Thus fixed-menu A permits named transactions if the companion chooses them. Loop-label C does not add transaction names. Labels and names must resolve to enclosing lexical targets, never runtime strings. The parameterized descriptors are proposed, not current syntax.\n\nCleanup-order A migrates hooks into unified lexical ordering, with checked fixes or author-reviewed reorders. Cleanup-order B retains the old hook API and its after-cleanup phase, regardless of this ballot's label answer. No combination may silently delete that phase while claiming compatibility. The separate scope-guard ballot decides whether the movable inferred carrier remains.\n\nZig errdefer is current-block error-return cleanup. It does not prove outer-loop targeting unnecessary.",
+      "options": [
+        {
+          "key": "A",
+          "name": "Fixed menu of cases",
+          "detail": "Permit block/function targets plus the transaction form selected by the paired ballot. Do not permit loop-label targets. Register outward only when that preserves conditional registration and capture lifetimes.",
+          "code": "#Defer { close(f) }\n#Defer(.Err) { undo() }\n#Defer(.Ok, scope: .Fn) { log_done() }"
+        },
+        {
+          "key": "B",
+          "name": "Cases plus .Loop(name)",
+          "detail": "Add the proposed lexical scope descriptor `.Loop(label)` for an enclosing labeled loop, plus the transaction form selected by the paired ballot. The label is checked at compile time, not evaluated as a runtime value.",
+          "code": "#Defer(scope: .Loop(outer)) { flush() }"
+        },
+        {
+          "key": "C",
+          "name": "Case or bare label",
+          "detail": "Permit a bare enclosing loop label alongside fixed targets and the independently selected transaction form. The parser and sema must resolve lexical targets, never arbitrary marker values.",
+          "code": "#Defer(scope: outer) { flush() }"
+        }
+      ],
+      "comparisons": [
+        {
+          "lang": "Zig",
+          "note": "Zig defer runs at scope exit in reverse registration order; errdefer runs only on an error-return path from its block. Neither has a target-scope argument. https://ziglang.org/documentation/0.15.2/#defer and https://ziglang.org/documentation/0.15.2/#errdefer",
+          "code": "defer f.close();\nerrdefer rollback();"
+        }
+      ],
+      "rec": "A",
+      "recommendation": {
+        "why": "Keep the scope vocabulary small and explicit. This trades away outer-loop registration, not merely compiler implementation work.",
+        "gains": [
+          "No loop-label spelling.",
+          "Smallest scope vocabulary."
+        ],
+        "losses": [
+          {
+            "loss": "No cleanup aimed at an outer loop's pass.",
+            "mitigation": "Move registration outward only if control flow and captured lifetimes are unchanged; otherwise keep an explicit outer-owned resource collection and clean it there."
+          }
+        ],
+        "whyNot": [
+          {
+            "key": "B",
+            "reason": "B honestly preserves outer-loop registration, but adds another lexical target form."
+          },
+          {
+            "key": "C",
+            "reason": "C is shortest, but hides whether a name denotes a lexical target or an ordinary value."
+          }
+        ],
+        "tradeoff": "Losing label targets buys a small, fixed scope menu."
+      },
+      "hybrid": null,
+      "ballotMode": "full",
+      "shortAuthorizedBy": null,
+      "ballotProcessVersion": 5,
+      "reviewPasses": {
+        "adversarial": "Author model family: Claude. Adversarial model family: GPT. Fresh agent: BallotReview3. Verified defer lowering, executed live-local cleanup and checked versioned Zig documentation; outer hoisting is not assumed equivalent. A remains recommended with the paired capture, ordering and transaction choices preserved."
+      },
+      "checkInstructions": null,
+      "surface": {
+        "gist": "Should proposed #Defer support fixed scope targets only, an explicit loop-target case, or bare loop labels?",
+        "lesson": "The proposed marker defaults to `.Always` at `.Block`; `.Ok` and `.Err` select outcomes, and `.Fn` selects function exit. This ballot chooses only whether and how loop labels are supported. The paired transaction ballot independently supplies its transaction-target form. A loses direct cleanup registration against an outer loop from a nested block.",
+        "trio": {
+          "current": {
+            "note": "Today `defer` is a statement, `scope.guard` a closure, and transactions use hooks.",
+            "code": "defer close(f)\nguard: scope.guard(fn() { reset() })"
+          },
+          "wild": {
+            "lang": "Zig",
+            "note": "Zig documents scope-exit defer and error-return-only errdefer, with no lexical target argument.",
+            "code": "defer f.close();\nerrdefer rollback();"
+          }
+        },
+        "options": [
+          {
+            "key": "A",
+            "name": "Fixed menu of cases",
+            "gist": "Use block/function targets and the paired transaction winner; no loop-label target.",
+            "gains": [
+              "No loop-label spelling to learn.",
+              "Targets remain an explicit menu."
+            ],
+            "losses": [
+              "Cleanup cannot target an outer loop's pass."
+            ],
+            "proposed": {
+              "code": "#Defer { close(f) }\n#Defer(.Err) { undo() }\n#Defer(.Ok, scope: .Fn) { log_done() }"
+            }
+          },
+          {
+            "key": "B",
+            "name": "Cases plus .Loop(name)",
+            "gist": "Add proposed `scope: .Loop(name)` for a lexically enclosing labeled loop.",
+            "gains": [
+              "Can target any labeled loop."
+            ],
+            "losses": [
+              "A fourth scope form to learn."
+            ],
+            "proposed": {
+              "code": "#Defer(scope: .Loop(outer)) { flush() }"
+            }
+          },
+          {
+            "key": "C",
+            "name": "Case or bare label",
+            "gist": "`scope:` takes a case or a bare loop label, as the card wrote it.",
+            "gains": [
+              "Shortest label form."
+            ],
+            "losses": [
+              "Loop labels and fixed targets have different surface forms."
+            ],
+            "proposed": {
+              "code": "#Defer(scope: outer) { flush() }"
+            }
+          }
+        ],
+        "recommendation": {
+          "rec": "A",
+          "why": "Keep the scope vocabulary small and explicit. This trades away outer-loop registration, not merely compiler implementation work.",
+          "gains": [
+            "No loop-label spelling.",
+            "Smallest scope vocabulary."
+          ],
+          "losses": [
+            {
+              "loss": "No cleanup aimed at an outer loop's pass.",
+              "mitigation": "Move registration outward only if control flow and captured lifetimes are unchanged; otherwise keep an explicit outer-owned resource collection and clean it there."
+            }
+          ],
+          "whyNot": [
+            {
+              "key": "B",
+              "reason": "B honestly preserves outer-loop registration, but adds another lexical target form."
+            },
+            {
+              "key": "C",
+              "reason": "C is shortest, but hides whether a name denotes a lexical target or an ordinary value."
+            }
+          ],
+          "tradeoff": "Losing label targets buys a small, fixed scope menu."
+        }
+      },
+      "reports": [
+        {
+          "title": "Unified #Defer marker pre-build review",
+          "path": "Docs/Audits/2026-11-27-unified-defer-marker-review.md",
+          "note": "Section 7 marker schema and ratification gap, and section 9, ballot B6."
+        }
+      ],
+      "draftedBy": "Orchestrator",
+      "reviewedBy": "BallotReview3",
+      "draft": false,
+      "status": "open",
+      "created": "2026-11-28T04:00:10.411Z"
+    },
+    {
+      "id": "D-DEFER-TXSCOPE1",
+      "cardId": "c08123r9",
+      "group": "syntax",
+      "title": "A #Defer names the enclosing transaction as scope: .Transact",
+      "situation": "Commit and rollback cleanup must target a transaction, not an intervening if block. We recommend an explicit `.Transact` target for the nearest transaction wall, while acknowledging that it cannot directly name a farther wall. Named targets preserve that ability at the cost of retaining names. Ratify this ballot with cleanup spelling; loop-label support is independent of the transaction choice.",
+      "gist": "How should a `#Defer` name the transaction it belongs to: `scope: .Transact`, the transaction's name, or a context-dependent `.Block`?",
+      "lesson": "Transaction-targeted cleanup follows that transaction's outcome, not function success or an intervening block exit. A chooses the nearest transaction; B retains names and can choose an outer one; C changes `.Block` inside transactions. Loop labels are controlled only by the paired cleanup-spelling ballot. Implicit nested regions and explicit transaction walls must not be conflated.",
+      "explainer": "",
+      "story": "Gus sends a receipt only when an order commits. His `#Defer(.Ok)` sits inside an `if` in the transaction, and must not fire when the `if` ends.",
+      "inWild": "errdefer rollback(); // on leaving this block with an error",
+      "detail": "Compiler/Prelude/Markers.jet, Transact:635-639, declares an optional name. Compiler/JetIR/Source/BuildTransact.jet, ir_transact:186-233, creates a named handle and commits at the generated wall exit. Compiler/JetSema/Source/Sema/Statements/Assignments.jet, sema_stmt_check_transaction:682-720, flattens a nested region only when implicit and transaction_depth>0. Explicit walls are distinct. The audit overgeneralized that predicate; A cannot rely on every nested transaction sharing the outermost commit.\n\nA targets the nearest actual wall; flattened implicit regions resolve to their owning wall. B keeps names and adds proposed .Transact(name), including direct outer-wall targeting. C redirects default/explicit .Block to the nearest actual wall inside a transaction, losing plain-block targeting there. Fn still follows the function outcome. All transaction targets run Ok only on their wall's commit and Err on its rollback.\n\nAn inner wall's commit does not prove an outer wall commits. Tooling must show the selected wall; atomic outer publication must target that outer wall. Existing hooks must migrate to their actual wall, not a convenient nearest wall. Where A cannot represent an outer target at the registration site, moving registration needs control-flow and capture-equivalence proof or an author-reviewed restructure.\n\nRatify with cleanup spelling. Its A/B/C selects no loop labels, .Loop(label), or bare loop labels. This ballot independently selects .Transact, .Transact(name), or contextual .Block. All nine combinations are defined. Named transaction B remains valid with fixed-menu A; loop-label C never makes transaction targets bare names.\n\nRatify also with cleanup order and capture laws. Unified-order A migrates hooks with explicit ordering checks; preserve-phase B retains old hook APIs and their later phase. Neither spelling ballot may erase that choice. Zig errdefer follows current-block error return, not a function target.",
+      "options": [
+        {
+          "key": "A",
+          "name": "scope: .Transact",
+          "detail": "Add proposed `.Transact`, resolving to the nearest actual transaction wall and rejecting use outside one. A flattened implicit region resolves to its owning wall. No direct outer-wall target is provided.",
+          "code": "#Transact {\n    stock -= 1\n    if paid {\n        #Defer(.Ok, scope: .Transact) { send_receipt() }\n    }\n}"
+        },
+        {
+          "key": "B",
+          "name": "Transaction name",
+          "detail": "Keep named transactions and add proposed `.Transact(name)` for a lexically enclosing named wall. This transaction form is independent of loop-label policy in the paired ballot.",
+          "code": "#Transact(order) {\n    #Defer(.Ok, scope: .Transact(order)) { send_receipt() }\n}"
+        },
+        {
+          "key": "C",
+          "name": "Contextual .Block",
+          "detail": "Inside a transaction, `.Block` resolves to the nearest transaction body rather than the declaring block.",
+          "code": "#Transact {\n    if paid {\n        #Defer(.Ok) { send_receipt() }   // transaction\n    }\n}"
+        }
+      ],
+      "comparisons": [
+        {
+          "lang": "Zig",
+          "note": "Zig documents errdefer as running if and only if the function returns an error from the block. It can capture that error but does not target a transaction. https://ziglang.org/documentation/0.15.2/#errdefer",
+          "code": "errdefer rollback(); // on leaving this block with an error"
+        }
+      ],
+      "rec": "A",
+      "recommendation": {
+        "why": "`.Transact` is one case with one meaning. It works for unnamed transactions and needs no handle. It never makes `.Block` mean something different inside a transaction.",
+        "gains": [
+          "Commit and rollback cleanup attach to the right scope.",
+          "No handle names."
+        ],
+        "losses": [
+          {
+            "loss": "An outer transaction cannot be named past an inner one.",
+            "mitigation": "Register in the intended outer transaction when lifetimes and control flow permit; otherwise use B. Explicit nested transaction walls are not all flattened."
+          }
+        ],
+        "whyNot": [
+          {
+            "key": "B",
+            "reason": "B is necessary for direct outer-wall targeting, but retains transaction names and a parameterized target."
+          },
+          {
+            "key": "C",
+            "reason": "C gives `.Block` two meanings depending on context."
+          }
+        ],
+        "tradeoff": "One new scope case buys exact transaction cleanup."
+      },
+      "hybrid": null,
+      "ballotMode": "full",
+      "shortAuthorizedBy": null,
+      "ballotProcessVersion": 5,
+      "reviewPasses": {
+        "adversarial": "Author model family: Claude. Adversarial model family: GPT. Fresh agent: BallotReview3. Verified that only implicit nested regions flatten, read wall lowering and checked Zig's error-return cleanup contract. A remains recommended while B retains the real advantage of naming an outer transaction wall."
+      },
+      "checkInstructions": null,
+      "surface": {
+        "gist": "How should a `#Defer` name the transaction it belongs to: `scope: .Transact`, the transaction's name, or a context-dependent `.Block`?",
+        "lesson": "Transaction-targeted cleanup follows that transaction's outcome, not function success or an intervening block exit. A chooses the nearest transaction; B retains names and can choose an outer one; C changes `.Block` inside transactions. Loop labels are controlled only by the paired cleanup-spelling ballot. Implicit nested regions and explicit transaction walls must not be conflated.",
+        "trio": {
+          "current": {
+            "note": "Today a named transaction exposes `on_commit` and `on_rollback` hooks.",
+            "code": "#Transact {\n    stock -= 1\n}\n// a named transaction exposes on_commit and on_rollback"
+          },
+          "wild": {
+            "lang": "Zig",
+            "note": "Zig errdefer runs only on an error-return path from its block; it is not a transaction commit/rollback primitive.",
+            "code": "errdefer rollback(); // on leaving this block with an error"
+          }
+        },
+        "options": [
+          {
+            "key": "A",
+            "name": "scope: .Transact",
+            "gist": "A new scope case meaning the innermost enclosing transaction.",
+            "gains": [
+              "Works with unnamed transactions.",
+              "One word, one meaning."
+            ],
+            "losses": [
+              "One more scope case to learn."
+            ],
+            "proposed": {
+              "code": "#Transact {\n    stock -= 1\n    if paid {\n        #Defer(.Ok, scope: .Transact) { send_receipt() }\n    }\n}"
+            }
+          },
+          {
+            "key": "B",
+            "name": "Transaction name",
+            "gist": "`scope: .Transact(name)` targets a retained enclosing transaction name.",
+            "gains": [
+              "Can name an outer transaction directly."
+            ],
+            "losses": [
+              "Keeps transaction names the card drops.",
+              "A named transaction target form must be learned."
+            ],
+            "proposed": {
+              "code": "#Transact(order) {\n    #Defer(.Ok, scope: .Transact(order)) { send_receipt() }\n}"
+            }
+          },
+          {
+            "key": "C",
+            "name": "Contextual .Block",
+            "gist": "`.Block` means the transaction body whenever a transaction encloses it.",
+            "gains": [
+              "No new word."
+            ],
+            "losses": [
+              "`.Block` changes meaning by context."
+            ],
+            "proposed": {
+              "code": "#Transact {\n    if paid {\n        #Defer(.Ok) { send_receipt() }   // transaction\n    }\n}"
+            }
+          }
+        ],
+        "recommendation": {
+          "rec": "A",
+          "why": "`.Transact` is one case with one meaning. It works for unnamed transactions and needs no handle. It never makes `.Block` mean something different inside a transaction.",
+          "gains": [
+            "Commit and rollback cleanup attach to the right scope.",
+            "No handle names."
+          ],
+          "losses": [
+            {
+              "loss": "An outer transaction cannot be named past an inner one.",
+              "mitigation": "Register in the intended outer transaction when lifetimes and control flow permit; otherwise use B. Explicit nested transaction walls are not all flattened."
+            }
+          ],
+          "whyNot": [
+            {
+              "key": "B",
+              "reason": "B is necessary for direct outer-wall targeting, but retains transaction names and a parameterized target."
+            },
+            {
+              "key": "C",
+              "reason": "C gives `.Block` two meanings depending on context."
+            }
+          ],
+          "tradeoff": "One new scope case buys exact transaction cleanup."
+        }
+      },
+      "reports": [
+        {
+          "title": "Unified #Defer marker pre-build review",
+          "path": "Docs/Audits/2026-11-27-unified-defer-marker-review.md",
+          "note": "Section 6 and section 9, ballot B3."
+        }
+      ],
+      "draftedBy": "Orchestrator",
+      "reviewedBy": "BallotReview3",
+      "draft": false,
+      "status": "open",
+      "created": "2026-11-28T04:00:12.936Z"
+    },
+    {
+      "id": "D-AMBIENT-SET1",
+      "cardId": "c0mvk3ul",
+      "group": "effects",
+      "title": "Ambient names the full deny-only set, without changing authority",
+      "situation": "",
+      "gist": "Should Ambient name all deny-only effects, or just allocation and panic?",
+      "lesson": "Bundle membership and authority are separate. Mem, Panic, Time.Wait and Unsafe are deny-only: they may be refused but need no grant. A names that whole set Ambient. B names only Mem.Alloc and Panic. Neither choice changes written ceilings or makes the other effects grantable.",
+      "explainer": "",
+      "story": "Ola wants a bundle's expansion to be clear without changing what her function is allowed to do.",
+      "inWild": "// slice::to_vec returns Vec<T> without an effect-row annotation",
+      "detail": "Compiler/JetFoundation/Source/Policy/Authority.jet, authority_is_deny_only, covers the Mem and Panic roots, Time.Wait and Unsafe. AUTHORITY_AMBIENT_BASIC_EFFECTS is a different default-grant set containing IO, Mem.Alloc and Exec.Args. Docs/Spec/spec.md:3397-3403 distinguishes deny-only events from positive ceilings. Mem.Rc is spellable; the earlier claim that users cannot name it was false.\n\nBoth options preserve this authority law. Defining a smaller bundle does not narrow the deny-only category or break ceilings. Rename the internal default-grant constant to avoid conflating a grant with the public bundle.\n\nBoth answers also adopt the audit's proposed allow-list check: reject a deny-only entry in allow: with a checked deletion fix. Never change it into a denial or silently discard it. Keep default-grant bookkeeping separate. This is a diagnostic and migration change, not a new requirement to grant deny-only events.",
+      "options": [
+        {
+          "key": "A",
+          "name": "Name the full deny-only set",
+          "detail": "Ambient expands to the four deny-only rows. Keep deny-only checks independent of expansion and rename the misleading internal default-grant constant.",
+          "code": "// proposed Ambient = Mem, Panic, Time.Wait, Unsafe"
+        },
+        {
+          "key": "B",
+          "name": "Name a smaller convenience bundle",
+          "detail": "Ambient expands to Mem.Alloc and Panic. All other deny-only effects keep their existing authority and ceiling treatment.",
+          "code": "// proposed Ambient = Mem.Alloc, Panic\n// Mem.Rc and Time.Wait still need no positive grant"
+        }
+      ],
+      "comparisons": [
+        {
+          "lang": "Rust",
+          "note": "Rust slice to_vec returns a Vec; the signature has no effect row. This is only a contrast in notation, not evidence about Jet authority. https://doc.rust-lang.org/std/primitive.slice.html#method.to_vec",
+          "code": "// slice::to_vec returns Vec<T> without an effect-row annotation"
+        }
+      ],
+      "rec": "A",
+      "recommendation": {
+        "why": "A name matching an existing category is easier to explain than a selected subset.",
+        "gains": [
+          "One clear bundle expansion."
+        ],
+        "losses": [
+          {
+            "loss": "Ambient sounds more harmless than Unsafe.",
+            "mitigation": "Show the complete expansion in documentation and diagnostics; preserve explicit denials."
+          }
+        ],
+        "whyNot": [
+          {
+            "key": "B",
+            "reason": "B is valid and does not break ceilings, but its subset needs a separate explanation."
+          }
+        ],
+        "tradeoff": "A broader name aligns with the existing category."
+      },
+      "hybrid": null,
+      "ballotMode": "short",
+      "shortAuthorizedBy": null,
+      "ballotProcessVersion": 5,
+      "reviewPasses": null,
+      "checkInstructions": null,
+      "surface": {
+        "gist": "Should Ambient name all deny-only effects, or just allocation and panic?",
+        "lesson": "Bundle membership and authority are separate. Mem, Panic, Time.Wait and Unsafe are deny-only: they may be refused but need no grant. A names that whole set Ambient. B names only Mem.Alloc and Panic. Neither choice changes written ceilings or makes the other effects grantable.",
+        "trio": {
+          "current": {
+            "note": "Dev authority policy separates deny-only effects from default grants.",
+            "code": "// deny-only: Mem, Panic, Time.Wait, Unsafe\n// default grants are a separate set"
+          },
+          "wild": {
+            "lang": "Rust",
+            "note": "Rust's slice to_vec signature has no allocation-effect row.",
+            "code": "// slice::to_vec returns Vec<T> without an effect-row annotation"
+          }
+        },
+        "options": [
+          {
+            "key": "A",
+            "name": "Name the full deny-only set",
+            "gist": "Ambient expands to Mem, Panic, Time.Wait and Unsafe.",
+            "gains": [
+              "The bundle matches one existing policy category."
+            ],
+            "losses": [
+              "The name includes unsafe reachability and waiting."
+            ],
+            "proposed": {
+              "code": "// proposed Ambient = Mem, Panic, Time.Wait, Unsafe"
+            }
+          },
+          {
+            "key": "B",
+            "name": "Name a smaller convenience bundle",
+            "gist": "Ambient expands only to Mem.Alloc and Panic; deny-only authority stays unchanged.",
+            "gains": [
+              "A smaller convenience bundle."
+            ],
+            "losses": [
+              "Ambient no longer names the full deny-only category."
+            ],
+            "proposed": {
+              "code": "// proposed Ambient = Mem.Alloc, Panic\n// Mem.Rc and Time.Wait still need no positive grant"
+            }
+          }
+        ],
+        "recommendation": {
+          "rec": "A",
+          "why": "A name matching an existing category is easier to explain than a selected subset.",
+          "gains": [
+            "One clear bundle expansion."
+          ],
+          "losses": [
+            {
+              "loss": "Ambient sounds more harmless than Unsafe.",
+              "mitigation": "Show the complete expansion in documentation and diagnostics; preserve explicit denials."
+            }
+          ],
+          "whyNot": [
+            {
+              "key": "B",
+              "reason": "B is valid and does not break ceilings, but its subset needs a separate explanation."
+            }
+          ],
+          "tradeoff": "A broader name aligns with the existing category."
+        }
+      },
+      "reports": [
+        {
+          "title": "Effects, concurrency and Shared unification pre-build review",
+          "path": "Docs/Audits/2026-11-27-effects-concurrency-shared-unification-review.md",
+          "note": "Finding F1.3 and section 5, ballot 1."
+        }
+      ],
+      "draftedBy": "Orchestrator",
+      "reviewedBy": "BallotReview3",
+      "draft": false,
+      "status": "open",
+      "created": "2026-11-28T04:00:15.456Z"
+    },
+    {
+      "id": "D-CELL-LOCAL1",
+      "cardId": "c0mvk3ul",
+      "group": "concurrency",
+      "title": "Cell remains the confined form of Shared, with one state-access API",
+      "situation": "",
+      "gist": "Should Cell keep its name as confined Shared, or should locality be selected another way?",
+      "lesson": "The choice is how to express locality, not whether aliases need safe borrowing. A keeps Cell as the confined spelling of one Shared implementation. B promotes Shared at runtime. C selects locality with a type parameter. Only A and C preserve static confinement; none promises cost-free access.",
+      "explainer": "",
+      "story": "Tia wants her local counter rejected if any alias, holder or captured closure sends it to a task.",
+      "inWild": "let hits = Rc::new(RefCell::new(0));\n*hits.borrow_mut() += 1;",
+      "detail": "Docs/Spec/spec.md:2927-2940 defines Cell get/set, guarded access, borrow conflicts and confinement. The executable baseline ran Cell.new/get/set and returned 1. This does not establish the proposed Shared cutover. The old plain-store and zero-overhead claims were not measured and are removed.\n\nUnder A, Cell is one locality selection of the same implementation, not a second state mechanism. Confinement is transitive through aliases, nested holders, guards and closures, including task, channel, Shared and parallel boundaries. No conversion may launder a confined handle into a sendable one. Uncontended local access need not acquire a cross-thread lock, but live-loan conflict checks and reentrancy rules remain.\n\nC offers the same static law through an ordinary locality type parameter, not a new value-parameter grammar. B must promote every alias safely before publishing any of them. All choices preserve ownership, failure, copy and guard lifetime laws. A fix may not replace a copying get with a borrowed projection unless equivalence is proven.",
+      "options": [
+        {
+          "key": "A",
+          "name": "Cell names confined Shared",
+          "detail": "Keep Cell as the local spelling of the shared implementation. Use one access and guard API, enforce transitive confinement and retain loan-conflict checks.",
+          "code": "// proposed: Cell and Shared use one access and guard API."
+        },
+        {
+          "key": "B",
+          "name": "Runtime promotion",
+          "detail": "Delete Cell and promote Shared before cross-task publication, updating all aliases safely. Specify synchronization and reentrant-access behavior; measure costs rather than assert a mode test on every access.",
+          "code": "// proposed: Shared promotes before any alias crosses a task."
+        },
+        {
+          "key": "C",
+          "name": "Compile-time locality parameter",
+          "detail": "Select locality with an ordinary type parameter. Local instantiations obey the same transitive confinement and borrowing laws as A; no local-to-sendable conversion bypasses them.",
+          "code": "// proposed type selection: Shared<Stats, Local>"
+        }
+      ],
+      "comparisons": [
+        {
+          "lang": "Rust",
+          "note": "RefCell has dynamic borrow checks; Rc permits aliases without cross-thread sharing. This does not imply Jet's proposed access is a plain unchecked store. https://doc.rust-lang.org/std/cell/index.html",
+          "code": "let hits = Rc::new(RefCell::new(0));\n*hits.borrow_mut() += 1;"
+        }
+      ],
+      "rec": "A",
+      "recommendation": {
+        "why": "Keep a concise locality name while sharing the implementation and safe-access rules.",
+        "gains": [
+          "One access model, checked confinement."
+        ],
+        "losses": [
+          {
+            "loss": "Cell-only operations and guards need migration.",
+            "mitigation": "Rewrite only when copying, projection and loan behavior are preserved; otherwise report a manual migration."
+          }
+        ],
+        "whyNot": [
+          {
+            "key": "B",
+            "reason": "B supports useful promotion but cannot promise that local handles never escape."
+          },
+          {
+            "key": "C",
+            "reason": "C is a strong alternative; A keeps locality out of common signature parameter lists."
+          }
+        ],
+        "tradeoff": "A short locality spelling remains alongside Shared."
+      },
+      "hybrid": null,
+      "ballotMode": "short",
+      "shortAuthorizedBy": null,
+      "ballotProcessVersion": 5,
+      "reviewPasses": null,
+      "checkInstructions": null,
+      "surface": {
+        "gist": "Should Cell keep its name as confined Shared, or should locality be selected another way?",
+        "lesson": "The choice is how to express locality, not whether aliases need safe borrowing. A keeps Cell as the confined spelling of one Shared implementation. B promotes Shared at runtime. C selects locality with a type parameter. Only A and C preserve static confinement; none promises cost-free access.",
+        "trio": {
+          "current": {
+            "note": "Cell currently has get/set and guarded read/edit operations.",
+            "code": "hits: Cell.new(0)\nhits.set(hits.get() + 1)"
+          },
+          "wild": {
+            "lang": "Rust",
+            "note": "RefCell checks borrowing at runtime; sharing it with Rc remains single-threaded.",
+            "code": "let hits = Rc::new(RefCell::new(0));\n*hits.borrow_mut() += 1;"
+          }
+        },
+        "options": [
+          {
+            "key": "A",
+            "name": "Cell names confined Shared",
+            "gist": "Keep Cell as the local form of the same shared-state abstraction and API.",
+            "gains": [
+              "A short familiar locality name.",
+              "Static crossing errors remain."
+            ],
+            "losses": [
+              "Two names for two locality settings."
+            ],
+            "proposed": {
+              "code": "// proposed: Cell and Shared use one access and guard API."
+            }
+          },
+          {
+            "key": "B",
+            "name": "Runtime promotion",
+            "gist": "Use Shared alone and safely promote all aliases before cross-task access.",
+            "gains": [
+              "One public type name.",
+              "Local state can later become cross-task state."
+            ],
+            "losses": [
+              "Promotion needs alias-safe synchronization.",
+              "No static local-only promise."
+            ],
+            "proposed": {
+              "code": "// proposed: Shared promotes before any alias crosses a task."
+            }
+          },
+          {
+            "key": "C",
+            "name": "Compile-time locality parameter",
+            "gist": "Use Shared with a locality type argument instead of the Cell name.",
+            "gains": [
+              "One explicit generic abstraction.",
+              "Static crossing errors remain."
+            ],
+            "losses": [
+              "Locality parameters appear in public signatures."
+            ],
+            "proposed": {
+              "code": "// proposed type selection: Shared<Stats, Local>"
+            }
+          }
+        ],
+        "recommendation": {
+          "rec": "A",
+          "why": "Keep a concise locality name while sharing the implementation and safe-access rules.",
+          "gains": [
+            "One access model, checked confinement."
+          ],
+          "losses": [
+            {
+              "loss": "Cell-only operations and guards need migration.",
+              "mitigation": "Rewrite only when copying, projection and loan behavior are preserved; otherwise report a manual migration."
+            }
+          ],
+          "whyNot": [
+            {
+              "key": "B",
+              "reason": "B supports useful promotion but cannot promise that local handles never escape."
+            },
+            {
+              "key": "C",
+              "reason": "C is a strong alternative; A keeps locality out of common signature parameter lists."
+            }
+          ],
+          "tradeoff": "A short locality spelling remains alongside Shared."
+        }
+      },
+      "reports": [
+        {
+          "title": "Effects, concurrency and Shared unification pre-build review",
+          "path": "Docs/Audits/2026-11-27-effects-concurrency-shared-unification-review.md",
+          "note": "Findings F2.1 to F2.3 and section 5, ballot 6."
+        }
+      ],
+      "draftedBy": "Orchestrator",
+      "reviewedBy": "BallotReview3",
+      "draft": false,
+      "status": "open",
+      "created": "2026-11-28T04:00:17.898Z"
+    },
+    {
+      "id": "D-EFFECT-PARAM1",
+      "cardId": "c0mvk3ul",
+      "group": "syntax",
+      "title": "Effect constraints use call form and one decidable containment law",
+      "situation": "The implementation accepts value constraints in braces and file scopes in parentheses. We recommend one call form and one decidable containment law, layered on the ratified provider-trait effect model. The audit's unrestricted user-written `covers` method is not sufficient to decide overlaps safely. Ratify this ballot together with the foreign-effect spelling ballot, which selects effect identities independently of constraint notation.",
+      "gist": "Should effect constraints use one call form and one decidable containment law, without arbitrary user coverage code?",
+      "lesson": "Effects remain provider traits under the ratified model; a constraint is not another effect declaration mechanism. A uses parentheses, B braces, and C keeps both notations. A and B share one closed constraint algebra: exact values, normalized path subtrees and products. Overlap is intersection, not merely containment in either direction.",
+      "explainer": "",
+      "story": "Ines declares a `Bucket` effect and later learns that file scopes use different brackets and a different denial rule.",
+      "inWild": "deno run --allow-read=./assets --allow-net=api.example.com main.ts",
+      "detail": "Compiler/JetFoundation/Source/Policy/EffectScope.jet, effect_scope_split:28-37 and effect_value_is_valued:69-71, recognizes two serialized shapes. effect_scope_covers:160-162 delegates scope checks to runtime authority. Its policy uses normalized path components, host equality and other literal equality, not arbitrary textual prefixes. Compiler/JetSema/Source/Sema/Effects/Checks.jet, sema_effect_declared_hits:3034-3041, already tests coverage both ways in one denial path. The draft's claim of universally different denial laws was too broad.\n\nThe ratified provider law governs every option: effect identities are #Effect provider traits and children are subtraits. Do not restore struct roots or another impl Effect mechanism. Library.jet, sema_library_effect_collect:306-335, recognizes trait metadata in dev, although Prelude/Effects.jet still has older declarations.\n\nA and B use one constraint solver at compile time and runtime. A permits one positional scalar field; multiple fields are named and required fields checked. Strings, integers and booleans match exactly. Declared path-subtree fields use normalized component containment. Products contain when every field contains; products overlap when every field intersects. Bare E means all values.\n\nA grant must contain the complete need. A denial rejects any intersecting need; it is never dropped or converted into a grant. Unknown values require ordinary mediated checks or a broader declared need under the same denial law. Review corrects the audit: arbitrary covers code cannot decide intersection in general. A therefore uses only exact atoms, paths and products. Custom domains use exact atoms or existing subtraits. B changes notation only. C retains legacy constraints, but not legacy effect declarations.\n\nRatify with foreign-effect spelling. Its A uses FFI values in this ballot's chosen notation. Its B uses language subtraits and library constraints in that notation. Its C uses closed language leaves and the same constraints. Under this ballot's C, FFI values retain legacy records and library scopes retain legacy parentheses. All nine combinations preserve one provider mechanism. Signatures illustrate proposed notation, not executed support.",
+      "options": [
+        {
+          "key": "A",
+          "name": "Call form E(v)",
+          "detail": "Use call-form constraints on ratified provider-trait identities. Exact atoms, normalized path subtrees and field products share one decidable containment/intersection solver; denials reject intersections. This corrects the audit's insufficient arbitrary covers proposal.",
+          "code": "upload: fn() -[Bucket(\"photos\")]> {}\nload: fn() -[FS.Read(\"assets/\")]> String { … }"
+        },
+        {
+          "key": "B",
+          "name": "Record form E{f: v}",
+          "detail": "Use named record constraints on provider-trait identities, with exactly the same closed containment/intersection solver and denial rule as A. Manifests and flags use the same canonical serialization.",
+          "code": "upload: fn() -[Bucket{name: \"photos\"}]> {}\nload: fn() -[FS.Read{path: \"assets/\"}]> String { … }"
+        },
+        {
+          "key": "C",
+          "name": "Keep two forms",
+          "detail": "Keep legacy value records and scope parentheses, without reversing the ratified provider-trait identity law. Accept the continuing distinction in constraint semantics.",
+          "code": "upload: fn() -[Bucket{name: \"photos\"}]> {}\nload: fn() -[FS.Read(\"assets/\")]> String { … }"
+        }
+      ],
+      "comparisons": [
+        {
+          "lang": "Deno",
+          "note": "Deno documents --allow-read path lists, --allow-net host lists and deny precedence. This illustrates scoped runtime grants, not Jet's proposed static containment algebra. https://docs.deno.com/runtime/reference/permissions/",
+          "code": "deno run --allow-read=./assets --allow-net=api.example.com main.ts"
+        }
+      ],
+      "rec": "A",
+      "recommendation": {
+        "why": "Keep the existing scope notation while unifying constraint semantics. A closed shared solver avoids arbitrary policy code and can decide overlaps.",
+        "gains": [
+          "One way to narrow any effect.",
+          "Least churn in manifests and flags."
+        ],
+        "losses": [
+          {
+            "loss": "An overlapping scope under a denial now fails.",
+            "mitigation": "Report the intersecting constraints; split the declared need or narrow it before granting. A narrower spelling is not always available."
+          }
+        ],
+        "whyNot": [
+          {
+            "key": "B",
+            "reason": "B makes field names explicit, but changes scope notation as well as value-effect notation."
+          },
+          {
+            "key": "C",
+            "reason": "C keeps two spellings and two denial rules for one idea."
+          }
+        ],
+        "tradeoff": "A stricter denial rule buys one value form for effects."
+      },
+      "hybrid": null,
+      "ballotMode": "full",
+      "shortAuthorizedBy": null,
+      "ballotProcessVersion": 5,
+      "reviewPasses": {
+        "adversarial": "Author model family: Claude. Adversarial model family: GPT. Fresh agent: BallotReview3. Verified scope serialization, containment, denials and provider registration, plus Deno's primary permission documentation. A remains recommended with a closed exact/path/product solver rather than arbitrary covers code."
+      },
+      "checkInstructions": null,
+      "surface": {
+        "gist": "Should effect constraints use one call form and one decidable containment law, without arbitrary user coverage code?",
+        "lesson": "Effects remain provider traits under the ratified model; a constraint is not another effect declaration mechanism. A uses parentheses, B braces, and C keeps both notations. A and B share one closed constraint algebra: exact values, normalized path subtrees and products. Overlap is intersection, not merely containment in either direction.",
+        "trio": {
+          "current": {
+            "note": "Today values use braces and scopes use parentheses, with different rules.",
+            "code": "upload: fn() -[Bucket{name: \"photos\"}]> {}\nload: fn() -[FS.Read(\"assets/\")]> String { … }"
+          },
+          "wild": {
+            "lang": "Deno",
+            "note": "Deno accepts path and host allow-lists on runtime permission flags; this is not a static effect-type system.",
+            "code": "deno run --allow-read=./assets --allow-net=api.example.com main.ts"
+          }
+        },
+        "options": [
+          {
+            "key": "A",
+            "name": "Call form E(v)",
+            "gist": "Use call-form constraints and a shared exact-value/path containment solver.",
+            "gains": [
+              "Matches manifests and `--allow` strings.",
+              "One decidable coverage and denial law."
+            ],
+            "losses": [
+              "User value effects change spelling."
+            ],
+            "proposed": {
+              "code": "upload: fn() -[Bucket(\"photos\")]> {}\nload: fn() -[FS.Read(\"assets/\")]> String { … }"
+            }
+          },
+          {
+            "key": "B",
+            "name": "Record form E{f: v}",
+            "gist": "Use named record constraints with the same containment law as A.",
+            "gains": [
+              "Matches type literals."
+            ],
+            "losses": [
+              "Every scope, manifest and `--allow` string changes."
+            ],
+            "proposed": {
+              "code": "upload: fn() -[Bucket{name: \"photos\"}]> {}\nload: fn() -[FS.Read{path: \"assets/\"}]> String { … }"
+            }
+          },
+          {
+            "key": "C",
+            "name": "Keep two forms",
+            "gist": "Values keep braces, scopes keep parentheses, each with its own rules.",
+            "gains": [
+              "No migration."
+            ],
+            "losses": [
+              "Two spellings and two denial rules."
+            ],
+            "proposed": {
+              "code": "upload: fn() -[Bucket{name: \"photos\"}]> {}\nload: fn() -[FS.Read(\"assets/\")]> String { … }"
+            }
+          }
+        ],
+        "recommendation": {
+          "rec": "A",
+          "why": "Keep the existing scope notation while unifying constraint semantics. A closed shared solver avoids arbitrary policy code and can decide overlaps.",
+          "gains": [
+            "One way to narrow any effect.",
+            "Least churn in manifests and flags."
+          ],
+          "losses": [
+            {
+              "loss": "An overlapping scope under a denial now fails.",
+              "mitigation": "Report the intersecting constraints; split the declared need or narrow it before granting. A narrower spelling is not always available."
+            }
+          ],
+          "whyNot": [
+            {
+              "key": "B",
+              "reason": "B makes field names explicit, but changes scope notation as well as value-effect notation."
+            },
+            {
+              "key": "C",
+              "reason": "C keeps two spellings and two denial rules for one idea."
+            }
+          ],
+          "tradeoff": "A stricter denial rule buys one value form for effects."
+        }
+      },
+      "reports": [
+        {
+          "title": "Effects, concurrency and Shared unification pre-build review",
+          "path": "Docs/Audits/2026-11-27-effects-concurrency-shared-unification-review.md",
+          "note": "Finding F1.6 and section 5, ballot 4."
+        }
+      ],
+      "draftedBy": "Orchestrator",
+      "reviewedBy": "BallotReview3",
+      "draft": false,
+      "status": "open",
+      "created": "2026-11-28T04:00:20.345Z"
+    },
+    {
+      "id": "D-FFI-EFFECT-NAME1",
+      "cardId": "c0mvk3ul",
+      "group": "syntax",
+      "title": "Foreign-language effects are spelled FFI(\"c\"), with packages adding languages under the FFI root",
+      "situation": "The implementation has a closed list of foreign-language effect cases. The ratified provider-trait model permits a common FFI root with child identities, while value constraints offer another route to openness. We recommend one language-value mechanism for every bridge, not a special value form for built-ins plus package kinds for others. Ratify this ballot together with effect constraints; that ballot controls all value and library-constraint notation.",
+      "gist": "Should foreign-language effects use language values under FFI, open language subtraits, or closed language identities?",
+      "lesson": "All options preserve provider traits. A uses canonical language values for every bridge. B uses shared language subtraits and ordinary qualified imports. C retains the closed language vocabulary as trait leaves. Library constraints remain available in all cases.",
+      "explainer": "",
+      "story": "Jun audits which foreign languages his program calls. He wants one spelling in rows, manifests and `--deny`, whether the language is built in or from a package.",
+      "inWild": "deno run --allow-ffi=./libsqlite3.so main.ts",
+      "detail": "Compiler/Prelude/Effects.jet, FFI:105-129, declares 24 cases. That implementation state cannot undo the later ratified provider law. Compiler/JetSema/Source/Sema/Effects/Library.jet, sema_library_effect_collect:306-335, recognizes #Effect trait metadata. Every option uses a provider-trait root and, where selected, provider subtraits. None requires a struct root.\n\nA uses one FFI identity with canonical language and optional library fields for every bridge, including C, Rust, assembly and packages. Language-only covers all its libraries; bare FFI covers all languages. Compiler bridges record actual fields and package interfaces publish the same facts. Different Python binders share a language-wide denial rather than unrelated package effects.\n\nLanguage names are canonical lower-case interface atoms, not paths or aliases. Registration rejects conflicting declarations but grants no authority. Native permission is not a sandbox around foreign code. B uses canonical language modules exporting FFI subtraits shared by competing binders. Ordinary qualified imports or root aliases avoid special parent lookup. C and assembly may have ordinary first-party modules. Library constraints attach to each identity. C keeps today's closed vocabulary as provider leaves, never old enum declarations.\n\nRatify with effect constraints. Its A spells this ballot's A as FFI(language: \"c\", library: \"sqlite3\"), with FFI(\"c\") shorthand. Its B uses FFI{language: \"c\", library: \"sqlite3\"}. Its C uses legacy value records. For this ballot's B/C, attach library constraints to c.FFI or FFI.C using the chosen call, record or legacy scope notation.\n\nOmitted library covers all libraries, never an empty library name. Every combination preserves root, language and library grants and denials, with manifest/lock updates and fact-based fixes. These signatures are proposals, not executed support.",
+      "options": [
+        {
+          "key": "A",
+          "name": "FFI root with a language value",
+          "detail": "Use the common FFI provider trait with canonical language and optional library constraints for all bridges. No built-in-value versus package-kind split. Constraint notation follows the paired ballot.",
+          "code": "run: fn() -[FFI(\"c\")]> { … }\n// --deny 'FFI(\"c\")' refuses all C calls"
+        },
+        {
+          "key": "B",
+          "name": "Package-first c.FFI",
+          "detail": "Use canonical language modules exporting FFI provider subtraits. Bindings may import the root under an ordinary alias; no special qualified-parent resolution is required. Competing binders share the language identity, and first-party C/assembly modules are allowed.",
+          "code": "run: fn() -[c.FFI]> { … }"
+        },
+        {
+          "key": "C",
+          "name": "Keep closed language identities",
+          "detail": "Keep the closed language vocabulary as provider-trait leaf identities, preserving library constraints. This changes the old enum representation to obey the ratified law without opening the language set.",
+          "code": "run: fn() -[FFI.C]> { … }"
+        }
+      ],
+      "comparisons": [
+        {
+          "lang": "Deno",
+          "note": "Deno's --allow-ffi accepts file or directory paths for native library loading. Loaded native libraries are unsandboxed, so this is not confinement of every foreign call. https://docs.deno.com/runtime/reference/permissions/#ffi-(foreign-function-interface)",
+          "code": "deno run --allow-ffi=./libsqlite3.so main.ts"
+        }
+      ],
+      "rec": "A",
+      "recommendation": {
+        "why": "One language-value mechanism preserves language-wide denials across competing binders without adding an effect identity for each language.",
+        "gains": [
+          "Open to new languages.",
+          "Root stays first in every row."
+        ],
+        "losses": [
+          {
+            "loss": "Language strings are less typo-safe than imported child identities.",
+            "mitigation": "Binders publish canonical language names in their interface facts; unknown names are diagnosed, not silently granted."
+          }
+        ],
+        "whyNot": [
+          {
+            "key": "B",
+            "reason": "B gives typo-safe nominal language names, but needs agreement on a shared module identity for competing binders."
+          },
+          {
+            "key": "C",
+            "reason": "C keeps a closed list that only a compiler change can extend."
+          }
+        ],
+        "tradeoff": "A mechanical rewrite buys an open, root-first FFI effect."
+      },
+      "hybrid": null,
+      "ballotMode": "full",
+      "shortAuthorizedBy": null,
+      "ballotProcessVersion": 5,
+      "reviewPasses": {
+        "adversarial": "Author model family: Claude. Adversarial model family: GPT. Fresh agent: BallotReview3. Verified the 24 legacy cases, provider-trait registration and Deno's unsandboxed native-library boundary. A remains recommended with one language-value identity and all paired constraint outcomes preserved."
+      },
+      "checkInstructions": null,
+      "surface": {
+        "gist": "Should foreign-language effects use language values under FFI, open language subtraits, or a closed list of language identities?",
+        "lesson": "All options preserve the ratified provider-trait model. A puts every language under one FFI identity with a language value. B gives each language a shared subtrait, including first-party modules for C and assembly. C keeps a closed set of language identities. Library restrictions remain expressible under every option.",
+        "trio": {
+          "current": {
+            "note": "Today each language is a case of one closed enum.",
+            "code": "run: fn() -[FFI.C]> { … }\n// --deny FFI.Py refuses all Python"
+          },
+          "wild": {
+            "lang": "Deno",
+            "note": "Deno can restrict native library loading by path; loaded libraries are not sandboxed by those permissions.",
+            "code": "deno run --allow-ffi=./libsqlite3.so main.ts"
+          }
+        },
+        "options": [
+          {
+            "key": "A",
+            "name": "FFI root with a language value",
+            "gist": "Every bridge uses one FFI provider identity constrained by language and optional library.",
+            "gains": [
+              "Root-first spelling, as today.",
+              "One mechanism for built-in and package languages."
+            ],
+            "losses": [
+              "Every `FFI.C` site is rewritten."
+            ],
+            "proposed": {
+              "code": "run: fn() -[FFI(\"c\")]> { … }\n// --deny 'FFI(\"c\")' refuses all C calls"
+            }
+          },
+          {
+            "key": "B",
+            "name": "Package-first c.FFI",
+            "gist": "Languages expose shared child provider traits, such as c.FFI.",
+            "gains": [
+              "Language packages own their effect."
+            ],
+            "losses": [
+              "Shared language identities need a canonical module.",
+              "First-party C and assembly modules still need a home."
+            ],
+            "proposed": {
+              "code": "run: fn() -[c.FFI]> { … }"
+            }
+          },
+          {
+            "key": "C",
+            "name": "Keep closed language identities",
+            "gist": "Keep the closed language set, translated to provider-trait leaf identities.",
+            "gains": [
+              "Existing language names remain."
+            ],
+            "losses": [
+              "New languages need a compiler change."
+            ],
+            "proposed": {
+              "code": "run: fn() -[FFI.C]> { … }"
+            }
+          }
+        ],
+        "recommendation": {
+          "rec": "A",
+          "why": "One language-value mechanism preserves language-wide denials across competing binders without adding an effect identity for each language.",
+          "gains": [
+            "Open to new languages.",
+            "Root stays first in every row."
+          ],
+          "losses": [
+            {
+              "loss": "Language strings are less typo-safe than imported child identities.",
+              "mitigation": "Binders publish canonical language names in their interface facts; unknown names are diagnosed, not silently granted."
+            }
+          ],
+          "whyNot": [
+            {
+              "key": "B",
+              "reason": "B gives typo-safe nominal language names, but needs agreement on a shared module identity for competing binders."
+            },
+            {
+              "key": "C",
+              "reason": "C keeps a closed list that only a compiler change can extend."
+            }
+          ],
+          "tradeoff": "A mechanical rewrite buys an open, root-first FFI effect."
+        }
+      },
+      "reports": [
+        {
+          "title": "Effects, concurrency and Shared unification pre-build review",
+          "path": "Docs/Audits/2026-11-27-effects-concurrency-shared-unification-review.md",
+          "note": "Finding F1.7 and section 5, ballot 5. Also settles ballot B7 of the DSL, library and FFI extraction review."
+        }
+      ],
+      "draftedBy": "Orchestrator",
+      "reviewedBy": "BallotReview3",
+      "draft": false,
+      "status": "open",
+      "created": "2026-11-28T04:00:22.937Z"
+    },
+    {
+      "id": "D-FX-EMPTY1",
+      "cardId": "c0mvk3ul",
+      "group": "syntax",
+      "title": "An empty list #FX() marks pure blocks, types and modules once bare #FX goes",
+      "situation": "An effect ceiling limits which outside actions code may perform. Jet lets a bare `#FX` require pure work on blocks and declarations, but the proposed cleanup removes it. Functions can use an empty arrow row; blocks, types and modules cannot. We recommend permitting `#FX()` there, while acknowledging that empty marker parentheses currently fail and need a grammar change.",
+      "gist": "When bare `#FX` goes, should an empty list `#FX()` mark pure blocks, types and modules?",
+      "lesson": "An empty effect list excludes ambient actions such as IO, but does not prove no allocation or panic. Functions can write `-[]>`; other sites need a marker. Today empty marker parentheses are rejected. A permits `#FX()` at arrowless sites. The placement ballot separately decides whether function FX contracts remain.",
+      "explainer": "",
+      "story": "Rosa marks a block that computes prices as pure. After the card, she needs to know what to write when there is no function arrow.",
+      "inWild": "// documented Koka signature:\nfun sqr : (int) -> total int",
+      "detail": "Compiler/Prelude/Markers.jet, FX, declares a list-valued grant. Compiler/JetSema/Source/Sema/Effects/Checks.jet, sema_effect_cap_ceiling, treats a bare cap as empty; PureRoot.jet, sema_pure_root_expr, strips deny-only effects before purity checks. Thus pure does not mean allocation-free or panic-free.\n\nExecuted on the older a0.0.46-dev baseline: `run: fn() { #FX { print(\"impure\") } }` fails Jet.EffectWithoutAuthority. Replacing the marker with `#FX()` fails Jet.StackedRuleLines, which says empty parentheses must be removed. These are baseline observations, not proof that the newer dev compiler behaves identically.\n\nA changes marker parsing to admit an empty effect list. At arrowless sites A uses #FX(), B retains bare #FX, and C removes empty ceilings. Ratify with FX placement: its A removes function FX contracts under all three answers here. Its B retains function FX contracts: this ballot's A uses #FX(), B uses bare #FX, and C permits only the empty arrow row while preserving nonempty FX contracts. Provider metadata keeps generic marker placement. All six combinations are defined.\n\nMigrate parsing, formatting, fixes, hover, cap facts and snapshots together. The landing proof must reject IO under the new empty cap on every applicable tier.",
+      "options": [
+        {
+          "key": "A",
+          "name": "Empty list #FX()",
+          "detail": "Replace bare #FX with an empty list at permitted marker-contract sites, subject to the paired function-placement decision.",
+          "code": "#FX() {\n    total: price * count\n}"
+        },
+        {
+          "key": "B",
+          "name": "Keep bare #FX",
+          "detail": "Keep bare FX as the empty ceiling at arrowless sites. The paired placement ballot determines whether functions can also use it. Nonempty caps retain list form.",
+          "code": "#FX {\n    total: price * count\n}"
+        },
+        {
+          "key": "C",
+          "name": "Functions only",
+          "detail": "Delete bare `#FX` with no replacement for blocks, types and modules.",
+          "code": "price_total: fn(price: Int, count: Int) -[]> Int {\n    price * count\n}"
+        }
+      ],
+      "comparisons": [
+        {
+          "lang": "Koka",
+          "note": "Koka calls functions without effects total and separately tracks exceptions and divergence. This is stronger than Jet's empty positive ceiling, which excludes deny-only events from that check. https://koka-lang.github.io/koka/doc/book.html#sec-effect-types",
+          "code": "// documented Koka signature:\nfun sqr : (int) -> total int"
+        }
+      ],
+      "rec": "A",
+      "recommendation": {
+        "why": "Use the same explicit list for empty and nonempty ceilings where no arrow exists. Functions keep their arrow row.",
+        "gains": [
+          "One ceiling form everywhere.",
+          "No purity marker lost."
+        ],
+        "losses": [
+          {
+            "loss": "`#FX()` looks unusual to newcomers.",
+            "mitigation": "Hover and the docs explain it as the empty list, the same as `-[]>`."
+          }
+        ],
+        "whyNot": [
+          {
+            "key": "B",
+            "reason": "B avoids a grammar change but gives empty lists a special bare form."
+          },
+          {
+            "key": "C",
+            "reason": "C leaves pure blocks, types and modules with no way to say so."
+          }
+        ],
+        "tradeoff": "Two parentheses buy one ceiling form everywhere."
+      },
+      "hybrid": null,
+      "ballotMode": "full",
+      "shortAuthorizedBy": null,
+      "ballotProcessVersion": 5,
+      "reviewPasses": {
+        "adversarial": "Author model family: Claude. Adversarial model family: GPT. Fresh agent: BallotReview3. Verified FX and purity source, reproduced both baseline diagnostics and checked Koka's stronger total-effect contract. A remains a proposed grammar change, not syntax claimed to work today."
+      },
+      "checkInstructions": null,
+      "surface": {
+        "gist": "When bare `#FX` goes, should an empty list `#FX()` mark pure blocks, types and modules?",
+        "lesson": "An empty effect list excludes ambient actions such as IO, but does not prove no allocation or panic. Functions can write `-[]>`; other sites need a marker. Today empty marker parentheses are rejected. A permits `#FX()` at arrowless sites. The placement ballot separately decides whether function FX contracts remain.",
+        "trio": {
+          "current": {
+            "note": "The executable baseline rejects IO under bare #FX; empty #FX() instead fails marker syntax.",
+            "code": "run: fn() { #FX { print(\"impure\") } }\n// refused: IO is outside the empty ceiling"
+          },
+          "wild": {
+            "lang": "Koka",
+            "note": "Koka documents total as an empty effect type, including termination; Jet's empty ceiling is weaker.",
+            "code": "// documented Koka signature:\nfun sqr : (int) -> total int"
+          }
+        },
+        "options": [
+          {
+            "key": "A",
+            "name": "Empty list #FX()",
+            "gist": "`#FX()` marks pure blocks, types and modules; function spelling follows the placement ballot.",
+            "gains": [
+              "One list form for every effect ceiling.",
+              "Blocks, types and modules keep a purity marker."
+            ],
+            "losses": [
+              "`#FX()` looks odd at first."
+            ],
+            "proposed": {
+              "code": "#FX() {\n    total: price * count\n}"
+            }
+          },
+          {
+            "key": "B",
+            "name": "Keep bare #FX",
+            "gist": "Bare #FX remains the empty ceiling at arrowless sites; function placement is decided separately.",
+            "gains": [
+              "Shortest spelling, no migration."
+            ],
+            "losses": [
+              "Empty and nonempty lists have different forms."
+            ],
+            "proposed": {
+              "code": "#FX {\n    total: price * count\n}"
+            }
+          },
+          {
+            "key": "C",
+            "name": "Functions only",
+            "gist": "Delete bare `#FX`; only functions can be marked pure, with `-[]>`.",
+            "gains": [
+              "Fewest forms."
+            ],
+            "losses": [
+              "Pure blocks, types and modules lose their marker."
+            ],
+            "proposed": {
+              "code": "price_total: fn(price: Int, count: Int) -[]> Int {\n    price * count\n}"
+            }
+          }
+        ],
+        "recommendation": {
+          "rec": "A",
+          "why": "Use the same explicit list for empty and nonempty ceilings where no arrow exists. Functions keep their arrow row.",
+          "gains": [
+            "One ceiling form everywhere.",
+            "No purity marker lost."
+          ],
+          "losses": [
+            {
+              "loss": "`#FX()` looks unusual to newcomers.",
+              "mitigation": "Hover and the docs explain it as the empty list, the same as `-[]>`."
+            }
+          ],
+          "whyNot": [
+            {
+              "key": "B",
+              "reason": "B avoids a grammar change but gives empty lists a special bare form."
+            },
+            {
+              "key": "C",
+              "reason": "C leaves pure blocks, types and modules with no way to say so."
+            }
+          ],
+          "tradeoff": "Two parentheses buy one ceiling form everywhere."
+        }
+      },
+      "reports": [
+        {
+          "title": "Effects, concurrency and Shared unification pre-build review",
+          "path": "Docs/Audits/2026-11-27-effects-concurrency-shared-unification-review.md",
+          "note": "Finding F1.2."
+        }
+      ],
+      "draftedBy": "Orchestrator",
+      "reviewedBy": "BallotReview3",
+      "draft": false,
+      "status": "open",
+      "created": "2026-11-28T04:00:25.522Z"
+    },
+    {
+      "id": "D-PAR-FOLD1",
+      "cardId": "c0mvk3ul",
+      "group": "concurrency",
+      "title": "xs.par() replaces para_*, and par().fold keeps its seed, step and merge arguments",
+      "situation": "",
+      "gist": "Should the proposed par adapter keep an explicit seed factory, step and merge?",
+      "lesson": "Parallel folding makes partial results before merging them. A keeps the three callbacks at the call site. B supplies the seed factory and merge through a reducer trait. C keeps the existing para methods. All must preserve chunking, failures and effects; a parallel fold is not a promise of serial-fold equality.",
+      "explainer": "",
+      "story": "Sam needs the same reduction tree when worker count changes, while allowing callback effects to interleave.",
+      "inWild": "let total: i32 = xs.par_iter().fold(|| 0, |a, x| a + x).sum();",
+      "detail": "Compiler/JetIR/Source/BuildParallel.jet, ir_para_fold_body and ir_para_fold_try, creates one fresh seed for each nonempty 64-item chunk. It steps in ascending item order within each chunk and merges adjacent chunk results in a fixed tree. Empty input calls the seed once; a single chunk never calls merge. Compiler/JetRuntime/Source/Parallel.jet, parallel_chunk_size, uses the fixed fold chunk size.\n\nThe baseline single-chunk probe returned 11 for seed 1, steps over 1..4 and merge a*100+b, confirming that merge was not called. This is not implementation-parity evidence for the adapter.\n\nPreserve these laws under every option. Source order of results and per-chunk steps does not imply global order of callback effects; concurrent effects are not rolled back. Lowest source-index step failure wins. Seed/merge failure precedence follows the fixed chunk/tree traversal, not wall-clock completion. Preserve that precedence explicitly, including left failure before right failure at a merge node.\n\nFor partition-independent mathematical reduction, the seed must be a merge identity and merge associative; the type checker cannot prove those laws for arbitrary callbacks. Fixed grouping stabilizes worker-count changes, not serial floating-point equality or all-machine bit equality. Do not rewrite a seed factory as one shared scalar seed.",
+      "options": [
+        {
+          "key": "A",
+          "name": "Explicit three-callback fold",
+          "detail": "Move seed factory, step and merge to the adapter without changing the chunk, effect or failure laws.",
+          "code": "// proposed\nxs.par().fold(seed_factory, step, merge)"
+        },
+        {
+          "key": "B",
+          "name": "Reducer trait",
+          "detail": "Specify a reducer with a fresh-seed factory, step and merge. It must retain per-chunk initialization and the same deterministic tree, not silently substitute a scalar initial value.",
+          "code": "// proposed\nxs.par().fold(reducer)"
+        },
+        {
+          "key": "C",
+          "name": "Keep para methods",
+          "detail": "Keep the current names and the same laws; do not add an adapter alias alongside them.",
+          "code": "xs.para_fold(seed_factory, step, merge)"
+        }
+      ],
+      "comparisons": [
+        {
+          "lang": "Rust",
+          "note": "Rayon's ParallelIterator exposes fold(identity, fold_op) and separate sum/reduce combinators. This is not evidence for Jet's fixed grouping. https://docs.rs/rayon/latest/rayon/iter/trait.ParallelIterator.html#method.fold",
+          "code": "let total: i32 = xs.par_iter().fold(|| 0, |a, x| a + x).sum();"
+        }
+      ],
+      "rec": "A",
+      "recommendation": {
+        "why": "Explicit callbacks preserve local reducer choice without a second reduction mechanism.",
+        "gains": [
+          "A direct API migration."
+        ],
+        "losses": [
+          {
+            "loss": "The merge callback remains extra syntax.",
+            "mitigation": "Show all three roles in signature help and document seed and merge laws."
+          }
+        ],
+        "whyNot": [
+          {
+            "key": "B",
+            "reason": "Reusable reducers are useful, but an ordinary helper can package callbacks without requiring a new trait."
+          },
+          {
+            "key": "C",
+            "reason": "C is viable but gives up a shared adapter surface."
+          }
+        ],
+        "tradeoff": "More explicit arguments avoid another required abstraction."
+      },
+      "hybrid": null,
+      "ballotMode": "short",
+      "shortAuthorizedBy": null,
+      "ballotProcessVersion": 5,
+      "reviewPasses": null,
+      "checkInstructions": null,
+      "surface": {
+        "gist": "Should the proposed par adapter keep an explicit seed factory, step and merge?",
+        "lesson": "Parallel folding makes partial results before merging them. A keeps the three callbacks at the call site. B supplies the seed factory and merge through a reducer trait. C keeps the existing para methods. All must preserve chunking, failures and effects; a parallel fold is not a promise of serial-fold equality.",
+        "trio": {
+          "current": {
+            "note": "The baseline's single-chunk fold uses one seed and no merge.",
+            "code": "[1, 2, 3, 4].para_fold(fn() { 1 }, fn(acc: Int, n: Int) { acc + n }, fn(a: Int, b: Int) { a * 100 + b }) // 11"
+          },
+          "wild": {
+            "lang": "Rust",
+            "note": "Rayon separates partial folding from the later reduction.",
+            "code": "let total: i32 = xs.par_iter().fold(|| 0, |a, x| a + x).sum();"
+          }
+        },
+        "options": [
+          {
+            "key": "A",
+            "name": "Explicit three-callback fold",
+            "gist": "par().fold takes a seed factory, step and merge.",
+            "gains": [
+              "Local merge choice; no new trait."
+            ],
+            "losses": [
+              "Different arity from serial fold."
+            ],
+            "proposed": {
+              "code": "// proposed\nxs.par().fold(seed_factory, step, merge)"
+            }
+          },
+          {
+            "key": "B",
+            "name": "Reducer trait",
+            "gist": "par().fold takes a reducer carrying a seed factory, step and merge.",
+            "gains": [
+              "Reusable named reduction contract."
+            ],
+            "losses": [
+              "A trait and reducer value for simple folds."
+            ],
+            "proposed": {
+              "code": "// proposed\nxs.par().fold(reducer)"
+            }
+          },
+          {
+            "key": "C",
+            "name": "Keep para methods",
+            "gist": "Retain the existing parallel method names and callback contract.",
+            "gains": [
+              "No adapter migration."
+            ],
+            "losses": [
+              "Separate parallel combinator names."
+            ],
+            "proposed": {
+              "code": "xs.para_fold(seed_factory, step, merge)"
+            }
+          }
+        ],
+        "recommendation": {
+          "rec": "A",
+          "why": "Explicit callbacks preserve local reducer choice without a second reduction mechanism.",
+          "gains": [
+            "A direct API migration."
+          ],
+          "losses": [
+            {
+              "loss": "The merge callback remains extra syntax.",
+              "mitigation": "Show all three roles in signature help and document seed and merge laws."
+            }
+          ],
+          "whyNot": [
+            {
+              "key": "B",
+              "reason": "Reusable reducers are useful, but an ordinary helper can package callbacks without requiring a new trait."
+            },
+            {
+              "key": "C",
+              "reason": "C is viable but gives up a shared adapter surface."
+            }
+          ],
+          "tradeoff": "More explicit arguments avoid another required abstraction."
+        }
+      },
+      "reports": [
+        {
+          "title": "Effects, concurrency and Shared unification pre-build review",
+          "path": "Docs/Audits/2026-11-27-effects-concurrency-shared-unification-review.md",
+          "note": "Finding F3.2 and section 5, ballot 8."
+        }
+      ],
+      "draftedBy": "Orchestrator",
+      "reviewedBy": null,
+      "draft": true,
+      "status": "open",
+      "created": "2026-11-28T04:00:28.179Z"
     }
   ],
   "questions": [
@@ -125982,6 +127442,181 @@
     }
   ],
   "events": [
+    {
+      "at": "2026-11-28T04:00:28.179Z",
+      "by": "Orchestrator",
+      "action": "decision.add",
+      "ref": "D-PAR-FOLD1",
+      "note": "xs.par() replaces para_*, and par().fold keeps its seed, step and merge arguments (draft)"
+    },
+    {
+      "at": "2026-11-28T04:00:27.298Z",
+      "by": "Orchestrator",
+      "action": "decision.post",
+      "ref": "D-FX-EMPTY1",
+      "note": "reviewed by BallotReview3"
+    },
+    {
+      "at": "2026-11-28T04:00:26.410Z",
+      "by": "BallotReview3",
+      "action": "decision.review",
+      "ref": "D-FX-EMPTY1",
+      "note": "passed"
+    },
+    {
+      "at": "2026-11-28T04:00:25.522Z",
+      "by": "Orchestrator",
+      "action": "decision.add",
+      "ref": "D-FX-EMPTY1",
+      "note": "An empty list #FX() marks pure blocks, types and modules once bare #FX goes (draft)"
+    },
+    {
+      "at": "2026-11-28T04:00:24.631Z",
+      "by": "Orchestrator",
+      "action": "decision.post",
+      "ref": "D-FFI-EFFECT-NAME1",
+      "note": "reviewed by BallotReview3"
+    },
+    {
+      "at": "2026-11-28T04:00:23.781Z",
+      "by": "BallotReview3",
+      "action": "decision.review",
+      "ref": "D-FFI-EFFECT-NAME1",
+      "note": "passed"
+    },
+    {
+      "at": "2026-11-28T04:00:22.937Z",
+      "by": "Orchestrator",
+      "action": "decision.add",
+      "ref": "D-FFI-EFFECT-NAME1",
+      "note": "Foreign-language effects are spelled FFI(\"c\"), with packages adding languages under the FFI root (draft)"
+    },
+    {
+      "at": "2026-11-28T04:00:22.051Z",
+      "by": "Orchestrator",
+      "action": "decision.post",
+      "ref": "D-EFFECT-PARAM1",
+      "note": "reviewed by BallotReview3"
+    },
+    {
+      "at": "2026-11-28T04:00:21.182Z",
+      "by": "BallotReview3",
+      "action": "decision.review",
+      "ref": "D-EFFECT-PARAM1",
+      "note": "passed"
+    },
+    {
+      "at": "2026-11-28T04:00:20.345Z",
+      "by": "Orchestrator",
+      "action": "decision.add",
+      "ref": "D-EFFECT-PARAM1",
+      "note": "Effect constraints use call form and one decidable containment law (draft)"
+    },
+    {
+      "at": "2026-11-28T04:00:19.540Z",
+      "by": "Orchestrator",
+      "action": "decision.post",
+      "ref": "D-CELL-LOCAL1",
+      "note": "reviewed by BallotReview3"
+    },
+    {
+      "at": "2026-11-28T04:00:18.708Z",
+      "by": "BallotReview3",
+      "action": "decision.review",
+      "ref": "D-CELL-LOCAL1",
+      "note": "passed"
+    },
+    {
+      "at": "2026-11-28T04:00:17.898Z",
+      "by": "Orchestrator",
+      "action": "decision.add",
+      "ref": "D-CELL-LOCAL1",
+      "note": "Cell remains the confined form of Shared, with one state-access API (draft)"
+    },
+    {
+      "at": "2026-11-28T04:00:17.067Z",
+      "by": "Orchestrator",
+      "action": "decision.post",
+      "ref": "D-AMBIENT-SET1",
+      "note": "reviewed by BallotReview3"
+    },
+    {
+      "at": "2026-11-28T04:00:16.262Z",
+      "by": "BallotReview3",
+      "action": "decision.review",
+      "ref": "D-AMBIENT-SET1",
+      "note": "passed"
+    },
+    {
+      "at": "2026-11-28T04:00:15.456Z",
+      "by": "Orchestrator",
+      "action": "decision.add",
+      "ref": "D-AMBIENT-SET1",
+      "note": "Ambient names the full deny-only set, without changing authority (draft)"
+    },
+    {
+      "at": "2026-11-28T04:00:14.590Z",
+      "by": "Orchestrator",
+      "action": "decision.post",
+      "ref": "D-DEFER-TXSCOPE1",
+      "note": "reviewed by BallotReview3"
+    },
+    {
+      "at": "2026-11-28T04:00:13.764Z",
+      "by": "BallotReview3",
+      "action": "decision.review",
+      "ref": "D-DEFER-TXSCOPE1",
+      "note": "passed"
+    },
+    {
+      "at": "2026-11-28T04:00:12.936Z",
+      "by": "Orchestrator",
+      "action": "decision.add",
+      "ref": "D-DEFER-TXSCOPE1",
+      "note": "A #Defer names the enclosing transaction as scope: .Transact (draft)"
+    },
+    {
+      "at": "2026-11-28T04:00:12.102Z",
+      "by": "Orchestrator",
+      "action": "decision.post",
+      "ref": "D-DEFER-SPELL1",
+      "note": "reviewed by BallotReview3"
+    },
+    {
+      "at": "2026-11-28T04:00:11.253Z",
+      "by": "BallotReview3",
+      "action": "decision.review",
+      "ref": "D-DEFER-SPELL1",
+      "note": "passed"
+    },
+    {
+      "at": "2026-11-28T04:00:10.412Z",
+      "by": "Orchestrator",
+      "action": "decision.add",
+      "ref": "D-DEFER-SPELL1",
+      "note": "#Defer takes a when case first and a scope: case from a fixed menu (draft)"
+    },
+    {
+      "at": "2026-11-28T04:00:09.588Z",
+      "by": "Orchestrator",
+      "action": "decision.post",
+      "ref": "D-CLOSE-MARKER1",
+      "note": "reviewed by BallotReview3"
+    },
+    {
+      "at": "2026-11-28T04:00:08.690Z",
+      "by": "BallotReview3",
+      "action": "decision.review",
+      "ref": "D-CLOSE-MARKER1",
+      "note": "passed"
+    },
+    {
+      "at": "2026-11-28T04:00:07.765Z",
+      "by": "Orchestrator",
+      "action": "decision.add",
+      "ref": "D-CLOSE-MARKER1",
+      "note": "The #Close marker retires; binders emit impl Close on foreign handle types (draft)"
+    },
     {
       "at": "2026-11-28T04:00:06.329Z",
       "by": "Orchestrator",
