@@ -3,7 +3,7 @@
     "version": 4,
     "project": "Jet",
     "nextNum": 7069,
-    "rev": 115271,
+    "rev": 115272,
     "ui": {
       "toggled": [
         "dec-group:syntax",
@@ -64340,6 +64340,11 @@
         {
           "at": "2026-11-28",
           "by": "Orchestrator",
+          "text": "c2 layout A (24-byte String with inline text, audit 2.1) measured on dev 79d8e1002e8: 104 #Export(c) text entries pass String as one word, 777 rt_text_data and 770 rt_text_len reads across 131 runtime files, 452 IRRouteCarrier.Text uses, 97 ir_string_row uses in 22 IR files; every String-returning runtime export needs an sret cell, [String] columns move to stride 24, Option<String> loses its null niche, and web, C FFI and X64 inline clone/drop all change, then a self-hosting S2==S3. Kept A as the target (the audit rejects B unless A is prohibitive; this is large, not prohibitive) and scheduled it as its own staged lane after the #7047 sweep lands. This pass: non-ASCII byte_slice without a temporary, web HiddenCopyInLoop reason removed, heap text blocks sized to the text, benchmarks on the current layout."
+        },
+        {
+          "at": "2026-11-28",
+          "by": "Orchestrator",
           "text": "c2 part 1 landed on dev 2d75085315c: slices > 64 bytes share the source buffer, short slices copy, mutation is copy-on-write; golden Examples/Text/StringZeroCopySlice; -O2 returned-slice bench 3.6-4.8s/14MB -> 0.01-0.02s/4MB. c2 still open: 24-byte inline-short String layout (audit's first choice), thread-local RC with promotion, non-ASCII byte_slice without the temporary copy, stale Jet.HiddenCopyInLoop reason for long slices on web, View<str> retirement ballot."
         },
         {
@@ -64424,7 +64429,7 @@
       "parentId": null,
       "needsAcceptance": false,
       "created": "2026-11-27T19:19:25.407Z",
-      "updated": "2026-11-28T01:52:46.426Z",
+      "updated": "2026-11-28T02:30:36.972Z",
       "updatedBy": "Orchestrator",
       "criteriaLastN": 6
     },
@@ -124942,6 +124947,13 @@
     }
   ],
   "events": [
+    {
+      "at": "2026-11-28T02:30:36.972Z",
+      "by": "Orchestrator",
+      "action": "card.update",
+      "ref": "c0nnf642",
+      "note": "logEntry"
+    },
     {
       "at": "2026-11-28T02:14:52.149Z",
       "by": "Orchestrator",
