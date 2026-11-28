@@ -3,7 +3,7 @@
     "version": 4,
     "project": "Jet",
     "nextNum": 7071,
-    "rev": 115282,
+    "rev": 115300,
     "ui": {
       "toggled": [
         "dec-group:syntax",
@@ -64440,7 +64440,7 @@
       "parentId": null,
       "needsAcceptance": false,
       "created": "2026-11-27T19:19:25.407Z",
-      "updated": "2026-11-28T02:55:19.577Z",
+      "updated": "2026-11-28T03:59:54.168Z",
       "updatedBy": "Orchestrator",
       "criteriaLastN": 6
     },
@@ -64505,7 +64505,7 @@
       "parentId": null,
       "needsAcceptance": false,
       "created": "2026-11-27T20:04:52.447Z",
-      "updated": "2026-11-27T21:54:30.914Z",
+      "updated": "2026-11-28T03:59:56.822Z",
       "updatedBy": "Orchestrator",
       "criteriaLastN": 4
     },
@@ -64581,7 +64581,7 @@
       "parentId": null,
       "needsAcceptance": false,
       "created": "2026-11-27T21:28:05.024Z",
-      "updated": "2026-11-28T02:04:02.500Z",
+      "updated": "2026-11-28T04:00:02.799Z",
       "updatedBy": "Orchestrator",
       "criteriaLastN": 4
     },
@@ -64646,7 +64646,7 @@
       "parentId": null,
       "needsAcceptance": false,
       "created": "2026-11-27T21:28:06.305Z",
-      "updated": "2026-11-27T22:08:58.497Z",
+      "updated": "2026-11-28T04:00:06.329Z",
       "updatedBy": "Orchestrator",
       "criteriaLastN": 4
     },
@@ -122917,6 +122917,920 @@
       "draft": false,
       "status": "open",
       "created": "2026-11-28T02:14:36.854Z"
+    },
+    {
+      "id": "D-STR-VIEW-RETIRE1",
+      "cardId": "c0nnf642",
+      "group": "memory",
+      "title": "Strings return plain String slices; View<str> and string from clauses leave the language",
+      "situation": "",
+      "gist": "Should string functions return owning `String` results, retiring `View<str>` and its `from` clauses?",
+      "lesson": "A string view borrows its source. An owned String slice keeps its bytes alive independently, sometimes by sharing and sometimes by copying. A removes string views in favor of that owning behavior. B keeps views for callers that require a borrow without retaining an owner. List views remain separate.",
+      "explainer": "",
+      "story": "Ana reads a parser signature with View<str> and a source clause; she would rather see one owning String result.",
+      "inWild": "head := line[:5] // another string",
+      "detail": "Examples/Memory/Views/ReturnedViews.jet declares View<str> returns with source sets; the older baseline ran its examples successfully. A separate owning longer function also ran. Neither execution measures allocation or proves dev parity. Compiler/JetRuntime/Source/Text.jet, rt_text_slice:237-255, shares long slices but copies slices of at most 64 bytes and allocator-scoped slices. Creating a shared slice can allocate a header as well as retain the root. It is not always one count update with no allocation.\n\nA removes string View<str> and its return-source clauses, migrating those APIs to owned String results. Short-slice copies, root retention, header allocation and allocator boundaries are real costs. Preserve Unicode boundaries and the original result bytes. Borrowed list views and mutable windows remain unchanged.\n\nB retains the borrowed string API beside owned String slices. It preserves the ability to avoid an owning header/retain and to constrain the result to its source lifetime, at the cost of a second API. Do not erase owner-set checks for list views or mechanically rewrite callback/aggregate signatures without checking their full ownership behavior.",
+      "options": [
+        {
+          "key": "A",
+          "name": "Plain String slices",
+          "detail": "Remove string View<str> and string return-source clauses only. Migrate to owned String with its actual short-copy, shared-header and allocator-boundary costs; preserve result bytes and leave list views unchanged.",
+          "code": "longer: fn(left: String, right: String) -> String {\n    if left.len() >= right.len() -> left else -> right\n}"
+        },
+        {
+          "key": "B",
+          "name": "Keep View<str> beside shared slices",
+          "detail": "Keep borrowed View<str> returns and their source clauses beside owning String results. Borrowing can avoid copying, header allocation or root retention, but its result cannot outlive its source.",
+          "code": "longer: fn(left: String, right: String) -> View<str> from left | right { … }"
+        }
+      ],
+      "comparisons": [
+        {
+          "lang": "Go",
+          "note": "Go's slice expressions construct substrings without a separate named borrow type. This comparison does not promise allocation behavior. https://go.dev/ref/spec#Slice_expressions",
+          "code": "head := line[:5] // another string"
+        },
+        {
+          "lang": "Rust",
+          "note": "Rust returns `&str` borrows with lifetimes, which cost no count update; see https://doc.rust-lang.org/book/ch04-03-slices.html.",
+          "code": "fn first(s: &str) -> &str { &s[..5] }"
+        }
+      ],
+      "rec": "A",
+      "recommendation": {
+        "why": "One string result type simplifies signatures and source-lifetime rules. A accepts real ownership costs rather than claiming views save only one count update.",
+        "gains": [
+          "One string type in every signature.",
+          "Fewer lifetime rules to learn."
+        ],
+        "losses": [
+          {
+            "loss": "Owned slices may copy, allocate or retain a larger root.",
+            "mitigation": "Keep the paired Rust time/memory acceptance gate; measure short slices, retained roots and allocator boundaries."
+          }
+        ],
+        "whyNot": [
+          {
+            "key": "B",
+            "reason": "B preserves useful borrowing but retains separate result types and source-lifetime contracts."
+          }
+        ],
+        "tradeoff": "Simpler string signatures trade away an explicit borrowed-return API."
+      },
+      "hybrid": null,
+      "ballotMode": "short",
+      "shortAuthorizedBy": null,
+      "ballotProcessVersion": 5,
+      "reviewPasses": null,
+      "checkInstructions": null,
+      "surface": {
+        "gist": "Should string functions return owning `String` results, retiring `View<str>` and its `from` clauses?",
+        "lesson": "A string view borrows its source. An owned String slice keeps its bytes alive independently, sometimes by sharing and sometimes by copying. A removes string views in favor of that owning behavior. B keeps views for callers that require a borrow without retaining an owner. List views remain separate.",
+        "trio": {
+          "current": {
+            "note": "The returned-view example names the borrowed result and its possible sources explicitly.",
+            "code": "longer: fn(left: String, right: String) -> View<str> from left | right { … }\ntokenize: fn(left: String, right: String) -> [View<str>] { … }"
+          },
+          "wild": {
+            "lang": "Go",
+            "note": "Go string slicing produces another string, without a separate named borrow type.",
+            "code": "head := line[:5] // another string"
+          }
+        },
+        "options": [
+          {
+            "key": "A",
+            "name": "Plain String slices",
+            "gist": "Return owning `String` results that may share or copy bytes; retire string views and their source clauses.",
+            "gains": [
+              "One string type in every signature.",
+              "No `from` clause on string returns."
+            ],
+            "losses": [
+              "Owned slices may copy bytes, allocate headers or retain a larger root."
+            ],
+            "proposed": {
+              "code": "longer: fn(left: String, right: String) -> String {\n    if left.len() >= right.len() -> left else -> right\n}"
+            }
+          },
+          {
+            "key": "B",
+            "name": "Keep View<str> beside shared slices",
+            "gist": "Keep explicit borrowed views beside owning String results.",
+            "gains": [
+              "Callers can avoid forcing an owning result."
+            ],
+            "losses": [
+              "Two ways to return part of a string.",
+              "Library authors must choose and explain one."
+            ],
+            "proposed": {
+              "code": "longer: fn(left: String, right: String) -> View<str> from left | right { … }"
+            }
+          }
+        ],
+        "recommendation": {
+          "rec": "A",
+          "why": "One string result type simplifies signatures and source-lifetime rules. A accepts real ownership costs rather than claiming views save only one count update.",
+          "gains": [
+            "One string type in every signature.",
+            "Fewer lifetime rules to learn."
+          ],
+          "losses": [
+            {
+              "loss": "Owned slices may copy, allocate or retain a larger root.",
+              "mitigation": "Keep the paired Rust time/memory acceptance gate; measure short slices, retained roots and allocator boundaries."
+            }
+          ],
+          "whyNot": [
+            {
+              "key": "B",
+              "reason": "B preserves useful borrowing but retains separate result types and source-lifetime contracts."
+            }
+          ],
+          "tradeoff": "Simpler string signatures trade away an explicit borrowed-return API."
+        }
+      },
+      "reports": [
+        {
+          "title": "Zero-magic memory trio pre-build review",
+          "path": "Docs/Audits/2026-11-27-zero-magic-memory-trio-review.md",
+          "note": "Section 2.2 item 8 and verdict ballot (i)."
+        }
+      ],
+      "draftedBy": "Orchestrator",
+      "reviewedBy": "BallotReview3",
+      "draft": false,
+      "status": "open",
+      "created": "2026-11-28T03:59:49.691Z"
+    },
+    {
+      "id": "D-WEAK-STALE-WRITE1",
+      "cardId": "c0nnf642",
+      "group": "syntax",
+      "title": "A write through ?. on a freed weak handle is skipped silently, the same on every tier",
+      "situation": "A weak handle does not keep its target alive. The proposed write `bob.parent?.hp -= 1` cannot update a target that has gone away. We recommend silently skipping the whole guarded operation, with the same semantics on every tier. This adds write semantics to optional chaining; an inspection listing is proposed tooling, not an existing compiler feature.",
+      "gist": "When `bob.parent?.hp -= 1` finds the parent already freed, should the skipped write stay silent or warn?",
+      "lesson": "Card #7059 lets a write go through `?.` on a weak handle. If the target is gone, nothing is written. The question is whether that skip is silent, as `?.` reads already are, or whether each such write warns until its skip is handled.",
+      "explainer": "",
+      "story": "Ivy keeps a weak link from each node to its parent. When a parent is freed early, she wants to know what `node.parent?.hp -= 1` does.",
+      "inWild": "john.residence?.address = someAddress // skipped when residence is nil",
+      "detail": "Compiler/JetFoundation/Data/Syntax/MathLayout.jet, OP_OPTIONAL_CHAIN:769-771, defines optional member access and a T? result, not the new guarded-write law. Examples/Memory/Expert/WeakBackEdge.jet demonstrates downgrade and upgrade. A standalone Shared<Peer> baseline probe upgraded a weak handle and printed hp=2. This was the older a0.0.46-dev executable, not proof that newer dev already supports guarded writes.\n\nFor either option, evaluate the receiver once. Upgrade before evaluating the guarded member, index, RHS or compound-operation read. A stale or absent target skips all those expressions. A successful upgrade pins the strong target through the complete write, obtains normal write authority, and releases it afterwards. Compound updates obey the same synchronization rules as explicit Shared writes; optional chaining must not introduce an unsynchronized read-modify-write. Upgrade failure is absence, not an authority-denial fallback. Actual arithmetic, RHS and authority errors still propagate.\n\nA proposes an inspect listing of guarded write sites. B warns at every syntactic guarded write; explicit upgrade-and-branch code is the way to handle absence and avoid the warning. No undocumented warning-suppression syntax is implied. Tests must cover a stale target, an absent optional, RHS/index side effects and successful compound updates on each tier.",
+      "options": [
+        {
+          "key": "A",
+          "name": "Skip silently, listed by inspect",
+          "detail": "A write through `?.` upgrades, writes and releases when the target lives, and does nothing when it is gone. The behavior is identical on O0, O1, O2, web and comptime. `jet inspect` lists each `?.` write so reviewers can find them.",
+          "code": "bob.parent?.hp -= 1   // parent gone: nothing happens"
+        },
+        {
+          "key": "B",
+          "name": "Warn on each ?. write",
+          "detail": "Use the same runtime law as A, but warn on every guarded-write expression. To handle absence without the warning, write an explicit upgrade and branch; the stale branch must be visible. CI may deny warnings. No new suppression marker is introduced.",
+          "code": "bob.parent?.hp -= 1   // warning: skipped when parent is gone"
+        }
+      ],
+      "comparisons": [
+        {
+          "lang": "Swift",
+          "note": "Swift documents that optional-chained assignment does not evaluate its right-hand side when the link is nil. The manual does not establish the old draft's blanket no-warning claim. https://docs.swift.org/swift-book/documentation/the-swift-programming-language/optionalchaining/",
+          "code": "john.residence?.address = someAddress // skipped when residence is nil"
+        },
+        {
+          "lang": "Kotlin",
+          "note": "Kotlin documents skipping safe-call assignment and its right-hand side when a receiver is null; this is not a claim about all compiler warning settings. https://kotlinlang.org/docs/null-safety.html#safe-call-operator",
+          "code": "person?.department?.head = manager // skipped if any link is null"
+        }
+      ],
+      "rec": "A",
+      "recommendation": {
+        "why": "A `?.` already means skip when missing for reads. Writes should mean the same, as in Swift and Kotlin. Listing write sites in `jet inspect` gives reviewers visibility without warning on intended skips.",
+        "gains": [
+          "One meaning for `?.`: missing means skip.",
+          "Intended skips stay quiet."
+        ],
+        "losses": [
+          {
+            "loss": "An early free skips a write quietly.",
+            "mitigation": "`jet inspect` lists every `?.` write, and tests can read the same place and see `None`."
+          }
+        ],
+        "whyNot": [
+          {
+            "key": "B",
+            "reason": "B warns on `?.` writes where `?.` reads never warn, adding noise to every intended skip."
+          }
+        ],
+        "tradeoff": "Quiet skips buy one meaning for `?.`, with inspect for review."
+      },
+      "hybrid": null,
+      "ballotMode": "full",
+      "shortAuthorizedBy": null,
+      "ballotProcessVersion": 5,
+      "reviewPasses": {
+        "adversarial": "Author model family: Claude. Adversarial model family: GPT. Fresh agent: BallotReview3. Verified optional-access source, weak-upgrade execution and primary Swift/Kotlin assignment rules; removed unsupported warning comparisons. A remains recommended with the existing pin, evaluation-order and synchronization requirements."
+      },
+      "checkInstructions": null,
+      "surface": {
+        "gist": "When `bob.parent?.hp -= 1` finds the parent already freed, should the skipped write stay silent or warn?",
+        "lesson": "Card #7059 lets a write go through `?.` on a weak handle. If the target is gone, nothing is written. The question is whether that skip is silent, as `?.` reads already are, or whether each such write warns until its skip is handled.",
+        "trio": {
+          "current": {
+            "note": "The weak-back-edge example upgrades the weak handle explicitly before accessing its live target.",
+            "code": "back: cell.downgrade()\n// inside a stored callback:\nback.upgrade()"
+          },
+          "wild": {
+            "lang": "Swift",
+            "note": "Swift documents skipping optional-chained assignment, including its right-hand side, when the optional link is nil.",
+            "code": "john.residence?.address = someAddress // skipped when residence is nil"
+          }
+        },
+        "options": [
+          {
+            "key": "A",
+            "name": "Skip silently, listed by inspect",
+            "gist": "A stale `?.` write does nothing on every tier; `jet inspect` lists each `?.` write.",
+            "gains": [
+              "Same meaning as `?.` reads: missing means skip.",
+              "Intended skips stay quiet."
+            ],
+            "losses": [
+              "A parent freed too early skips a write quietly."
+            ],
+            "proposed": {
+              "code": "bob.parent?.hp -= 1   // parent gone: nothing happens"
+            }
+          },
+          {
+            "key": "B",
+            "name": "Warn on each ?. write",
+            "gist": "Each `?.` write warns unless its skip is handled; `--deny-warnings` refuses it.",
+            "gains": [
+              "An early free cannot hide behind a quiet skip."
+            ],
+            "losses": [
+              "Every intended skip carries a warning or extra code.",
+              "Reads and writes through `?.` behave differently."
+            ],
+            "proposed": {
+              "code": "bob.parent?.hp -= 1   // warning: skipped when parent is gone"
+            }
+          }
+        ],
+        "recommendation": {
+          "rec": "A",
+          "why": "A `?.` already means skip when missing for reads. Writes should mean the same, as in Swift and Kotlin. Listing write sites in `jet inspect` gives reviewers visibility without warning on intended skips.",
+          "gains": [
+            "One meaning for `?.`: missing means skip.",
+            "Intended skips stay quiet."
+          ],
+          "losses": [
+            {
+              "loss": "An early free skips a write quietly.",
+              "mitigation": "`jet inspect` lists every `?.` write, and tests can read the same place and see `None`."
+            }
+          ],
+          "whyNot": [
+            {
+              "key": "B",
+              "reason": "B warns on `?.` writes where `?.` reads never warn, adding noise to every intended skip."
+            }
+          ],
+          "tradeoff": "Quiet skips buy one meaning for `?.`, with inspect for review."
+        }
+      },
+      "reports": [
+        {
+          "title": "Zero-magic memory trio pre-build review",
+          "path": "Docs/Audits/2026-11-27-zero-magic-memory-trio-review.md",
+          "note": "Section 4.2 item 5 and verdict ballot (vii)."
+        }
+      ],
+      "draftedBy": "Orchestrator",
+      "reviewedBy": "BallotReview3",
+      "draft": false,
+      "status": "open",
+      "created": "2026-11-28T03:59:52.345Z"
+    },
+    {
+      "id": "D-VIA-FATE1",
+      "cardId": "c0fwmv7h",
+      "group": "syntax",
+      "title": "-[via f]> leaves the language once callback pass-through is inferred",
+      "situation": "A function calling a callback can inherit that callback's effects. Jet has a `via` annotation, while the proposed callback analysis would infer that dependency and publish it in the lock. An optional annotation can still serve as a checked API ceiling, so inference alone does not make it meaningless. We recommend deleting `via`, provided lock diffs expose changes to the inferred contract.",
+      "gist": "Once callback pass-through is inferred, should `-[via f]>` be deleted, extended to several callbacks, or kept as it is?",
+      "lesson": "A removes the annotation and publishes inferred callback dependencies in the lock. B and C retain a checked public contract, not a second execution mechanism. That protects an API from accidental growth; A relies instead on visible lock diffs and ordinary ceilings.",
+      "explainer": "",
+      "story": "Raj writes `retry(f)`, which calls its callback up to three times. He wants callers to see the callback's effects without writing `via`.",
+      "inWild": "// documented Koka type:\nmap : (xs : list<a>, f : (a) -> e b) -> e list<b>",
+      "detail": "Compiler/JetFoundation/Data/Syntax/PackageFiles.jet, KW_VIA:248, registers via; Highlights.jet:173 highlights it. The callback dependency proposal would publish inference in the lock. The older executable baseline parsed `-[via f]>`; its initial probe needed explicit Never! callback results to isolate effects from failure marking. Baseline results are not implementation-parity claims about newer dev source.\n\nA removes only via entries, never other entries or denials in a mixed row. Regenerate published dependency facts and require reviewable lock diffs when inferred callback dependencies change. A body change can still change its API; inference does not freeze a contract.\n\nB explicitly proposes `-[via f, via g]>`, with repeated via entries in the existing row list. Each name must identify a function-valued parameter. The list asserts that the published row is the union of the listed callback dependencies plus any explicitly listed direct effects; unlisted callback effects or extra direct effects are errors. It uses the same inferred facts as A, not an independent effect solver. C keeps the single-name grammar and the same assertion meaning. No option defers its grammar to another vote.",
+      "options": [
+        {
+          "key": "A",
+          "name": "Delete via",
+          "detail": "Remove the via keyword and its parser branch. Inference publishes pass-through through the lock. A checked fix removes only resolved via entries, preserving other effects and denials, then regenerates dependency facts for review.",
+          "technical": "Deletes `KW_VIA` and the `-[via f]>` parse path; the lock row records inferred pass-through per function-valued parameter.",
+          "code": "apply: fn(f: fn(Int) -> Int, x: Int) -> Int {\n    f(x)   // pass-through of f is inferred\n}"
+        },
+        {
+          "key": "B",
+          "name": "Keep checked multi-callback via",
+          "detail": "Proposed row syntax is `-[via f, via g]>`. Repeated via entries assert that the row contains only those callback dependencies plus written direct effects; check this against inference. Names must be function-valued parameters. This ballot authorizes the list grammar rather than deferring it.",
+          "code": "// proposed list grammar\napply2: fn(f: fn(Int) -> Int Never!, g: fn(Int) -> Int Never!, x: Int) -[via f, via g]> Int Never! { g(f(x)) }"
+        },
+        {
+          "key": "C",
+          "name": "Keep single-callback via",
+          "detail": "Keep today's single-parameter `via` beside inference.",
+          "code": "apply: fn(f: fn(Int) -> Int, x: Int) -[via f]> Int {\n    f(x)\n}"
+        }
+      ],
+      "comparisons": [
+        {
+          "lang": "Koka",
+          "note": "Koka documents map's effect-polymorphic type: callback effect e is also the map effect. This is a type-system comparison, not a claim that Jet's lock publishing follows from it. https://koka-lang.github.io/koka/doc/book.html#sec-polymorphic-effects",
+          "code": "// documented Koka type:\nmap : (xs : list<a>, f : (a) -> e b) -> e list<b>"
+        }
+      ],
+      "rec": "A",
+      "recommendation": {
+        "why": "A reduces annotation surface if inferred contract changes are visible in reviewed lock diffs. Checked explicit contracts are useful; this recommendation accepts losing that optional assertion.",
+        "gains": [
+          "One spelling for callback pass-through.",
+          "One keyword leaves the registry."
+        ],
+        "losses": [
+          {
+            "loss": "Signatures no longer show pass-through.",
+            "mitigation": "Hover and the lock row show it, and a callback bound like `fn(Int) -[Net]> Int` still states a limit."
+          }
+        ],
+        "whyNot": [
+          {
+            "key": "B",
+            "reason": "B provides API stability assertions, but adds list grammar and contract maintenance beside inference."
+          },
+          {
+            "key": "C",
+            "reason": "C retains that assertion but cannot express a function depending on several callbacks."
+          }
+        ],
+        "tradeoff": "Pass-through moves from the signature to hover and the lock."
+      },
+      "hybrid": null,
+      "ballotMode": "full",
+      "shortAuthorizedBy": null,
+      "ballotProcessVersion": 5,
+      "reviewPasses": {
+        "adversarial": "Author model family: Claude. Adversarial model family: GPT. Fresh agent: BallotReview3. Verified via registration and baseline execution, and replaced an unsupported Koka example with its documented map type. A remains recommended; checked removal must preserve other row entries and published dependency facts."
+      },
+      "checkInstructions": null,
+      "surface": {
+        "gist": "Once callback pass-through is inferred, should `-[via f]>` be deleted, extended to several callbacks, or kept as it is?",
+        "lesson": "A publishes callback dependencies by inference alone. B retains an explicit checked contract and permits several callbacks; it rejects a body that adds an effect outside that contract. That is a real stability benefit, not a second execution mechanism. A instead relies on visible lock changes and ordinary written effect ceilings.",
+        "trio": {
+          "current": {
+            "note": "Today `via` publishes one callback's effects as the function's own.",
+            "code": "apply: fn(f: fn(Int) -> Int, x: Int) -[via f]> Int {\n    f(x)\n}"
+          },
+          "wild": {
+            "lang": "Koka",
+            "note": "Koka's documented map type returns the callback effect e; this is type polymorphism, not Jet lock publishing.",
+            "code": "// documented Koka type:\nmap : (xs : list<a>, f : (a) -> e b) -> e list<b>"
+          }
+        },
+        "options": [
+          {
+            "key": "A",
+            "name": "Delete via",
+            "gist": "Pass-through is always inferred and recorded in the lock; `-[via f]>` is removed.",
+            "gains": [
+              "One way to state pass-through.",
+              "One keyword fewer."
+            ],
+            "losses": [
+              "Readers see pass-through in hover and the lock, not the signature."
+            ],
+            "proposed": {
+              "code": "apply: fn(f: fn(Int) -> Int, x: Int) -> Int {\n    f(x)   // pass-through of f is inferred\n}"
+            }
+          },
+          {
+            "key": "B",
+            "name": "Keep via for several callbacks",
+            "gist": "`via` stays as an asserted contract and may name several callbacks.",
+            "gains": [
+              "The signature states the pass-through.",
+              "Covers functions with two callbacks."
+            ],
+            "losses": [
+              "Adds list grammar and an optional assertion to maintain."
+            ],
+            "proposed": {
+              "code": "// proposed list grammar\napply2: fn(f: fn(Int) -> Int Never!, g: fn(Int) -> Int Never!, x: Int) -[via f, via g]> Int Never! { g(f(x)) }"
+            }
+          },
+          {
+            "key": "C",
+            "name": "Keep single-callback via",
+            "gist": "`via f` stays beside inference, for one callback only.",
+            "gains": [
+              "No migration for existing `via` code."
+            ],
+            "losses": [
+              "The checked assertion covers only one callback."
+            ],
+            "proposed": {
+              "code": "apply: fn(f: fn(Int) -> Int, x: Int) -[via f]> Int {\n    f(x)\n}"
+            }
+          }
+        ],
+        "recommendation": {
+          "rec": "A",
+          "why": "A reduces annotation surface if changes to inferred callback contracts remain visible in reviewed lock diffs. This accepts losing an optional checked assertion.",
+          "gains": [
+            "One spelling for callback pass-through.",
+            "One keyword leaves the registry."
+          ],
+          "losses": [
+            {
+              "loss": "Signatures no longer show pass-through.",
+              "mitigation": "Hover and the lock row show it, and a callback bound like `fn(Int) -[Net]> Int` still states a limit."
+            }
+          ],
+          "whyNot": [
+            {
+              "key": "B",
+              "reason": "B adds grammar and contract maintenance, but honestly provides an explicit API stability check."
+            },
+            {
+              "key": "C",
+              "reason": "C retains that useful assertion but only for one callback."
+            }
+          ],
+          "tradeoff": "Pass-through moves from the signature to hover and the lock."
+        }
+      },
+      "reports": [
+        {
+          "title": "Large-scale effect ergonomics pre-build review",
+          "path": "Docs/Audits/2026-11-27-large-scale-effect-ergonomics-review.md",
+          "note": "Section 7, question B2."
+        }
+      ],
+      "draftedBy": "Orchestrator",
+      "reviewedBy": "BallotReview3",
+      "draft": false,
+      "status": "open",
+      "created": "2026-11-28T03:59:55.081Z"
+    },
+    {
+      "id": "D-DYNDATA-ROLE1",
+      "cardId": "c000ls9h",
+      "group": "library",
+      "title": "Dynamic data uses existing capability traits, not a blanket DynamicData role",
+      "situation": "",
+      "gist": "Should each dynamic-data operation use its existing trait, rather than one blanket role?",
+      "lesson": "Encoding, decoding and conversion are different powers. Implementing codecs does not supply navigation or writable fields. A replaces named codec exceptions with their respective trait contracts. B keeps the existing builtin exceptions. Both keep canonical Dyn navigation and literal behavior distinct from codecs.",
+      "explainer": "",
+      "story": "Omar wants his config format to decode through the same public contract as other formats, without pretending it is Dyn.",
+      "inWild": "let cfg: Config = serde_json::from_value(v)?;",
+      "detail": "Compiler/Prelude/Traits.jet declares Encode, Decode and From separately. Compiler/JetSema/Source/Sema/Serde.jet, sema_serde_core_data_name:280-290, specially admits canonical Dyn and named formats, with different encode/decode treatment. Registration/Derives.jet:2695 has a named data-type branch. A migrates these codec exceptions to explicit implementations of the appropriate existing trait, preserving failures and format semantics.\n\nExpressions/Dyn.jet separates canonical identity and wrapping shapes, named data literals, accessors and codec dispatch. Its sema_data_accessor_contract:239-251 defines navigation; sema_data_stored_codec_hidden:225-230 protects storage codecs that retain secrets. These are not powers supplied by three codec traits. A preserves canonical literals, navigation, wrapping and stored-codec restrictions rather than replacing them with an unspecified role.\n\nThe previous blanket-role choice was not ready: no lookup, missing-key or writeback law was given. B now offers the complete existing alternative, retaining named builtin handling. Neither option invents a second conversion mechanism or implicit coercion. This is a codec-dispatch cutover, not a claim that the baseline implements generic dynamic-tree roles.",
+      "options": [
+        {
+          "key": "A",
+          "name": "Dispatch each capability separately",
+          "detail": "Use each existing trait only for its declared operation. Preserve explicit conversion and failure rules. Do not grant Dyn navigation from codec membership.",
+          "code": "// proposed: Decode enables decoding, not dynamic navigation."
+        },
+        {
+          "key": "B",
+          "name": "Keep named builtin exceptions",
+          "detail": "Retain named builtin codec admission and the separate canonical Dyn literal, navigation and wrapping checks. User codecs continue through ordinary trait methods; no new role is added.",
+          "code": "// retain named builtin codec exceptions; no new role"
+        }
+      ],
+      "comparisons": [
+        {
+          "lang": "Rust",
+          "note": "from_value interprets Value as T and can fail on shape or data mismatches. It is not a navigation protocol. https://docs.rs/serde_json/latest/serde_json/fn.from_value.html",
+          "code": "let cfg: Config = serde_json::from_value(v)?;"
+        }
+      ],
+      "rec": "A",
+      "recommendation": {
+        "why": "Use the existing contract for each codec operation, without granting unrelated dynamic-tree powers.",
+        "gains": [
+          "No duplicate codec mechanism."
+        ],
+        "losses": [
+          {
+            "loss": "Builtin codec exceptions must become explicit implementations.",
+            "mitigation": "Migrate canonical codecs before removing their exceptions; preserve stored-codec access restrictions."
+          }
+        ],
+        "whyNot": [
+          {
+            "key": "B",
+            "reason": "B avoids migration but retains name-based codec privileges."
+          }
+        ],
+        "tradeoff": "Uniform codec contracts require a checked builtin migration."
+      },
+      "hybrid": null,
+      "ballotMode": "short",
+      "shortAuthorizedBy": null,
+      "ballotProcessVersion": 5,
+      "reviewPasses": null,
+      "checkInstructions": null,
+      "surface": {
+        "gist": "Should each dynamic-data operation use its existing trait, rather than one blanket role?",
+        "lesson": "Encoding, decoding and conversion are different powers. Implementing codecs does not supply navigation or writable fields. A replaces named codec exceptions with their respective trait contracts. B keeps the existing builtin exceptions. Both keep canonical Dyn navigation and literal behavior distinct from codecs.",
+        "trio": {
+          "current": {
+            "note": "Dev source has special handling for canonical Dyn and named format types.",
+            "code": "// Dyn navigation and format conversion have separate compiler paths."
+          },
+          "wild": {
+            "lang": "Rust",
+            "note": "serde_json::from_value returns Result, not navigation rights.",
+            "code": "let cfg: Config = serde_json::from_value(v)?;"
+          }
+        },
+        "options": [
+          {
+            "key": "A",
+            "name": "Dispatch each capability separately",
+            "gist": "Use Encode, Decode and From(Dyn) only for their own operations; keep navigation on Dyn or ordinary collection traits.",
+            "gains": [
+              "No blanket role.",
+              "Third-party codecs use the same contracts."
+            ],
+            "losses": [
+              "A codec alone gets no dynamic field syntax."
+            ],
+            "proposed": {
+              "code": "// proposed: Decode enables decoding, not dynamic navigation."
+            }
+          },
+          {
+            "key": "B",
+            "name": "Keep named builtin exceptions",
+            "gist": "Keep the existing Dyn and format-name checks; user types use ordinary codec methods.",
+            "gains": [
+              "No builtin dispatch migration."
+            ],
+            "losses": [
+              "Builtin codec admission remains special."
+            ],
+            "proposed": {
+              "code": "// retain named builtin codec exceptions; no new role"
+            }
+          }
+        ],
+        "recommendation": {
+          "rec": "A",
+          "why": "Use the existing contract for each codec operation, without granting unrelated dynamic-tree powers.",
+          "gains": [
+            "No duplicate codec mechanism."
+          ],
+          "losses": [
+            {
+              "loss": "Builtin codec exceptions must become explicit implementations.",
+              "mitigation": "Migrate canonical codecs before removing their exceptions; preserve stored-codec access restrictions."
+            }
+          ],
+          "whyNot": [
+            {
+              "key": "B",
+              "reason": "B avoids migration but retains name-based codec privileges."
+            }
+          ],
+          "tradeoff": "Uniform codec contracts require a checked builtin migration."
+        }
+      },
+      "reports": [
+        {
+          "title": "Tier 1 policy, roles and AST pre-build review",
+          "path": "Docs/Audits/2026-11-27-tier1-policy-roles-ast-review.md",
+          "note": "Sections 2.1 and 2.3, dynamic data row."
+        }
+      ],
+      "draftedBy": "Orchestrator",
+      "reviewedBy": "BallotReview3",
+      "draft": false,
+      "status": "open",
+      "created": "2026-11-28T03:59:57.844Z"
+    },
+    {
+      "id": "D-DOT-STATIC1",
+      "cardId": "c000ls9h",
+      "group": "syntax",
+      "title": "A leading-dot call infers its type for any static method that returns the expected type",
+      "situation": "A leading dot can omit a type already fixed by a call's argument slot. Jet gives this convenience to enum cases and `.new`, but rejects other static method names in that position. We recommend extending it to static methods returning the expected type, without guessing among several types. This removes the special method name while retaining ordinary callable shorthand in callable argument slots.",
+      "gist": "Should `.name(…)` infer its type from context for any static method returning that type, not only for `new`?",
+      "lesson": "Today `.new(…)` alone may leave out its type when the expected type is known, as in `draw(.new(1, 2))`. That rule is keyed on one method name. Extending it to any static method that returns the expected type makes it general, as Swift does. Deleting it means writing the type every time.",
+      "explainer": "",
+      "story": "Eli calls `draw(.new(1, 2))` and it works, then writes `draw(.origin())` and it fails. He cannot see why one static method differs from another.",
+      "inWild": "// documented Swift example:\nvar x = MyEnumeration.someValue\nx = .anotherValue",
+      "detail": "Compiler/JetSema/Source/Sema/Expressions.jet, sema_expr_is_inferred_constructor:8501-8506, exempts only new from bare-member-as-value rejection. sema_expr_check_bare_member_chain:8563-8588 first interprets a member chain as unary callable shorthand when a function type is expected. A must preserve that priority; it must not silently turn `.name()` into a static call in a callable slot.\n\nBaseline probes used a Point with explicit Never! constructors to isolate receiver inference. The first unannotated constructor probe was stopped by the older baseline's failure-mark rule, not receiver lookup. A separate `.origin()` probe failed Jet.MemberShorthandAsValue. These observations concern the older a0.0.46-dev executable only; the cited dev branch establishes the current name-keyed check.\n\nA requires one fully known nominal expected type before lookup. No context means write the type. Optional expectations may unwrap one known payload type; unrelated unions cannot trigger a search. A method must be static, visible, and return the expected type; wrong result types and instance methods are errors. Generic methods infer only their own arguments after the receiver is fixed. Enum case lookup remains unchanged, and collisions must be diagnosed rather than guessed. Fixes for B need checked receiver facts, never textual name guesses.",
+      "options": [
+        {
+          "key": "A",
+          "name": "Any static method",
+          "detail": "When the expected type is known, `.name(…)` looks up a static method `name` on that type, and accepts it if it returns that type.",
+          "code": "draw(.new(1, 2))\ndraw(.origin())"
+        },
+        {
+          "key": "B",
+          "name": "Delete the shorthand",
+          "detail": "Remove inferred `.new(…)`. A migration may insert a type only when the receiver has been uniquely resolved and the edit preserves lookup; otherwise report manual guidance.",
+          "code": "draw(Point.new(1, 2))\ndraw(Point.origin())"
+        },
+        {
+          "key": "C",
+          "name": "Keep new-only",
+          "detail": "Keep today's rule.",
+          "code": "draw(.new(1, 2))"
+        }
+      ],
+      "comparisons": [
+        {
+          "lang": "Swift",
+          "note": "Swift's reference defines implicit member expressions for enum cases or type methods when inference determines the implied type. It does not promise every static call resolves without context. https://docs.swift.org/swift-book/documentation/the-swift-programming-language/expressions/#Implicit-Member-Expression",
+          "code": "// documented Swift example:\nvar x = MyEnumeration.someValue\nx = .anotherValue"
+        }
+      ],
+      "rec": "A",
+      "recommendation": {
+        "why": "Leading-dot enum cases already take their type from context. Applying the same rule to static methods that return the type removes the name-keyed case and gives one rule to learn.",
+        "gains": [
+          "One leading-dot rule.",
+          "No special method name."
+        ],
+        "losses": [
+          {
+            "loss": "Calls hide their type in more places.",
+            "mitigation": "Hover shows the resolved type, and the rule only fires when the method returns the expected type."
+          }
+        ],
+        "whyNot": [
+          {
+            "key": "B",
+            "reason": "B lengthens every construction call to remove one special case."
+          },
+          {
+            "key": "C",
+            "reason": "C keeps the name-keyed rule the card asks to remove."
+          }
+        ],
+        "tradeoff": "A wider shorthand buys one leading-dot rule."
+      },
+      "hybrid": null,
+      "ballotMode": "full",
+      "shortAuthorizedBy": null,
+      "ballotProcessVersion": 5,
+      "reviewPasses": {
+        "adversarial": "Author model family: Claude. Adversarial model family: GPT. Fresh agent: BallotReview3. Verified new-name lookup and callable priority in dev source, executed new/origin probes, and checked Swift's primary reference. A remains recommended only with one known expected receiver and checked ambiguity handling."
+      },
+      "checkInstructions": null,
+      "surface": {
+        "gist": "Should `.name(…)` infer its type from context for any static method returning that type, not only for `new`?",
+        "lesson": "Today `.new(…)` alone may leave out its type when the expected type is known, as in `draw(.new(1, 2))`. That rule is keyed on one method name. Extending it to any static method that returns the expected type makes it general, as Swift does. Deleting it means writing the type every time.",
+        "trio": {
+          "current": {
+            "note": "Today only `new` gets the expected-type receiver.",
+            "code": "draw(.new(1, 2))    // receiver inferred\ndraw(.origin())     // only new is inferred"
+          },
+          "wild": {
+            "lang": "Swift",
+            "note": "Swift documents implicit member expressions when context determines the type, including type methods; this is not unrestricted overload search.",
+            "code": "// documented Swift example:\nvar x = MyEnumeration.someValue\nx = .anotherValue"
+          }
+        },
+        "options": [
+          {
+            "key": "A",
+            "name": "Any static method",
+            "gist": "A leading-dot call resolves on the expected type when that static method returns it.",
+            "gains": [
+              "One rule for enum cases and static methods.",
+              "No method name is special."
+            ],
+            "losses": [
+              "A reader must know the expected type to find the method."
+            ],
+            "proposed": {
+              "code": "draw(.new(1, 2))\ndraw(.origin())"
+            }
+          },
+          {
+            "key": "B",
+            "name": "Delete the shorthand",
+            "gist": "Every static call writes its type, including `new`.",
+            "gains": [
+              "Every call names its type."
+            ],
+            "losses": [
+              "Longer calls wherever `.new` was used."
+            ],
+            "proposed": {
+              "code": "draw(Point.new(1, 2))\ndraw(Point.origin())"
+            }
+          },
+          {
+            "key": "C",
+            "name": "Keep new-only",
+            "gist": "Only `.new(…)` infers its type, as today.",
+            "gains": [
+              "No change."
+            ],
+            "losses": [
+              "One method name stays special."
+            ],
+            "proposed": {
+              "code": "draw(.new(1, 2))"
+            }
+          }
+        ],
+        "recommendation": {
+          "rec": "A",
+          "why": "Leading-dot enum cases already take their type from context. Applying the same rule to static methods that return the type removes the name-keyed case and gives one rule to learn.",
+          "gains": [
+            "One leading-dot rule.",
+            "No special method name."
+          ],
+          "losses": [
+            {
+              "loss": "Calls hide their type in more places.",
+              "mitigation": "Hover shows the resolved type, and the rule only fires when the method returns the expected type."
+            }
+          ],
+          "whyNot": [
+            {
+              "key": "B",
+              "reason": "B lengthens every construction call to remove one special case."
+            },
+            {
+              "key": "C",
+              "reason": "C keeps the name-keyed rule the card asks to remove."
+            }
+          ],
+          "tradeoff": "A wider shorthand buys one leading-dot rule."
+        }
+      },
+      "reports": [
+        {
+          "title": "Tier 1 policy, roles and AST pre-build review",
+          "path": "Docs/Audits/2026-11-27-tier1-policy-roles-ast-review.md",
+          "note": "Section 2.4 item 2."
+        }
+      ],
+      "draftedBy": "Orchestrator",
+      "reviewedBy": "BallotReview3",
+      "draft": false,
+      "status": "open",
+      "created": "2026-11-28T04:00:00.853Z"
+    },
+    {
+      "id": "D-FAIL-FN-ABI1",
+      "cardId": "c0l6uetj",
+      "group": "language",
+      "title": "Failing and non-failing functions share one calling convention, so lists of them widen freely",
+      "situation": "",
+      "gist": "Should a list of non-failing functions pass where a list of failing ones is expected, by sharing one calling convention?",
+      "lesson": "A common indirect-call convention removes container rebuilding but can increase non-failing call overhead. Mutable positions stay invariant. Explicit rebuilding remains a caller-visible alternative, not a hidden allocation.",
+      "explainer": "",
+      "story": "Ali has a list of checks that never fail and wants to pass it to `run_all`, which accepts failing checks.",
+      "inWild": "fun value(): Int = 2\nfun main() {\n    val checks: List<() -> Int> = listOf(::value)\n    val wide: List<() -> Any> = checks\n    println(checks === wide)\n    println(wide[0]())\n} // JVM output: true, then 2",
+      "detail": "Compiler/JetSema/Source/Sema/TypeRelations.jet, sema_type_nested_fn_failure_gap:655-705 and sema_type_assignable:809-815, distinguishes standalone adapters from nested functions without adapters. Never-returning cases are specially handled; not every function-shaped type has this gap. The older executable accepted a list of fn(Int)->Int Never! at a [fn(Int)->Int Err!] parameter. It must not be presented as reproducing dev's rejection.\n\nA requires identical indirect-call layouts for success and failure results. A prefix alone does not make an old callee initialize a newly expected failure register. Non-failing indirect callees must supply the no-failure result. Direct calls may remain specialized. Measure register pressure, code size and throughput before claiming zero overhead.\n\nRead covariance follows parameter contravariance and result covariance recursively. Writable positions, writable aliases, map keys and callback inputs cannot widen merely because the outer container is read-only. Preserve effects, labels, ownership and origin obligations.\n\nB preserves separate conventions and rejects incompatible assignments. Callers may explicitly rebuild a container of adapted functions when they accept its cost. This is not an automatic hidden allocation. Kotlin covariance uses uniform JVM reference representations; it does not prove Jet's failure ABI is free.",
+      "options": [
+        {
+          "key": "A",
+          "name": "One calling convention",
+          "detail": "Use identical indirect-call layouts with an initialized no-failure result for non-failing callees. Widen only covariant read positions, preserving effects and ownership; writable aliases and contravariant inputs stay checked.",
+          "code": "checks: [fn(Int) -> Int]{double}\nrun_all(checks)   // accepted, no copy"
+        },
+        {
+          "key": "B",
+          "name": "Keep E0638",
+          "detail": "Keep separate conventions and E0638. A caller may explicitly rebuild a container of adapted functions, choosing its visible allocation cost.",
+          "code": "run_all(checks)   // E0638"
+        }
+      ],
+      "comparisons": [
+        {
+          "lang": "Kotlin",
+          "note": "Compiled with Kotlin 2.3.21 on JVM: the widened reference is identical and calling it returns 2. This proves this example, not Jet ABI cost. Primary references: https://kotlinlang.org/api/core/kotlin-stdlib/kotlin.collections/-list/ and https://kotlinlang.org/docs/generics.html#declaration-site-variance.",
+          "code": "fun value(): Int = 2\nfun main() {\n    val checks: List<() -> Int> = listOf(::value)\n    val wide: List<() -> Any> = checks\n    println(checks === wide)\n    println(wide[0]())\n} // JVM output: true, then 2"
+        }
+      ],
+      "rec": "A",
+      "recommendation": {
+        "why": "A removes implicit container rebuilding by unifying indirect-call representations. This may add per-call overhead and needs backend measurements.",
+        "gains": [
+          "Uniform function subtyping.",
+          "No container copies."
+        ],
+        "losses": [
+          {
+            "loss": "Non-failing indirect calls may return an extra failure word.",
+            "mitigation": "Specialize direct calls and measure indirect-call register pressure, code size and runtime on every backend."
+          }
+        ],
+        "whyNot": [
+          {
+            "key": "B",
+            "reason": "B is sound but requires explicit container rebuilding when nested function adaptation is needed."
+          }
+        ],
+        "tradeoff": "One backend change buys uniform function subtyping."
+      },
+      "hybrid": null,
+      "ballotMode": "short",
+      "shortAuthorizedBy": null,
+      "ballotProcessVersion": 5,
+      "reviewPasses": null,
+      "checkInstructions": null,
+      "surface": {
+        "gist": "Should a list of non-failing functions pass where a list of failing ones is expected, by sharing one calling convention?",
+        "lesson": "Standalone function values have a widening adapter; functions already stored inside a container do not. A shared indirect-call convention can remove that container conversion. It may add a failure-result word to non-failing calls. Explicitly mapping a container is also honest when the caller chooses its cost.",
+        "trio": {
+          "current": {
+            "note": "Dev rejects nested failure-layout gaps; the older executable accepted this widening. Do not infer implementation parity.",
+            "code": "// dev: nested function failure mismatch is E0638\n// older executable: non-failing list passed to failing slot"
+          },
+          "wild": {
+            "lang": "Kotlin",
+            "note": "This JVM example widens a covariant List without replacing it. Kotlin documents List<out E> and function-result covariance.",
+            "code": "fun value(): Int = 2\nfun main() {\n    val checks: List<() -> Int> = listOf(::value)\n    val wide: List<() -> Any> = checks\n    println(checks === wide)\n    println(wide[0]())\n} // JVM output: true, then 2"
+          }
+        },
+        "options": [
+          {
+            "key": "A",
+            "name": "One calling convention",
+            "gist": "Use identical indirect-call layouts so read containers widen without rebuilding.",
+            "gains": [
+              "Lists of functions widen with no copy.",
+              "Function subtyping becomes uniform."
+            ],
+            "losses": [
+              "Non-failing indirect calls may pay failure-result overhead."
+            ],
+            "proposed": {
+              "code": "checks: [fn(Int) -> Int]{double}\nrun_all(checks)   // accepted, no copy"
+            }
+          },
+          {
+            "key": "B",
+            "name": "Keep E0638",
+            "gist": "Containers of functions keep refusing to widen; the rule is documented.",
+            "gains": [
+              "No backend change."
+            ],
+            "losses": [
+              "Callers rebuild the container by hand."
+            ],
+            "proposed": {
+              "code": "run_all(checks)   // E0638"
+            }
+          }
+        ],
+        "recommendation": {
+          "rec": "A",
+          "why": "A makes read-container widening uniform without hidden rebuilding. Its calling-convention cost must be measured, not described as free.",
+          "gains": [
+            "Uniform function subtyping.",
+            "No container copies."
+          ],
+          "losses": [
+            {
+              "loss": "Non-failing indirect calls may return an extra failure word.",
+              "mitigation": "Keep direct calls specialized and compare indirect-call code, registers and timing on every backend."
+            }
+          ],
+          "whyNot": [
+            {
+              "key": "B",
+              "reason": "B is sound but requires explicit container rebuilding when nested function adaptation is needed."
+            }
+          ],
+          "tradeoff": "One backend change buys uniform function subtyping."
+        }
+      },
+      "reports": [
+        {
+          "title": "Marks, conversions and type unification pre-build review",
+          "path": "Docs/Audits/2026-11-27-marks-conversions-type-unification-review.md",
+          "note": "Section 2.4 and gaps ballot B6."
+        }
+      ],
+      "draftedBy": "Orchestrator",
+      "reviewedBy": "BallotReview3",
+      "draft": false,
+      "status": "open",
+      "created": "2026-11-28T04:00:03.853Z"
     }
   ],
   "questions": [
@@ -125068,6 +125982,132 @@
     }
   ],
   "events": [
+    {
+      "at": "2026-11-28T04:00:06.329Z",
+      "by": "Orchestrator",
+      "action": "decision.post",
+      "ref": "D-FAIL-FN-ABI1",
+      "note": "reviewed by BallotReview3"
+    },
+    {
+      "at": "2026-11-28T04:00:05.140Z",
+      "by": "BallotReview3",
+      "action": "decision.review",
+      "ref": "D-FAIL-FN-ABI1",
+      "note": "passed"
+    },
+    {
+      "at": "2026-11-28T04:00:03.853Z",
+      "by": "Orchestrator",
+      "action": "decision.add",
+      "ref": "D-FAIL-FN-ABI1",
+      "note": "Failing and non-failing functions share one calling convention, so lists of them widen freely (draft)"
+    },
+    {
+      "at": "2026-11-28T04:00:02.800Z",
+      "by": "Orchestrator",
+      "action": "decision.post",
+      "ref": "D-DOT-STATIC1",
+      "note": "reviewed by BallotReview3"
+    },
+    {
+      "at": "2026-11-28T04:00:01.859Z",
+      "by": "BallotReview3",
+      "action": "decision.review",
+      "ref": "D-DOT-STATIC1",
+      "note": "passed"
+    },
+    {
+      "at": "2026-11-28T04:00:00.853Z",
+      "by": "Orchestrator",
+      "action": "decision.add",
+      "ref": "D-DOT-STATIC1",
+      "note": "A leading-dot call infers its type for any static method that returns the expected type (draft)"
+    },
+    {
+      "at": "2026-11-28T03:59:59.780Z",
+      "by": "Orchestrator",
+      "action": "decision.post",
+      "ref": "D-DYNDATA-ROLE1",
+      "note": "reviewed by BallotReview3"
+    },
+    {
+      "at": "2026-11-28T03:59:58.781Z",
+      "by": "BallotReview3",
+      "action": "decision.review",
+      "ref": "D-DYNDATA-ROLE1",
+      "note": "passed"
+    },
+    {
+      "at": "2026-11-28T03:59:57.844Z",
+      "by": "Orchestrator",
+      "action": "decision.add",
+      "ref": "D-DYNDATA-ROLE1",
+      "note": "Dynamic data uses existing capability traits, not a blanket DynamicData role (draft)"
+    },
+    {
+      "at": "2026-11-28T03:59:56.822Z",
+      "by": "Orchestrator",
+      "action": "decision.post",
+      "ref": "D-VIA-FATE1",
+      "note": "reviewed by BallotReview3"
+    },
+    {
+      "at": "2026-11-28T03:59:55.949Z",
+      "by": "BallotReview3",
+      "action": "decision.review",
+      "ref": "D-VIA-FATE1",
+      "note": "passed"
+    },
+    {
+      "at": "2026-11-28T03:59:55.082Z",
+      "by": "Orchestrator",
+      "action": "decision.add",
+      "ref": "D-VIA-FATE1",
+      "note": "-[via f]> leaves the language once callback pass-through is inferred (draft)"
+    },
+    {
+      "at": "2026-11-28T03:59:54.168Z",
+      "by": "Orchestrator",
+      "action": "decision.post",
+      "ref": "D-WEAK-STALE-WRITE1",
+      "note": "reviewed by BallotReview3"
+    },
+    {
+      "at": "2026-11-28T03:59:53.252Z",
+      "by": "BallotReview3",
+      "action": "decision.review",
+      "ref": "D-WEAK-STALE-WRITE1",
+      "note": "passed"
+    },
+    {
+      "at": "2026-11-28T03:59:52.345Z",
+      "by": "Orchestrator",
+      "action": "decision.add",
+      "ref": "D-WEAK-STALE-WRITE1",
+      "note": "A write through ?. on a freed weak handle is skipped silently, the same on every tier (draft)"
+    },
+    {
+      "at": "2026-11-28T03:59:51.472Z",
+      "by": "Orchestrator",
+      "action": "decision.post",
+      "ref": "D-STR-VIEW-RETIRE1",
+      "note": "reviewed by BallotReview3"
+    },
+    {
+      "at": "2026-11-28T03:59:50.598Z",
+      "by": "BallotReview3",
+      "action": "decision.review",
+      "ref": "D-STR-VIEW-RETIRE1",
+      "note": "passed"
+    },
+    {
+      "at": "2026-11-28T03:59:49.691Z",
+      "by": "Orchestrator",
+      "action": "decision.add",
+      "ref": "D-STR-VIEW-RETIRE1",
+      "note": "Strings return plain String slices; View<str> and string from clauses leave the language (draft)"
+    },
     {
       "at": "2026-11-28T03:50:56.108Z",
       "by": "Orchestrator",
