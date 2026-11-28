@@ -3,7 +3,7 @@
     "version": 4,
     "project": "Jet",
     "nextNum": 7071,
-    "rev": 115363,
+    "rev": 115365,
     "ui": {
       "toggled": [
         "dec-group:syntax",
@@ -65031,6 +65031,11 @@
         {
           "at": "2026-11-28",
           "by": "Orchestrator",
+          "text": "Trigger found by the #7056 worker: its shell carried a hard ulimit -v 4194304 (4 GiB of address space), which systemd-run --scope inherits. When a thread's allocation fails, the compiler deadlocks (the parent's threads in futex wait, the jet-comptime child in a pipe read) instead of exiting. With --threads 1 the same build aborts with 'memory allocation of 119505768 bytes failed'. The defect this card owns is that a failed allocation on a worker thread deadlocks the compile instead of ending it with a clear out-of-memory error. Reproduce with ulimit -v 4194304 and then jet build --profile dev Compiler."
+        },
+        {
+          "at": "2026-11-28",
+          "by": "Orchestrator",
           "text": "Fourth occurrence 2026-11-27 22:50: the seed's dev Compiler build of the #7056 worktree ran 57 min on 2:37 of CPU, with 33 threads in futex wait and the jet-comptime child in anon_pipe_read since its start, holding the shared build lock. jet debug --attach failed with Jet.DebugAttachFailed because the seed copy was kept without its jet.debug, so no stack was captured; seeds will now keep jet.debug beside the binary. Builds now run under timeout 900 so a hang frees the lock by itself."
         }
       ],
@@ -65052,6 +65057,15 @@
           "verifiedBy": null,
           "evidence": "",
           "at": "2026-11-28T02:49:28.342Z"
+        },
+        {
+          "n": 3,
+          "text": "Under ulimit -v 4194304, jet build --profile dev Compiler exits promptly with a clear out-of-memory diagnostic and a nonzero exit code (no deadlock), with both the threaded and --threads 1 paths covered by a case",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-11-28T04:09:20.066Z"
         }
       ],
       "refs": [
@@ -65061,9 +65075,9 @@
       "parentId": null,
       "needsAcceptance": false,
       "created": "2026-11-28T02:49:22.814Z",
-      "updated": "2026-11-28T03:50:56.108Z",
+      "updated": "2026-11-28T04:09:20.066Z",
       "updatedBy": "Orchestrator",
-      "criteriaLastN": 2
+      "criteriaLastN": 3
     },
     {
       "id": "c0sitwb5",
@@ -129187,6 +129201,20 @@
     }
   ],
   "events": [
+    {
+      "at": "2026-11-28T04:09:20.067Z",
+      "by": "Orchestrator",
+      "action": "card.criteria-add",
+      "ref": "c03ewpy6",
+      "note": "#3 Under ulimit -v 4194304, jet build --profile dev Compiler ex"
+    },
+    {
+      "at": "2026-11-28T04:09:18.825Z",
+      "by": "Orchestrator",
+      "action": "card.update",
+      "ref": "c03ewpy6",
+      "note": "logEntry"
+    },
     {
       "at": "2026-11-28T04:01:05.578Z",
       "by": "Orchestrator",
