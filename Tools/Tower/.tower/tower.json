@@ -3,7 +3,7 @@
     "version": 4,
     "project": "Jet",
     "nextNum": 7071,
-    "rev": 115459,
+    "rev": 115460,
     "ui": {
       "toggled": [
         "dec-group:syntax",
@@ -63774,7 +63774,7 @@
       "parentId": null,
       "needsAcceptance": false,
       "created": "2026-11-27T17:33:24.075Z",
-      "updated": "2026-11-28T00:22:21.353Z",
+      "updated": "2026-11-28T05:01:27.463Z",
       "updatedBy": "Orchestrator",
       "criteriaLastN": 6
     },
@@ -131290,6 +131290,181 @@
       "draft": false,
       "status": "open",
       "created": "2026-11-28T04:33:27.196Z"
+    },
+    {
+      "id": "D-GROUP-JUMP1",
+      "cardId": "c0aularf",
+      "group": "concurrency",
+      "title": "A jump out of a task group cancels its unfinished children, joins them, then jumps",
+      "situation": "A task group owns the child tasks started in its body and waits for them at its closing brace. When `break`, `skip`, `return`, or error propagation leaves the body early, the language must say what happens to children that are still running. Today they are waited for, not stopped. The composition-laws audit asks for a defined rule and recommends cancelling them first. We recommend cancel, then join, then jump.",
+      "gist": "When a jump leaves a `task.group` body early, should still-running children be cancelled before the group waits for them?",
+      "lesson": "A jump that leaves a group runs the body's cleanups first. Then the closing brace waits for every child, and then control moves. The open question is whether children still running at that moment are cancelled or allowed to finish.",
+      "explainer": "",
+      "story": "Ana starts two searches in a group and returns as soon as she finds a cached answer. She needs to know whether the return waits for both searches to finish.",
+      "inWild": "async with asyncio.TaskGroup() as tg:\n    tg.create_task(slow())\n    raise Found(item)  # remaining tasks are cancelled, then awaited",
+      "detail": "`Docs/Spec/spec.md:5431-5434` says the group owns and joins every child, and that a cancel of the opening task reaches unfinished children. It does not say what an early jump does to them. `Docs/Spec/composition-laws.md` G8.2 asks for a rule: \"Recommended: cancel the siblings, join them, then jump.\"\n\nThe seed compiler was run once per case. A `break` out of a group, with a child that sleeps 50ms, printed `group 1 cleanup`, `child 1 done`, `child 1 cleanup`, `loop over`. After `return 1`, the child printed before the caller saw 1. After error propagation, the child printed before the caller saw the error. So today every jump joins without cancelling (B). `Examples/Basics/JumpUnwindOrder` covers only already-joined children until this is ratified.\n\nUnder A or C the jump lowering must request cancel of the group's unfinished children before its join, on O0, O1 and O2. A golden must then show the cleanup order with a child that is still running.",
+      "options": [
+        {
+          "key": "A",
+          "name": "Cancel, join, jump",
+          "detail": "Any jump that leaves a group body (`break`, `skip`, `return`, error propagation) runs the body's cleanups, cancels every unfinished child, waits for all children, then transfers control. A normal fall-through to the closing brace is unchanged: it waits without cancelling.",
+          "technical": "Lower each exit edge out of a group body to cancel the group's children before the join, reusing the existing cancel delivery of D-GROUP-CANCEL1. The golden shows a sleeping child observing cancel before the jump completes.",
+          "code": "task.group g {\n    task { search(left) }\n    task { search(right) }\n    if cached == .Val(hit) -> return hit\n}"
+        },
+        {
+          "key": "B",
+          "name": "Join without cancelling",
+          "detail": "Any jump that leaves a group body runs the body's cleanups, waits for every child to finish, then transfers control. This is the live behaviour; the ballot would ratify it in spec.md and composition-laws G8.2.",
+          "technical": "No lowering change. Spec text and a golden with a still-running child.",
+          "code": "task.group g {\n    task { search(left) }\n    if cached == .Val(hit) -> return hit\n}"
+        },
+        {
+          "key": "C",
+          "name": "Cancel only on failure",
+          "detail": "Error propagation out of a group cancels, joins, then propagates. `break`, `skip`, and `return` join without cancelling.",
+          "technical": "Cancel only on the propagation exit edges. Goldens for both kinds of jump.",
+          "code": "task.group g {\n    task { upload(a) }\n    check(b)!\n    if done -> break\n}"
+        }
+      ],
+      "comparisons": [
+        {
+          "lang": "Python",
+          "note": "asyncio.TaskGroup and Trio nurseries cancel on an exception and wait on a normal exit.",
+          "code": "async with asyncio.TaskGroup() as tg:\n    tg.create_task(slow())\n    return item  # waits for slow()"
+        },
+        {
+          "lang": "Swift",
+          "note": "withThrowingTaskGroup cancels the remaining children when the body throws; a returning body awaits them.",
+          "code": "try await withThrowingTaskGroup(of: Int.self) { group in\n    group.addTask { await slow() }\n    throw Found()\n}"
+        }
+      ],
+      "rec": "A",
+      "recommendation": {
+        "why": "The group is the lifetime of its children. Leaving it early ends that lifetime, so the children are cancelled and joined before control moves, like a cancel of the opening task.",
+        "gains": [
+          "One unwinding rule for every jump out of a group."
+        ],
+        "losses": [
+          {
+            "loss": "A jump out while a child has useful work loses that work.",
+            "mitigation": "Join the child (`child.join()`) before the jump, or start it in an outer group."
+          }
+        ],
+        "whyNot": [
+          {
+            "key": "B",
+            "reason": "An early exit would still wait for all remaining work, so leaving the block does not leave its cost."
+          },
+          {
+            "key": "C",
+            "reason": "Two exit rules for one block, chosen by jump kind, is harder to read than one."
+          }
+        ],
+        "tradeoff": "Early exit stops the group's remaining work."
+      },
+      "hybrid": null,
+      "ballotMode": "short",
+      "shortAuthorizedBy": null,
+      "ballotProcessVersion": 5,
+      "reviewPasses": null,
+      "checkInstructions": null,
+      "surface": {
+        "gist": "When a jump leaves a `task.group` body early, should still-running children be cancelled before the group waits for them?",
+        "lesson": "A jump that leaves a group runs the body's cleanups first. Then the closing brace waits for every child, and then control moves. The open question is whether children still running at that moment are cancelled or allowed to finish.",
+        "trio": {
+          "current": {
+            "note": "Seed compiler: the `break` waits for the sleeping child, which finishes normally.",
+            "code": "task.group g {\n    defer { print(\"group cleanup\") }\n    task {\n        time.sleep(50ms)\n        print(\"child done\")\n    }\n    if round == 1 -> break\n}\n// prints: group cleanup, child done"
+          },
+          "wild": {
+            "lang": "Python",
+            "note": "asyncio.TaskGroup cancels the remaining tasks when the body raises, but waits for them when the body exits by `break` or `return`.",
+            "code": "async with asyncio.TaskGroup() as tg:\n    tg.create_task(slow())\n    raise Found(item)  # remaining tasks are cancelled, then awaited"
+          }
+        },
+        "options": [
+          {
+            "key": "A",
+            "name": "Cancel, join, jump",
+            "gist": "Every early exit cancels unfinished children, waits for them, then jumps.",
+            "gains": [
+              "An early `return` does not wait for the other searches.",
+              "One rule, matching a cancel of the task that opened the group."
+            ],
+            "losses": [
+              "Work that a child would have finished is lost when the body jumps out."
+            ],
+            "proposed": {
+              "code": "task.group g {\n    task { search(left) }\n    task { search(right) }\n    if cached == .Val(hit) -> return hit\n}\n// the jump cancels both searches, waits for them, then returns"
+            }
+          },
+          {
+            "key": "B",
+            "name": "Join without cancelling",
+            "gist": "Every early exit waits for every child to finish, then jumps (today's behaviour).",
+            "gains": [
+              "No change to running programs.",
+              "A child's work is never cut short by the body's control flow."
+            ],
+            "losses": [
+              "An early exit waits for the slowest child unless cancelled explicitly."
+            ],
+            "proposed": {
+              "code": "task.group g {\n    task { search(left) }\n    if cached == .Val(hit) -> return hit\n}\n// the jump waits for the search to finish, then returns"
+            }
+          },
+          {
+            "key": "C",
+            "name": "Cancel only on failure",
+            "gist": "Error propagation cancels, joins, then propagates; `break`, `skip`, and `return` join without cancelling.",
+            "gains": [
+              "Matches Python, Trio, Swift and Kotlin: failure stops siblings, normal exit waits."
+            ],
+            "losses": [
+              "Two rules for the same block, chosen by which kind of jump left it."
+            ],
+            "proposed": {
+              "code": "task.group g {\n    task { upload(a) }\n    check(b)!   // fails: upload(a) is cancelled, joined, then the error leaves\n    if done -> break   // upload(a) finishes, then the loop ends\n}"
+            }
+          }
+        ],
+        "recommendation": {
+          "rec": "A",
+          "why": "The group is the lifetime of its children. Leaving it early ends that lifetime, so the children are cancelled and joined before control moves, like a cancel of the opening task.",
+          "gains": [
+            "One unwinding rule for every jump out of a group."
+          ],
+          "losses": [
+            {
+              "loss": "A jump out while a child has useful work loses that work.",
+              "mitigation": "Join the child (`child.join()`) before the jump, or start it in an outer group."
+            }
+          ],
+          "whyNot": [
+            {
+              "key": "B",
+              "reason": "An early exit would still wait for all remaining work, so leaving the block does not leave its cost."
+            },
+            {
+              "key": "C",
+              "reason": "Two exit rules for one block, chosen by jump kind, is harder to read than one."
+            }
+          ],
+          "tradeoff": "Early exit stops the group's remaining work."
+        }
+      },
+      "reports": [
+        {
+          "title": "Composition laws audit",
+          "path": "Docs/Spec/composition-laws.md",
+          "note": "Law 8, gap G8.2."
+        }
+      ],
+      "draftedBy": "Orchestrator",
+      "reviewedBy": null,
+      "draft": true,
+      "status": "open",
+      "created": "2026-11-28T05:01:27.463Z"
     }
   ],
   "questions": [
@@ -133441,6 +133616,13 @@
     }
   ],
   "events": [
+    {
+      "at": "2026-11-28T05:01:27.463Z",
+      "by": "Orchestrator",
+      "action": "decision.add",
+      "ref": "D-GROUP-JUMP1",
+      "note": "A jump out of a task group cancels its unfinished children, joins them, then jumps (draft)"
+    },
     {
       "at": "2026-11-28T04:59:30.410Z",
       "by": "Orchestrator",
