@@ -2,8 +2,8 @@
   "meta": {
     "version": 4,
     "project": "Jet",
-    "nextNum": 7070,
-    "rev": 115278,
+    "nextNum": 7071,
+    "rev": 115281,
     "ui": {
       "toggled": [
         "dec-group:syntax",
@@ -65058,6 +65058,55 @@
       "updated": "2026-11-28T02:49:28.342Z",
       "updatedBy": "Orchestrator",
       "criteriaLastN": 2
+    },
+    {
+      "id": "c0sitwb5",
+      "num": 7070,
+      "title": "A closure that writes a captured local, passed to xs.map, is an internal compiler error (unlowered closure method MapMut)",
+      "body": "Repro (dev compiler batch93-skip-seed, jet run -A): run: fn() { ^count:0; xs:[Int]{1,2}; doubled: xs.map(fn(x){count += 1; x*2}); print(count); print(doubled) } exits 101 with ir.build unlowered: closure method MapMut. Sema accepts the program, so the backend failing on it breaks I2. Found during ballot review of the #7062 writing-closure law.",
+      "kind": "bug",
+      "track": "epoch",
+      "epoch": "G1",
+      "milestoneId": null,
+      "phase": "planning",
+      "priority": "P1",
+      "plan": null,
+      "checkSteps": null,
+      "probe": null,
+      "visualMedia": [],
+      "blockedBy": [],
+      "assignee": null,
+      "log": [],
+      "criteria": [
+        {
+          "n": 1,
+          "text": "xs.map with a closure that writes a captured local lowers on every tier (O0, O1, O2, web) and prints count 2 then [2, 4]; every other closure-taking List method with a writing closure (filter, each, fold and the rest) is covered by the same fix",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-11-28T03:24:07.713Z"
+        },
+        {
+          "n": 2,
+          "text": "A golden example and a case pin the behaviour; or, if the #7062 ballot makes writing closures illegal here, sema rejects the program with a registered diagnostic and UI snapshot instead of reaching the backend",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-11-28T03:24:08.531Z"
+        }
+      ],
+      "refs": [
+        "7062"
+      ],
+      "tags": [],
+      "parentId": null,
+      "needsAcceptance": false,
+      "created": "2026-11-28T03:24:03.160Z",
+      "updated": "2026-11-28T03:24:08.531Z",
+      "updatedBy": "Orchestrator",
+      "criteriaLastN": 2
     }
   ],
   "decisions": [
@@ -125013,6 +125062,27 @@
     }
   ],
   "events": [
+    {
+      "at": "2026-11-28T03:24:08.531Z",
+      "by": "Orchestrator",
+      "action": "card.criteria-add",
+      "ref": "c0sitwb5",
+      "note": "#2 A golden example and a case pin the behaviour; or, if the #7"
+    },
+    {
+      "at": "2026-11-28T03:24:07.713Z",
+      "by": "Orchestrator",
+      "action": "card.criteria-add",
+      "ref": "c0sitwb5",
+      "note": "#1 xs.map with a closure that writes a captured local lowers on"
+    },
+    {
+      "at": "2026-11-28T03:24:03.160Z",
+      "by": "Orchestrator",
+      "action": "card.add",
+      "ref": "c0sitwb5",
+      "note": "A closure that writes a captured local, passed to xs.map, is an internal compiler error (unlowered closure method MapMut)"
+    },
     {
       "at": "2026-11-28T03:10:04.524Z",
       "by": "Orchestrator",
