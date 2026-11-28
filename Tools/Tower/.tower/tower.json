@@ -2,8 +2,8 @@
   "meta": {
     "version": 4,
     "project": "Jet",
-    "nextNum": 7069,
-    "rev": 115272,
+    "nextNum": 7070,
+    "rev": 115275,
     "ui": {
       "toggled": [
         "dec-group:syntax",
@@ -64992,6 +64992,55 @@
       "created": "2026-11-28T01:52:56.037Z",
       "updated": "2026-11-28T01:53:01.252Z",
       "updatedBy": "Orchestrator"
+    },
+    {
+      "id": "c03ewpy6",
+      "num": 7069,
+      "title": "Compiles deadlock intermittently with the comptime child: parent threads all in futex wait, child blocked reading its pipe",
+      "body": "Seen 3 times on 2026-11-27 with batch93-skip-seed during jet build --profile dev Compiler: the parent's 34 threads all sit in futex wait at about 0% CPU (36 s CPU in 11 min), while the idle jet-comptime child blocks in anon_pipe_read. A rerun with --trace completed, which points at a timing-dependent lost wakeup or unanswered request between parent and child. It holds the shared build lock and stalls every other build on the machine. Related design: #6798 (one warm comptime child per compile).",
+      "kind": "task",
+      "track": "epoch",
+      "epoch": "G1",
+      "milestoneId": null,
+      "phase": "planning",
+      "priority": "P1",
+      "plan": null,
+      "checkSteps": null,
+      "probe": null,
+      "visualMedia": [],
+      "blockedBy": [],
+      "assignee": null,
+      "log": [],
+      "criteria": [
+        {
+          "n": 1,
+          "text": "Root cause named with a captured stack of both processes from jet debug (or the recorded gap if jet debug cannot attach), and the parent/child protocol fixed so no request or wakeup is lost",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-11-28T02:49:27.502Z"
+        },
+        {
+          "n": 2,
+          "text": "A stress case runs 50 dev-profile Compiler builds (or 500 comptime-heavy checks) with no stall over 3 minutes on O0 comptime",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-11-28T02:49:28.342Z"
+        }
+      ],
+      "refs": [
+        "6798"
+      ],
+      "tags": [],
+      "parentId": null,
+      "needsAcceptance": false,
+      "created": "2026-11-28T02:49:22.814Z",
+      "updated": "2026-11-28T02:49:28.342Z",
+      "updatedBy": "Orchestrator",
+      "criteriaLastN": 2
     }
   ],
   "decisions": [
@@ -124947,6 +124996,27 @@
     }
   ],
   "events": [
+    {
+      "at": "2026-11-28T02:49:28.342Z",
+      "by": "Orchestrator",
+      "action": "card.criteria-add",
+      "ref": "c03ewpy6",
+      "note": "#2 A stress case runs 50 dev-profile Compiler builds (or 500 co"
+    },
+    {
+      "at": "2026-11-28T02:49:27.502Z",
+      "by": "Orchestrator",
+      "action": "card.criteria-add",
+      "ref": "c03ewpy6",
+      "note": "#1 Root cause named with a captured stack of both processes fro"
+    },
+    {
+      "at": "2026-11-28T02:49:22.814Z",
+      "by": "Orchestrator",
+      "action": "card.add",
+      "ref": "c03ewpy6",
+      "note": "Compiles deadlock intermittently with the comptime child: parent threads all in futex wait, child blocked reading its pipe"
+    },
     {
       "at": "2026-11-28T02:30:36.972Z",
       "by": "Orchestrator",
