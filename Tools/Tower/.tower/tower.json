@@ -3,7 +3,7 @@
     "version": 4,
     "project": "Jet",
     "nextNum": 7071,
-    "rev": 115470,
+    "rev": 115472,
     "ui": {
       "toggled": [
         "dec-group:syntax",
@@ -57970,6 +57970,11 @@
       "assignee": null,
       "log": [
         {
+          "at": "2026-11-28",
+          "by": "Orchestrator",
+          "text": "jet perf gaps found while profiling #7059 String cells: (1) the text view lists only Jet lines plus the top 8 non-Jet functions, so a full per-function self-sample list needs jq on the trace; (2) runtime helpers get no inclusive (callee) attribution; (3) --frames=all is a view flag only, perf run rejects it, so generated frames are not kept; (4) --instructions=NAME needs the unit. prefix for runtime functions and the error shows that only by example; (5) sample counts swing about 2x on a loaded machine, with no load warning."
+        },
+        {
           "at": "2026-11-24",
           "by": "Orchestrator",
           "text": "Reopened: four dogfooding frictions found 2026-11-24 while diagnosing the LSP workspace/symbol crash (c37-c40)."
@@ -58529,7 +58534,7 @@
       "parentId": null,
       "needsAcceptance": false,
       "created": "2026-11-20T00:56:36.847Z",
-      "updated": "2026-11-25T15:53:11.095Z",
+      "updated": "2026-11-28T07:40:37.729Z",
       "updatedBy": "Orchestrator",
       "criteriaLastN": 44
     },
@@ -64376,6 +64381,11 @@
         {
           "at": "2026-11-28",
           "by": "Orchestrator",
+          "text": "c2 part 3 built (3 patches; they land after #7047 converts them). Profile (jet perf, O2): push lost 41% to the temporary text for s += \"{x}\", 35% to the append/growth chain and 18% to integer display overflow checks; atomic RC is at most 4% in every cell, so D2 thread-local counts is dropped (no crossing census needed). Fixes: interpolated append writes straight into the owner (new runtime reopen exports), in-place sink room when the owner is sole with spare capacity, and wrapping integer digits. Median of 7 vs Rust/Go: push 298->150 ms (Rust 114, Go 67); short 291->275 ms, 409 MB (Rust 174/167 MB); slices 47->40 (21/32); views 45->39 (20/34); bslice 44->35 (19/33). Second programs: report 262->171, numbers 226->196. The peer floor is still unmet; the short-cell RSS and slice-block allocation need layout A (audit section 10). Not fixed: += on a String field still concatenates the whole text."
+        },
+        {
+          "at": "2026-11-28",
+          "by": "Orchestrator",
           "text": "c2 part 2 landed on dev 81400545a65: a String view that is copied or made owned now shares its root text instead of copying; byte_slice is a runtime route that shares bytes on character-boundary cuts and otherwise makes one repaired copy with no temporary; the web/native HiddenCopyInLoop reason no longer fires for owned views. Paired benchmarks (median of 7, peak RSS) vs Rust 1.99 -O3 and Go 1.26.7: views 46 ms/47 MB (before 62/72) vs Rust 20/24 and Go 30/62; slices 48/47 (before 63/73); short strings 293 ms/410 MB unchanged vs Rust 181/167 and Go 171/205; push 307 ms vs Rust 115 and Go 63. Jet is still 1.4-4.9x slower per cell, so the peer floor is not met; short strings need layout A (plan in the audit, section 10). Still open in c2: layout A, thread-local counts (left out because the crossing census also has to cover runtime-internal hand-offs), and the push cost."
         },
         {
@@ -64470,7 +64480,7 @@
       "parentId": null,
       "needsAcceptance": false,
       "created": "2026-11-27T19:19:25.407Z",
-      "updated": "2026-11-28T03:59:54.168Z",
+      "updated": "2026-11-28T07:40:36.917Z",
       "updatedBy": "Orchestrator",
       "criteriaLastN": 6
     },
@@ -133636,6 +133646,20 @@
     }
   ],
   "events": [
+    {
+      "at": "2026-11-28T07:40:37.729Z",
+      "by": "Orchestrator",
+      "action": "card.update",
+      "ref": "c00ni11n",
+      "note": "logEntry"
+    },
+    {
+      "at": "2026-11-28T07:40:36.917Z",
+      "by": "Orchestrator",
+      "action": "card.update",
+      "ref": "c0nnf642",
+      "note": "logEntry"
+    },
     {
       "at": "2026-11-28T06:55:30.998Z",
       "by": "Orchestrator",
