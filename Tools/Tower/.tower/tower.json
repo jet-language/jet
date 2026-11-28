@@ -3,7 +3,7 @@
     "version": 4,
     "project": "Jet",
     "nextNum": 7071,
-    "rev": 115350,
+    "rev": 115363,
     "ui": {
       "toggled": [
         "dec-group:syntax",
@@ -64900,8 +64900,8 @@
       "parentId": null,
       "needsAcceptance": false,
       "created": "2026-11-27T21:28:10.503Z",
-      "updated": "2026-11-28T04:00:52.451Z",
-      "updatedBy": "BallotReview3",
+      "updated": "2026-11-28T04:00:56.860Z",
+      "updatedBy": "Orchestrator",
       "criteriaLastN": 3
     },
     {
@@ -64979,7 +64979,7 @@
       "parentId": null,
       "needsAcceptance": false,
       "created": "2026-11-28T01:52:46.426Z",
-      "updated": "2026-11-28T01:53:03.450Z",
+      "updated": "2026-11-28T04:01:05.578Z",
       "updatedBy": "Orchestrator",
       "criteriaLastN": 4
     },
@@ -126391,9 +126391,651 @@
       ],
       "draftedBy": "Orchestrator",
       "reviewedBy": "BallotReview3",
-      "draft": true,
+      "draft": false,
       "status": "open",
       "created": "2026-11-28T04:00:51.412Z"
+    },
+    {
+      "id": "D-VALIDATE-NAME1",
+      "cardId": "c0im9zg7",
+      "group": "library",
+      "title": "The outside-context check builder becomes FieldErrors.collect so the trait can be Validate",
+      "situation": "",
+      "gist": "Should the external check builder become FieldErrors.collect, or remain a factory on Validate?",
+      "lesson": "A trait and a builder need not be the same type to share an entry point. A names the factory FieldErrors.collect and reserves Validate for the trait. B keeps Validate.over as a trait-level factory returning a separate builder. Both preserve field checks and accumulated errors.",
+      "explainer": "",
+      "story": "Hana wants to collect external form checks without confusing the builder value with the trait implemented by her form.",
+      "inWild": "// form.validate() returns a Result with ValidationErrors",
+      "detail": "Compiler/JetFoundation/Data/Syntax/PackageFiles.jet, TYPE_VALIDATE and TYPE_VALIDATE_BUILDER, distinguishes the public factory name Validate from the internal builder type __JetValidate. Docs/Spec/spec.md:1355-1363 defines accumulated checks and field paths. The baseline rejected at: missing on Signup with Jet.UnknownValidateField, confirming the field-name check. Its rejection is not evidence that the proposed new factory exists.\n\nB is corrected to a real trait-level factory returning a distinct builder, not a merger of trait and builder types. It must use the existing generic/static-member rules and preserve the same builder semantics. Under both options checks retain their order, pure-condition restrictions, real-field path checking and finish result: the validated T or accumulated [FieldError] failure. The trait extraction cannot silently remove those guarantees. A migrates resolved builtin references, including imports and qualified calls; it does not replace arbitrary text named Validate.over. No compatibility alias remains after cutover.",
+      "options": [
+        {
+          "key": "A",
+          "name": "Separate factory name",
+          "detail": "Move the builtin entry point to FieldErrors.collect. Preserve the separate builder and all check/finish behavior; migrate resolved calls without touching user-defined names.",
+          "code": "// proposed\nFieldErrors.collect(form).check(true, at: email, \"invalid\").finish()"
+        },
+        {
+          "key": "B",
+          "name": "Trait factory, separate builder",
+          "detail": "Let Validate.over be a trait-level factory using existing member rules and returning a distinct builder. Preserve the same accumulated checks; do not turn the trait itself into builder state.",
+          "code": "// proposed trait factory, separate returned builder\nValidate.over(form).check(true, at: email, \"invalid\").finish()"
+        }
+      ],
+      "comparisons": [
+        {
+          "lang": "Rust",
+          "note": "validator documents a Validate trait, ValidationError and ValidationErrors. It illustrates separate roles, not Jet's factory syntax. https://docs.rs/validator/latest/validator/",
+          "code": "// form.validate() returns a Result with ValidationErrors"
+        }
+      ],
+      "rec": "A",
+      "recommendation": {
+        "why": "A distinct builder entry name separates collecting checks from implementing a type contract.",
+        "gains": [
+          "Clearer roles without another validation mechanism."
+        ],
+        "losses": [
+          {
+            "loss": "Renaming calls requires name-resolution-aware migration.",
+            "mitigation": "Rewrite only references resolved to the builtin factory, preserving checks, field paths and finish results; leave user names alone."
+          }
+        ],
+        "whyNot": [
+          {
+            "key": "B",
+            "reason": "B is viable and does not merge types, but puts builder discovery into the trait namespace."
+          }
+        ],
+        "tradeoff": "A factory rename makes the role distinction visible."
+      },
+      "hybrid": null,
+      "ballotMode": "short",
+      "shortAuthorizedBy": null,
+      "ballotProcessVersion": 5,
+      "reviewPasses": null,
+      "checkInstructions": null,
+      "surface": {
+        "gist": "Should the external check builder become FieldErrors.collect, or remain a factory on Validate?",
+        "lesson": "A trait and a builder need not be the same type to share an entry point. A names the factory FieldErrors.collect and reserves Validate for the trait. B keeps Validate.over as a trait-level factory returning a separate builder. Both preserve field checks and accumulated errors.",
+        "trio": {
+          "current": {
+            "note": "Validate.over starts an external check builder with checked field names.",
+            "code": "Validate.over(form).check(true, at: email, \"invalid\").finish()"
+          },
+          "wild": {
+            "lang": "Rust",
+            "note": "validator exposes a Validate trait and a distinct ValidationErrors collection.",
+            "code": "// form.validate() returns a Result with ValidationErrors"
+          }
+        },
+        "options": [
+          {
+            "key": "A",
+            "name": "Separate factory name",
+            "gist": "Rename the entry point to FieldErrors.collect; keep Validate as the trait.",
+            "gains": [
+              "The builder and type contract have distinct entry names."
+            ],
+            "losses": [
+              "Existing resolved builder calls change."
+            ],
+            "proposed": {
+              "code": "// proposed\nFieldErrors.collect(form).check(true, at: email, \"invalid\").finish()"
+            }
+          },
+          {
+            "key": "B",
+            "name": "Trait factory, separate builder",
+            "gist": "Validate.over returns a separate builder; the trait itself is not the builder.",
+            "gains": [
+              "One discoverable validation namespace.",
+              "No factory call-site rename."
+            ],
+            "losses": [
+              "The trait API also owns a builder factory."
+            ],
+            "proposed": {
+              "code": "// proposed trait factory, separate returned builder\nValidate.over(form).check(true, at: email, \"invalid\").finish()"
+            }
+          }
+        ],
+        "recommendation": {
+          "rec": "A",
+          "why": "A distinct builder entry name separates collecting checks from implementing a type contract.",
+          "gains": [
+            "Clearer roles without another validation mechanism."
+          ],
+          "losses": [
+            {
+              "loss": "Renaming calls requires name-resolution-aware migration.",
+              "mitigation": "Rewrite only references resolved to the builtin factory, preserving checks, field paths and finish results; leave user names alone."
+            }
+          ],
+          "whyNot": [
+            {
+              "key": "B",
+              "reason": "B is viable and does not merge types, but puts builder discovery into the trait namespace."
+            }
+          ],
+          "tradeoff": "A factory rename makes the role distinction visible."
+        }
+      },
+      "reports": [
+        {
+          "title": "DSL, library and FFI extraction pre-build review",
+          "path": "Docs/Audits/2026-11-27-dsl-library-ffi-extraction-review.md",
+          "note": "Section 2.1, attack 1, and ballot B1."
+        }
+      ],
+      "draftedBy": "Orchestrator",
+      "reviewedBy": "BallotReview3",
+      "draft": false,
+      "status": "open",
+      "created": "2026-11-28T04:00:55.011Z"
+    },
+    {
+      "id": "D-DISJOINT-EDIT1",
+      "cardId": "c0tcufgj",
+      "group": "library",
+      "title": "One method edits distinct entries of a list, map or pool at once",
+      "situation": "",
+      "gist": "Should lists, maps and pools share one disjoint-edit method, instead of pool-only `edit_pair` and `edit_many`?",
+      "lesson": "Simultaneous writes need proof that entries differ. Lists, maps and typed stores share that need. One proposed method can check disjointness once and return checked windows; the owner cannot invalidate them while they live.",
+      "explainer": "",
+      "story": "Kim writes a battle loop where one monster hits another in the same pool. She wants write access to both entries without copying either.",
+      "inWild": "let [a, b] = v.get_disjoint_mut([i, j])?;\nb.hp -= a.attack;",
+      "detail": "Compiler/JetIR/Source/BuildPools.jet, ir_pool_slot_address:274-307, provides checked store indexing. Examples/Memory/Views/ReturnedViews.jet demonstrates owner-bound View<T> returns, not an existing dynamic split API. The ratified store name is Slots<T>. The companion provenance and stale-lookup ballots remain independent; capacity-sized indices and append-only generation removal apply unchanged.\n\nA proposes edit_disjoint(keys) on lists, maps and Slots. Evaluate owner and keys once in source order. Validate all bounds, membership and liveness in requested order before checking duplicate resolved entries. Invalid keys follow indexing failure, never insertion. After successful validation, duplicates return None, including distinct map keys equal under the key relation. Statically foreign IDs are errors; runtime identity follows the provenance ballot. Empty input succeeds with an empty result.\n\nReturn an optional collection of ordinary owner-bound writable views in requested order, not a new reference kind or owning T copies. Expose no windows until all checks pass; key-evaluation effects are not rolled back. The owner cannot grow, remove, rehash or otherwise invalidate entries while windows live. This proposes compiler-backed splitting, not unchecked library aliases or an existing API. No universal one-comparison cost is claimed.\n\nB uses the same validation, authority and lifetime laws for its pair/many store methods. C uses sequential edits; simple swaps of copyable fields need not deep-copy whole entries. Rust slices use Result for overlap or bad bounds, so None for duplicates is Jet policy rather than identical Rust behavior.",
+      "options": [
+        {
+          "key": "A",
+          "name": "One method for every owner",
+          "detail": "Proposed edit_disjoint(keys) validates once, returns owner-bound write windows in key order, or None for duplicate resolved entries. Other invalid keys retain indexing failure. Structural invalidation is forbidden until the windows expire.",
+          "code": "// proposed: windows on distinct entries, None if two keys match\npair: pool.edit_disjoint([x, y])"
+        },
+        {
+          "key": "B",
+          "name": "Pool-only edit_pair and edit_many",
+          "detail": "Add pair/many methods only to Slots, under the same validation and ownership laws as A. Limit the first implementation to stores, without promising a matching list/map API.",
+          "code": "// proposed by the card\npair: pool.edit_pair(x, y)"
+        },
+        {
+          "key": "C",
+          "name": "No disjoint edits",
+          "detail": "Keep today: read what you need from one entry, then write the other.",
+          "code": "attack: pool[x].attack\npool[y].hp -= attack"
+        }
+      ],
+      "comparisons": [
+        {
+          "lang": "Rust",
+          "note": "Rust slice get_disjoint_mut was stabilized in 1.86 and returns Result for overlap or bad bounds. https://doc.rust-lang.org/std/primitive.slice.html#method.get_disjoint_mut",
+          "code": "let [a, b] = v.get_disjoint_mut([i, j])?;\nb.hp -= a.attack;"
+        }
+      ],
+      "rec": "A",
+      "recommendation": {
+        "why": "One method gives lists, maps and typed stores the same checked-disjointness rule without two store-only names.",
+        "gains": [
+          "One method across lists, maps and pools.",
+          "One result for equal keys on every tier."
+        ],
+        "losses": [
+          {
+            "loss": "A new method name joins Core.",
+            "mitigation": "Add one general method rather than the two store-only names proposed by the card."
+          }
+        ],
+        "whyNot": [
+          {
+            "key": "B",
+            "reason": "B limits the initial work to stores, but leaves two names and no common list/map contract."
+          },
+          {
+            "key": "C",
+            "reason": "C cannot hold simultaneous windows, although sequential edits suffice for some simple transfers."
+          }
+        ],
+        "tradeoff": "One general method instead of two pool-only ones."
+      },
+      "hybrid": null,
+      "ballotMode": "short",
+      "shortAuthorizedBy": null,
+      "ballotProcessVersion": 5,
+      "reviewPasses": null,
+      "checkInstructions": null,
+      "surface": {
+        "gist": "Should lists, maps and pools share one disjoint-edit method, instead of pool-only `edit_pair` and `edit_many`?",
+        "lesson": "Simultaneous writes need proof that entries differ. Lists, maps and typed stores share that need. One proposed method can check disjointness once and return checked windows. The result must preserve the owner's authority and forbid invalidating structural changes while those windows live.",
+        "trio": {
+          "current": {
+            "note": "This sequential example does not hold simultaneous write windows.",
+            "code": "attack: pool[x].attack\npool[y].hp -= attack"
+          },
+          "wild": {
+            "lang": "Rust",
+            "note": "Rust slices offer checked simultaneous mutable access; overlap or bad bounds returns an error.",
+            "code": "let [a, b] = v.get_disjoint_mut([i, j])?;\nb.hp -= a.attack;"
+          }
+        },
+        "options": [
+          {
+            "key": "A",
+            "name": "One method for every owner",
+            "gist": "A proposed `edit_disjoint` gives write windows on distinct entries of any list, map or pool.",
+            "gains": [
+              "One rule for lists, maps and pools.",
+              "Equal keys fail the same way on every tier."
+            ],
+            "losses": [
+              "A new method name to learn."
+            ],
+            "proposed": {
+              "code": "// proposed: windows on distinct entries, None if two keys match\npair: pool.edit_disjoint([x, y])"
+            }
+          },
+          {
+            "key": "B",
+            "name": "Pool-only edit_pair and edit_many",
+            "gist": "Add `edit_pair` and `edit_many` only to the typed store.",
+            "gains": [
+              "Smallest change for the pool card."
+            ],
+            "losses": [
+              "Lists and maps still lack a shared disjoint-edit contract.",
+              "Two public names distinguish fixed and variable arity."
+            ],
+            "proposed": {
+              "code": "// proposed by the card\npair: pool.edit_pair(x, y)"
+            }
+          },
+          {
+            "key": "C",
+            "name": "No disjoint edits",
+            "gist": "Edit one entry at a time and copy values between steps.",
+            "gains": [
+              "No new API."
+            ],
+            "losses": [
+              "Some transfers need staging or cannot move entries directly."
+            ],
+            "proposed": {
+              "code": "attack: pool[x].attack\npool[y].hp -= attack"
+            }
+          }
+        ],
+        "recommendation": {
+          "rec": "A",
+          "why": "One method gives lists, maps and typed stores the same disjointness rule without adding two store-only names.",
+          "gains": [
+            "One method across lists, maps and pools.",
+            "One result for equal keys on every tier."
+          ],
+          "losses": [
+            {
+              "loss": "A new method name joins Core.",
+              "mitigation": "Add one general method rather than the two store-only names proposed by the card."
+            }
+          ],
+          "whyNot": [
+            {
+              "key": "B",
+              "reason": "B limits the initial work to stores, but leaves two names and no common list/map contract."
+            },
+            {
+              "key": "C",
+              "reason": "C cannot hold simultaneous windows, although sequential edits suffice for some simple transfers."
+            }
+          ],
+          "tradeoff": "One general method instead of two pool-only ones."
+        }
+      },
+      "reports": [
+        {
+          "title": "Zero-magic memory trio pre-build review",
+          "path": "Docs/Audits/2026-11-27-zero-magic-memory-trio-review.md",
+          "note": "Section 5.2 item 3 and verdict ballot (iv)."
+        }
+      ],
+      "draftedBy": "Orchestrator",
+      "reviewedBy": "BallotReview3",
+      "draft": false,
+      "status": "open",
+      "created": "2026-11-28T04:00:57.891Z"
+    },
+    {
+      "id": "D-POOL-CROSS-ID1",
+      "cardId": "c0tcufgj",
+      "group": "library",
+      "title": "Store provenance is checked independently of index width and removal generations",
+      "situation": "",
+      "gist": "How should IDs reject use with the wrong store while allowing narrow, generation-free layouts?",
+      "lesson": "Index width follows capacity. Removal generations detect reused slots, not store identity. Append-only stores omit generations. A proves store identity statically where possible and checks a nonreused tag otherwise. B always carries that tag. C permits safe but wrong cross-store reads.",
+      "explainer": "",
+      "story": "Two levels contain the same entity type. Their equal-sized indices must not make an ID from one level select an entity in the other.",
+      "inWild": "new_key_type! { struct PlayerKey; }",
+      "detail": "Compiler/JetIR/Source/BuildPools.jet, ir_pool_id_carrier:50-56, uses two I64 words. ir_pool_fresh_generation:117-142 embeds a store tag in the generation word's high 32 bits; ir_pool_add uses it. The all-zero-generation claim was stale for dev. Minting has no explicit exhaustion guard, so no unbounded guarantee is claimed.\n\nThe older baseline's two-store probe printed 10, 20, then 20 when the final lookup used the first store's ID on the second. That wrong-entry observation is not dev parity: dev's lowering compares the embedded tag. No newer compiler was built.\n\nThe owner's criteria require a capacity-sized unsigned index: capacity 1024 uses U16. Append-only stores have no removal generation. Drop bounds checks only when the ID range fits capacity. Keep separate live-entry or initialization checks unless also proved unnecessary; bounds and liveness are different facts.\n\nA strengthens the audit's seed proposal: prove store-dependent provenance without new written syntax, rejecting statically foreign IDs. Erased provenance or several possible owners require a checked tag. Append-only alone does not permit dropping it. Escaping IDs retain either their owning-store relation or that tag, never silently becoming unbranded integers.\n\nA/B mint tags uniquely across threads and never reuse one while any ID could survive. Stop before tag wrap; retire a slot before generation wrap. Moves preserve identity; independent copies mint a new identity, leaving existing IDs tied to the original, without implicit graph remapping. Persisted or transferred IDs need verified store rebinding or rejection; a process-local tag alone is not durable identity.\n\nReport index, optional generation, optional tag and alignment separately. Fully proved append-only access may need only address computation and a load. The ratified store is Slots<T>; mem.Pool remains the allocator. B always carries a tag, simplifying escaping-ID rules at a byte/comparison cost. C drops cross-store identity guarantees but retains memory safety and removal stale checks. No collision estimate is a guarantee.",
+      "options": [
+        {
+          "key": "A",
+          "name": "Prove or check provenance",
+          "detail": "Track the owning store statically; use a checked nonreused tag on erased provenance. Stop before tag exhaustion. Omit generations only for append-only stores.",
+          "code": "// narrow index + only the unproved identity/removal facts"
+        },
+        {
+          "key": "B",
+          "name": "Always carry a tag",
+          "detail": "Use a capacity-sized index plus a nonreused tag, and a generation only for removal. Stop before either namespace wraps.",
+          "code": "// index + store tag + optional removal generation"
+        },
+        {
+          "key": "C",
+          "name": "No store-identity guarantee",
+          "detail": "Retain memory-safe indexing but document that a foreign same-type ID may select an unrelated live entry.",
+          "code": "// no cross-store identity guarantee"
+        }
+      ],
+      "comparisons": [
+        {
+          "lang": "Rust",
+          "note": "slotmap documents unspecified cross-map use and offers distinct key types. See https://docs.rs/slotmap/latest/slotmap/.",
+          "code": "new_key_type! { struct PlayerKey; }"
+        }
+      ],
+      "rec": "A",
+      "recommendation": {
+        "why": "Reviewed A strengthens the audit's seed idea to a guarantee and accommodates the owner's capacity and append-only requirements.",
+        "gains": [
+          "Small proven IDs and checked identity."
+        ],
+        "losses": [
+          {
+            "loss": "Provenance analysis is required.",
+            "mitigation": "Use runtime tags when static provenance cannot be retained; never silently erase both."
+          }
+        ],
+        "whyNot": [
+          {
+            "key": "B",
+            "reason": "Always pays runtime tag cost."
+          },
+          {
+            "key": "C",
+            "reason": "Allows silent wrong-entry selection."
+          }
+        ],
+        "tradeoff": "Static proofs eliminate only checks they actually establish."
+      },
+      "hybrid": null,
+      "ballotMode": "short",
+      "shortAuthorizedBy": null,
+      "ballotProcessVersion": 5,
+      "reviewPasses": null,
+      "checkInstructions": null,
+      "surface": {
+        "gist": "How should IDs reject wrong-store use while allowing narrow, generation-free layouts?",
+        "lesson": "Capacity controls index width. Removal controls generations. Store identity is a separate fact. Prove it statically or check a nonreused tag; append-only alone does not prove it.",
+        "trio": {
+          "current": {
+            "note": "Dev already embeds a store tag in its generation word.",
+            "code": "// BuildPools.ir_pool_fresh_generation:\n// generation = store_tag << 32"
+          },
+          "wild": {
+            "lang": "Rust",
+            "note": "slotmap supports distinct key types; using a key with a different same-key-type map is safe but unspecified.",
+            "code": "new_key_type! { struct PlayerKey; }"
+          }
+        },
+        "options": [
+          {
+            "key": "A",
+            "name": "Prove or check provenance",
+            "gist": "Use a static store relation, otherwise a checked tag.",
+            "gains": [
+              "No silent cross-store reads.",
+              "Proven IDs omit tag bytes."
+            ],
+            "losses": [
+              "Escaping IDs need provenance tracking."
+            ],
+            "proposed": {
+              "code": "// proposed: foreign known owner is a type error\n// erased owner requires a checked store tag"
+            }
+          },
+          {
+            "key": "B",
+            "name": "Always carry a tag",
+            "gist": "Every ID carries a nonreused runtime store tag.",
+            "gains": [
+              "Simple runtime identity rule."
+            ],
+            "losses": [
+              "Extra bytes even for proven owners."
+            ],
+            "proposed": {
+              "code": "// ID layout: index + store tag\n// + removal generation only when needed"
+            }
+          },
+          {
+            "key": "C",
+            "name": "No store-identity guarantee",
+            "gist": "Allow same-type cross-store IDs with documented unspecified selection.",
+            "gains": [
+              "No provenance overhead."
+            ],
+            "losses": [
+              "May select the wrong entry."
+            ],
+            "proposed": {
+              "code": "// foreign same-type ID may select an unrelated entry"
+            }
+          }
+        ],
+        "recommendation": {
+          "rec": "A",
+          "why": "A preserves the small proven layout without treating identity collisions as acceptable.",
+          "gains": [
+            "Narrow layouts with checked identity."
+          ],
+          "losses": [
+            {
+              "loss": "Escaping IDs need provenance tracking.",
+              "mitigation": "Retain the owner relation, or carry a checked tag; reject erasure that does neither."
+            }
+          ],
+          "whyNot": [
+            {
+              "key": "B",
+              "reason": "B pays tag cost even when the owner is statically known."
+            },
+            {
+              "key": "C",
+              "reason": "C permits silent wrong-entry selection."
+            }
+          ],
+          "tradeoff": "Stronger provenance analysis buys smaller proven IDs."
+        }
+      },
+      "reports": [
+        {
+          "title": "Zero-magic memory trio pre-build review",
+          "path": "Docs/Audits/2026-11-27-zero-magic-memory-trio-review.md",
+          "note": "Section 5.2 item 2; reviewed against the later capacity criteria and dev store tags."
+        }
+      ],
+      "draftedBy": "Orchestrator",
+      "reviewedBy": "BallotReview3",
+      "draft": false,
+      "status": "open",
+      "created": "2026-11-28T04:01:00.726Z"
+    },
+    {
+      "id": "D-POOL-STALE-GET1",
+      "cardId": "c0tcufgj",
+      "group": "library",
+      "title": "pool[id] stops on a stale ID, and pool.get(id) is the optional form",
+      "situation": "",
+      "gist": "Should `pool[id]` keep stopping on a stale ID, with `pool.get(id)` returning an optional for code that expects removal?",
+      "lesson": "Plain indexing stops on a removed entry. An optional lookup could use an explicit get method or the card's shorter guarded-index form. A keeps optional lookup independent of the following projection; B is shorter but makes lookup depend on that context.",
+      "explainer": "",
+      "story": "Sam stores a monster ID in a quest, and the monster may die first. He wants one short read that gives `None` when it is gone.",
+      "inWild": "let name = sm.get(bob).map(|p| &p.name); // None if removed\nlet hp = sm[bob].hp;                     // panics if removed",
+      "detail": "Compiler/JetIR/Source/BuildPools.jet, ir_pool_slot_address:274-307, stops on stale lookup; ir_pool_find:181-198 checks bounds and generation. MathLayout.jet, OP_OPTIONAL_CHAIN:769-771, defines optional members. The older baseline's PoolStaleID example stopped as expected, but its has probe failed UnknownFunction even though dev ir_pool_method:87-89 implements has. A proposes get, not an already implemented method.\n\nThe ratified store is Slots<T>; mem.Pool is the allocator. Capacity-sized indices, no append-only removal generation and removal of bounds checks proved unnecessary apply to index, get and has. Provenance follows its companion ballot independently of generations. Missing, removed or foreign runtime-tagged IDs give None under get; statically foreign branded IDs are errors. Plain indexing stops on invalid runtime IDs. Capacity alone does not make an uninitialized entry readable.\n\nUnder A, get returns an optional owner-backed place, not an owned T copy. Projections retain ordinary authority and lifetime checks; writes mutate stored entries, never temporaries. The owner cannot grow, remove or invalidate an outstanding window. Optional writes follow guarded-write evaluation, including one lookup and stale-side-effect suppression. No raw reference escapes. B uses these same place and evaluation laws with its guarded-index surface.\n\nA has-then-index fix needs proof that no mutation, concurrency or intervening effect invalidates the check. Preserve evaluation count. C remains useful where stability is guaranteed; it is not inherently racy. B's guarded-index spelling is distinguishable, not inherently an I8 violation. A is preferred because optional lookup is explicit and composable. No answer changes plain indexing.",
+      "options": [
+        {
+          "key": "A",
+          "name": "Index stops; get is optional",
+          "detail": "Indexing stops on an invalid runtime ID. get returns an optional owner-backed place with normal read/write authority and lifetime checking, not an owning T copy. Missing and stale IDs give None; statically foreign branded IDs are errors.",
+          "code": "print(pool[bob].name)                // stops if bob was removed\nprint(pool.get(bob)?.name ?? \"gone\")"
+        },
+        {
+          "key": "B",
+          "name": "Index turns optional before ?.",
+          "detail": "A guarded projection immediately after indexing requests optional lookup, under A's same authority, lifetime and evaluation laws. Plain indexing still stops. The shorter surface trades away an independently named optional lookup.",
+          "code": "print(people[bob]?.name ?? \"gone\")"
+        },
+        {
+          "key": "C",
+          "name": "Keep today",
+          "detail": "No optional form. Code that expects removal checks `has` and then indexes.",
+          "code": "if pool.has(bob) -> print(pool[bob].name)"
+        }
+      ],
+      "comparisons": [
+        {
+          "lang": "Rust",
+          "note": "slotmap indexing panics on a stale key, and `get` returns an `Option`; see https://docs.rs/slotmap/latest/slotmap/struct.SlotMap.html#method.get.",
+          "code": "let name = sm.get(bob).map(|p| &p.name); // None if removed\nlet hp = sm[bob].hp;                     // panics if removed"
+        }
+      ],
+      "rec": "A",
+      "recommendation": {
+        "why": "An explicit get makes optional lookup usable on its own, without changing indexing according to the next operator. It borrows the entry rather than copying T.",
+        "gains": [
+          "One meaning per spelling.",
+          "No new operator rule."
+        ],
+        "losses": [
+          {
+            "loss": "Optional reads are a few characters longer.",
+            "mitigation": "Offer get fixes only when ownership facts prove equivalent evaluation and no intervening invalidation."
+          }
+        ],
+        "whyNot": [
+          {
+            "key": "B",
+            "reason": "B is shorter, but ties optional lookup to guarded projection instead of exposing an independent optional result."
+          },
+          {
+            "key": "C",
+            "reason": "C adds no API but usually checks twice and separates the check from use; it is valid when stability is proved."
+          }
+        ],
+        "tradeoff": "Slightly longer optional reads buy one meaning per spelling."
+      },
+      "hybrid": null,
+      "ballotMode": "short",
+      "shortAuthorizedBy": null,
+      "ballotProcessVersion": 5,
+      "reviewPasses": null,
+      "checkInstructions": null,
+      "surface": {
+        "gist": "Should `pool[id]` keep stopping on a stale ID, with `pool.get(id)` returning an optional for code that expects removal?",
+        "lesson": "Plain indexing stops on a removed entry. An optional lookup could use an explicit get method or the card's shorter guarded-index form. A keeps optional lookup independent of the following projection; B is shorter but makes lookup depend on that context.",
+        "trio": {
+          "current": {
+            "note": "A stale index stops today; the ratified `pool.has(id)` checks first.",
+            "code": "if pool.has(bob) -> print(pool[bob].name)"
+          },
+          "wild": {
+            "lang": "Rust",
+            "note": "slotmap indexing panics on an invalid key; get returns an optional borrowed value.",
+            "code": "let name = sm.get(bob).map(|p| &p.name); // None if removed\nlet hp = sm[bob].hp;                     // panics if removed"
+          }
+        },
+        "options": [
+          {
+            "key": "A",
+            "name": "Index stops; get is optional",
+            "gist": "`pool[id]` stops on a stale ID; `pool.get(id)` returns an optional owner-backed place, not an owning T copy.",
+            "gains": [
+              "Each meaning has one spelling.",
+              "Reuses `?.` and `??` from optionals."
+            ],
+            "losses": [
+              "`.get(id)` is longer than an index."
+            ],
+            "proposed": {
+              "code": "print(pool[bob].name)                // stops if bob was removed\nprint(pool.get(bob)?.name ?? \"gone\")"
+            }
+          },
+          {
+            "key": "B",
+            "name": "Index turns optional before ?.",
+            "gist": "`people[bob]?.name` skips when stale, while plain `people[bob]` still stops.",
+            "gains": [
+              "Shortest spelling, as the card wrote it."
+            ],
+            "losses": [
+              "Lookup behavior depends on the following projection.",
+              "Needs a new rule for `?.` on a non-optional."
+            ],
+            "proposed": {
+              "code": "print(people[bob]?.name ?? \"gone\")"
+            }
+          },
+          {
+            "key": "C",
+            "name": "Keep today",
+            "gist": "Indexing stops, and code checks `pool.has(id)` first.",
+            "gains": [
+              "No new API."
+            ],
+            "losses": [
+              "Usually checks twice unless reuse is proved safe."
+            ],
+            "proposed": {
+              "code": "if pool.has(bob) -> print(pool[bob].name)"
+            }
+          }
+        ],
+        "recommendation": {
+          "rec": "A",
+          "why": "An explicit get makes optional lookup usable on its own, without changing indexing according to the next operator. It borrows the entry rather than copying T.",
+          "gains": [
+            "One meaning per spelling.",
+            "No new operator rule."
+          ],
+          "losses": [
+            {
+              "loss": "Optional reads are a few characters longer.",
+              "mitigation": "Offer get fixes only when ownership facts prove equivalent evaluation and no intervening invalidation."
+            }
+          ],
+          "whyNot": [
+            {
+              "key": "B",
+              "reason": "B is shorter, but ties optional lookup to guarded projection instead of exposing an independent optional result."
+            },
+            {
+              "key": "C",
+              "reason": "C adds no API but usually checks twice and separates the check from use; it is valid when stability is proved."
+            }
+          ],
+          "tradeoff": "Slightly longer optional reads buy one meaning per spelling."
+        }
+      },
+      "reports": [
+        {
+          "title": "Zero-magic memory trio pre-build review",
+          "path": "Docs/Audits/2026-11-27-zero-magic-memory-trio-review.md",
+          "note": "Section 5.2 item 4 and verdict ballot (v)."
+        }
+      ],
+      "draftedBy": "Orchestrator",
+      "reviewedBy": "BallotReview3",
+      "draft": false,
+      "status": "open",
+      "created": "2026-11-28T04:01:03.643Z"
     }
   ],
   "questions": [
@@ -128545,6 +129187,97 @@
     }
   ],
   "events": [
+    {
+      "at": "2026-11-28T04:01:05.578Z",
+      "by": "Orchestrator",
+      "action": "decision.post",
+      "ref": "D-POOL-STALE-GET1",
+      "note": "reviewed by BallotReview3"
+    },
+    {
+      "at": "2026-11-28T04:01:04.614Z",
+      "by": "BallotReview3",
+      "action": "decision.review",
+      "ref": "D-POOL-STALE-GET1",
+      "note": "passed"
+    },
+    {
+      "at": "2026-11-28T04:01:03.643Z",
+      "by": "Orchestrator",
+      "action": "decision.add",
+      "ref": "D-POOL-STALE-GET1",
+      "note": "pool[id] stops on a stale ID, and pool.get(id) is the optional form (draft)"
+    },
+    {
+      "at": "2026-11-28T04:01:02.662Z",
+      "by": "Orchestrator",
+      "action": "decision.post",
+      "ref": "D-POOL-CROSS-ID1",
+      "note": "reviewed by BallotReview3"
+    },
+    {
+      "at": "2026-11-28T04:01:01.656Z",
+      "by": "BallotReview3",
+      "action": "decision.review",
+      "ref": "D-POOL-CROSS-ID1",
+      "note": "passed"
+    },
+    {
+      "at": "2026-11-28T04:01:00.726Z",
+      "by": "Orchestrator",
+      "action": "decision.add",
+      "ref": "D-POOL-CROSS-ID1",
+      "note": "Store provenance is checked independently of index width and removal generations (draft)"
+    },
+    {
+      "at": "2026-11-28T04:00:59.777Z",
+      "by": "Orchestrator",
+      "action": "decision.post",
+      "ref": "D-DISJOINT-EDIT1",
+      "note": "reviewed by BallotReview3"
+    },
+    {
+      "at": "2026-11-28T04:00:58.854Z",
+      "by": "BallotReview3",
+      "action": "decision.review",
+      "ref": "D-DISJOINT-EDIT1",
+      "note": "passed"
+    },
+    {
+      "at": "2026-11-28T04:00:57.891Z",
+      "by": "Orchestrator",
+      "action": "decision.add",
+      "ref": "D-DISJOINT-EDIT1",
+      "note": "One method edits distinct entries of a list, map or pool at once (draft)"
+    },
+    {
+      "at": "2026-11-28T04:00:56.860Z",
+      "by": "Orchestrator",
+      "action": "decision.post",
+      "ref": "D-VALIDATE-NAME1",
+      "note": "reviewed by BallotReview3"
+    },
+    {
+      "at": "2026-11-28T04:00:55.909Z",
+      "by": "BallotReview3",
+      "action": "decision.review",
+      "ref": "D-VALIDATE-NAME1",
+      "note": "passed"
+    },
+    {
+      "at": "2026-11-28T04:00:55.011Z",
+      "by": "Orchestrator",
+      "action": "decision.add",
+      "ref": "D-VALIDATE-NAME1",
+      "note": "The outside-context check builder becomes FieldErrors.collect so the trait can be Validate (draft)"
+    },
+    {
+      "at": "2026-11-28T04:00:54.140Z",
+      "by": "Orchestrator",
+      "action": "decision.post",
+      "ref": "D-STATE-TEACH1",
+      "note": "reviewed by BallotReview3"
+    },
     {
       "at": "2026-11-28T04:00:52.451Z",
       "by": "BallotReview3",
