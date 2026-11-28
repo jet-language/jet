@@ -3,7 +3,7 @@
     "version": 4,
     "project": "Jet",
     "nextNum": 7069,
-    "rev": 115253,
+    "rev": 115271,
     "ui": {
       "toggled": [
         "dec-group:syntax",
@@ -64082,7 +64082,7 @@
       "parentId": null,
       "needsAcceptance": false,
       "created": "2026-11-27T18:34:41.611Z",
-      "updated": "2026-11-28T01:57:54.954Z",
+      "updated": "2026-11-28T02:14:44.444Z",
       "updatedBy": "Orchestrator",
       "criteriaLastN": 3
     },
@@ -64138,7 +64138,7 @@
       "parentId": null,
       "needsAcceptance": false,
       "created": "2026-11-27T18:45:49.293Z",
-      "updated": "2026-11-28T01:56:09.790Z",
+      "updated": "2026-11-28T02:14:46.306Z",
       "updatedBy": "Orchestrator",
       "criteriaLastN": 3
     },
@@ -64259,7 +64259,7 @@
       "parentId": null,
       "needsAcceptance": false,
       "created": "2026-11-27T18:59:20.698Z",
-      "updated": "2026-11-28T01:57:57.366Z",
+      "updated": "2026-11-28T02:14:52.149Z",
       "updatedBy": "Orchestrator",
       "criteriaLastN": 3
     },
@@ -64315,7 +64315,7 @@
       "parentId": null,
       "needsAcceptance": false,
       "created": "2026-11-27T18:59:50.392Z",
-      "updated": "2026-11-28T01:57:55.758Z",
+      "updated": "2026-11-28T02:14:48.238Z",
       "updatedBy": "Orchestrator",
       "criteriaLastN": 3
     },
@@ -121918,78 +121918,56 @@
       "id": "D-STRING-ONE1",
       "cardId": "c0gtkt1o",
       "group": "library",
-      "title": "One String type built in place; no separate builder, and the name stays String",
-      "situation": "Programs often build text piece by piece, such as a report line or a JSON document. Jet has one text type, String, and `s += piece` already grows it in place, but people also write `out = \"{out}{piece}\"`, which copies the whole text every time. An earlier request asked for a separate StringBuilder type, as Java and Go have. This vote decides whether Jet keeps one String with a few building methods; we recommend that, and keeping the name String.",
-      "gist": "Should Jet keep one String type for building text, or add a separate StringBuilder type?",
-      "lesson": "A String that only one place holds grows in its own buffer, so a loop of `s += piece` stays fast. `s.reserve(n)` already makes room ahead. Whichever wins, two jobs stay owed. One is a warning when a loop keeps the growing text alive each pass; the other is a streaming writer for huge output.",
+      "title": "Build text with String",
+      "situation": "Programs often build text by appending pieces in a loop. Jet can already grow a String, but callers need clear append methods and a warning when retained copies make growth expensive. The owner chose one String type rather than a separate builder or a rename. We recommend that choice while preserving recoverable allocation failures; byte validation below is a separate proposal.",
+      "gist": "Should text construction use String itself or a separate builder?",
+      "lesson": "A builder is a separate object for assembling text. A unique String can already reuse spare capacity when it grows. Retaining earlier versions can still force copies. The owner chose String with append methods. Memory allocation errors remain recoverable; these methods must not become stopping twins of try methods.",
       "explainer": "",
-      "story": "Lee builds a JSON reply in a loop and writes `out = \"{out}[\"`, copying the whole text each pass. The friction survey asked for a StringBuilder, but `out += \"[\"` already grows the text in place.",
-      "inWild": "let mut out = String::with_capacity(64);\nfor _ in 0..depth { out.push('['); }\nout.push_str(\"]\");\n// Rust String: https://doc.rust-lang.org/std/string/struct.String.html",
-      "detail": "Owner context: card #7055 criterion 2 asked to \"add StringBuilder (or ^s.push_str)\", from item F36 in `Docs/Research/jet-authoring-friction-2026-11-27.md`. The owner answered in chat on 2026-11-27: one String, no builder type, keep the name, and record the two owed follow-ups.\n\nWhat Jet does today. `jet_rt_string_append` in `Compiler/JetRuntime/Source/Text.jet` implements `left += right`. Its comment says a sole heap owner appends in place and grows its buffer geometrically, so building text by repeated `+=` is linear. `s.reserve(n)` is `jet_rt_string_reserve`, and `String.with_capacity(n)` exists in the same file.\n\n`Compiler/JetFoundation/Source/Registry/BuiltinMethods.jet` lists String `try_push`, `reserve`, `capacity`, `insert`, `remove` and `truncate`. There is no String `push` or `push_byte` yet; the friction survey notes that one byte such as ESC needs `String.from_bytes([U8]{27}) ?? \"\"`. `Examples/Basics/StringAppend.jet` shows the `+=` form; `Examples/Data/JSON/JSONParseLimits.jet` shows the copying `out = \"{out}[\"` form.\n\nAudit finding. `Docs/Audits/2026-11-27-zero-magic-memory-trio-review.md` (section 2.2, item 3) says not to add a second builder type: a builder is `^s: \"\"` plus push. The real slow case is a growing string that is also kept each pass, such as `parts.push(s)`. That defeats the in-place growth, so it needs a warning.\n\nResearch. Java's StringBuilder and Go's `strings.Builder` exist because their strings cannot change. Rust's `String` and Swift's `String` can change, and neither language has a builder type. Jet's String changes in place, so it belongs with Rust and Swift.",
+      "story": "Mina prints three opening brackets and a closing bracket. She wants to reserve space and append without learning a second text type.",
+      "inWild": "let mut out = String::with_capacity(5);\nfor _ in 0..3 { out.push('['); }\nout.push_str(\"]\");\nprintln!(\"{out}\");",
+      "detail": "Owner scope: keep the name String, use it for construction, and provide push/push_byte alongside append assignment. The owner did not choose an ASCII-only byte API, an infallible allocation API, or a second try API. The byte rule below remains a proposal the owner may reject.\n\nSource baseline: `Compiler/JetRuntime/Source/Text.jet`, `rt_text_reserve_extra:331`, grows geometrically. `jet_rt_string_append:569` uses the owned append path; shared or static storage requires copying. `rt_text_concat:546` allocates a combined buffer. `jet_rt_string_reserve:775` reserves ADDITIONAL bytes, not an absolute target capacity. The no-retained-alias loop has reusable growth; retained snapshots can require repeated copies. These are code-path facts, not benchmark results.\n\n`Compiler/JetFoundation/Source/Registry/BuiltinMethods.jet:96-110` registers String.try_push and String.reserve, not the proposed push and push_byte pair. The compiled a0.0.46-dev seed executed the current example and printed `[[[]`. Both method-absence probes reported Jet.UnknownMethod. The seed predates today's propagation spelling, so successful unchecked allocation calls do not establish compliance with the ratified law.\n\n`Docs/Audits/2026-11-27-zero-magic-memory-trio-review.md`, section 2.2(3), recommends one String, identifies retained-growth cost, and requires a useful warning. Its old representation discussion must not be copied as current runtime truth. This ballot makes no representation-size or lifetime claim.\n\nThe ratified allocation-failure ruling (2026-11-11, outcome C) requires one recoverable operation by default, not infallible/try twins. The original draft's stopping push twin contradicted that ruling. Every reserving or growing String path must report AllocError unless failure is proved impossible. A caller may explicitly choose a stopping boundary. Proposed checked examples show the intended contract, not implemented method availability.\n\nResearch: https://doc.rust-lang.org/std/string/struct.String.html documents capacity reuse, UTF-8 invariants, push(char), and push_str(&str). The Rust example compiled and printed `[[[]`. Rust's default allocation policy is not evidence for Jet's policy.",
       "options": [
         {
           "key": "A",
-          "name": "One String, built in place",
-          "detail": "Keep one `String`. Add `push(text)` as the infallible twin of the existing `try_push`, matching list `push`. Add `push_byte(b: U8)` for single ASCII bytes. A byte of 128 or more is refused, because one such byte alone is not valid UTF-8 text. `+=`, `reserve` and `with_capacity` stay as they are.\n\nThis decision records two owed follow-ups. First, a compiler warning, with a UI snapshot, when a loop grows a string that it also keeps each pass, which makes building quadratic. Second, a streaming Writer for output too large to hold as one String.",
-          "technical": "Add `push` and `push_byte` rows to `Compiler/JetFoundation/Source/Registry/BuiltinMethods.jet` beside `try_push`. Lower them to `jet_rt_string_append` and a one-byte variant in `Compiler/JetRuntime/Source/Text.jet`. `push_byte` with a constant byte of 128 or more is a compile error; a run-time byte of 128 or more stops with a message pointing to `push`. Rewrite `Examples/Data/JSON/JSONParseLimits.jet` to `+=`. File the warning and the streaming Writer as cards.",
-          "code": "^out: \"\"\nout.reserve(depth + 1)\nloop _ in 0..<depth -> out.push(\"[\")\nout.push_byte(27)\nout += \"]\""
+          "name": "One String",
+          "detail": "Keep String as the sole general text value and construction value. Add push(String) and push_byte with the same owned append machinery as +=. These are string and byte entry points to one append meaning, not alternate allocation policies. Growing and reserving preserve recoverable AllocError. Remove obsolete try/stopping twins in a clean cutover rather than exposing both forever.",
+          "technical": "The draft proposes an ASCII-only push_byte: accept byte values below 128, return a typed invalid-byte error otherwise, and leave the string unchanged on failure. This is NOT the owner's settled choice. A single arbitrary byte cannot always preserve valid UTF-8. Encoding a byte's numeric value as Unicode, accepting validated sequences, or omitting this method are alternatives the owner can choose separately.\n\nCover 0, 127, 128, 255, multibyte text, self-append, aliases, empty input, overflow, and allocation failure without partial mutation. `reserve(n)` keeps its existing additional-byte meaning. Preserve one checked append implementation for += and methods; decide its expression-level propagation consistently with the allocation cutover, not by silently stopping.\n\nImplement the audit's retained-growing-alias warning, including a useful Writer suggestion for streaming output. Diagnose the retained snapshot pattern, not every append loop. Document that reservation cannot remove sharing copies. Migrate registry, lowering, Core callers, docs, and tests together.",
+          "code": "// Proposed checked methods; ASCII restriction is not settled.\n^out: \"\"\nout.reserve(5)!\nloop _ in 0..<3 -> out.push_byte(91)!\nout.push(\"]\")!\nprint(out)"
         },
         {
           "key": "B",
-          "name": "Separate StringBuilder",
-          "detail": "Add a `StringBuilder` type with its own push methods and a `to_string()` that produces the finished String. String building would then have two spellings, the builder and `+=`, which the audit flags as a second concept for one job.",
-          "technical": "New Core type and runtime buffer, plus a conversion that either copies or hands over the buffer. The builder API shown is illustrative, not a design.",
-          "code": "^b: StringBuilder.new()\nloop _ in 0..<depth -> b.push(\"[\")\nout: b.to_string()"
-        },
-        {
-          "key": "C",
-          "name": "One type, renamed Text",
-          "detail": "Same as A, but rename `String` to `Text` everywhere, in source, the spec, diagnostics and guides.",
-          "technical": "A repo-wide rename across `Compiler/`, `Core/`, `Examples/`, `Tests/`, `Tools/` and `Docs/`, with a retired-name diagnostic for `String`.",
-          "code": "greet: fn(name: Text) -> Text {\n    ^out: \"hello, \"\n    out += name\n    out\n}"
+          "name": "Separate builder",
+          "detail": "Use a dedicated mutable construction type, then move its buffer into String at finish. Finishing need not copy. A restricted builder can prevent snapshots of unfinished text and make retained-growth costs harder to trigger. This is a stronger alternative than mere naming familiarity, but adds another type and conversion boundary.",
+          "technical": "A builder still needs recoverable allocation and UTF-8 rules. Share low-level storage code rather than maintaining competing growth algorithms. Restrict intermediate snapshots if avoiding shared-growth copies is its promised advantage. The separate type needs an explicit exception to the one-mechanism design rule; it should not win just by having nicer method names.",
+          "code": "// Proposed alternative API, not existing Jet.\n^out: StringBuilder.new()!\nout.reserve(5)!\nloop _ in 0..<3 -> out.push_byte(91)!\nout.push(\"]\")!\nprint(out.finish())"
         }
       ],
       "comparisons": [
         {
           "lang": "Rust",
-          "note": "One growable `String` with `push`, `push_str` and `with_capacity`; see https://doc.rust-lang.org/std/string/struct.String.html.",
-          "code": "let mut s = String::new(); s.push_str(\"a\"); s.push('b');"
-        },
-        {
-          "lang": "Swift",
-          "note": "One value-type `String` that grows with `append` and `+=`; see https://developer.apple.com/documentation/swift/string.",
-          "code": "var s = \"\"; s += \"a\"; s.append(\"b\")"
-        },
-        {
-          "lang": "Go",
-          "note": "Strings cannot change, so `strings.Builder` exists for building; see https://pkg.go.dev/strings#Builder.",
-          "code": "var b strings.Builder; b.WriteString(\"a\"); s := b.String()"
+          "note": "String handles construction directly; push accepts a Unicode character, not a byte.",
+          "code": "let mut out = String::with_capacity(5);\nfor _ in 0..3 { out.push('['); }\nout.push_str(\"]\");\nprintln!(\"{out}\");"
         }
       ],
       "rec": "A",
       "recommendation": {
-        "why": "Jet's String already grows in place, so a few building methods give fast building without a second type to learn or convert.",
+        "why": "String already has reusable growth machinery; expose it without another construction type.",
         "gains": [
-          "No builder-to-String conversion at the end.",
-          "No rename across every Jet file."
+          "One text type for building and passing strings."
         ],
         "losses": [
           {
-            "loss": "`push_byte` refuses bytes 128 and above.",
-            "mitigation": "Other characters go through `push` with text; the refusal message names the byte and points to `push`."
+            "loss": "Retaining earlier strings can cause repeated copying.",
+            "mitigation": "Warn about retained growth and offer a Writer when output need not stay in memory."
           }
         ],
         "whyNot": [
           {
             "key": "B",
-            "reason": "B adds a second text type and a conversion step for a job String already does in place."
-          },
-          {
-            "key": "C",
-            "reason": "C renames the most common type everywhere for a small gain in clarity."
+            "reason": "Its stronger construction boundary helps some code, but adds a second type for ordinary text loops."
           }
         ],
-        "tradeoff": "Raw non-ASCII bytes go through `[U8]` and `String.from_bytes`, not `push_byte`."
+        "tradeoff": "Keep one type, without promising cheap growth when earlier versions remain live."
       },
       "hybrid": null,
       "ballotMode": "short",
@@ -121998,108 +121976,81 @@
       "reviewPasses": null,
       "checkInstructions": null,
       "surface": {
-        "gist": "Should Jet keep one String type for building text, or add a separate StringBuilder type?",
-        "lesson": "A String that only one place holds grows in its own buffer, so a loop of `s += piece` stays fast. `s.reserve(n)` already makes room ahead. Whichever wins, two jobs stay owed. One is a warning when a loop keeps the growing text alive each pass; the other is a streaming writer for huge output.",
+        "gist": "Should text construction use String itself or a separate builder?",
+        "lesson": "A builder is a separate object for assembling text. A unique String can already reuse spare capacity when it grows. Retaining earlier versions can still force copies. The owner chose String with append methods. Memory allocation errors remain recoverable; these methods must not become stopping twins of try methods.",
         "trio": {
           "current": {
-            "note": "Today `+=` grows in place, but the copy-everything spelling is common and single bytes have no direct path.",
-            "code": "^out: \"\"\nloop _ in 0..<depth -> out = \"{out}[\"  // copies all of out\nout += \"]\"                              // grows in place"
+            "note": "This executable-baseline loop prints [[[]; it does not prove compliance with the allocation ruling.",
+            "code": "^out: \"\"\nout.reserve(5)\nloop _ in 0..<3 -> out += \"[\"\nout += \"]\"\nprint(out)"
           },
           "wild": {
             "lang": "Rust",
-            "note": "Rust has one owned String that grows in place and no builder type. See https://doc.rust-lang.org/std/string/struct.String.html.",
-            "code": "let mut out = String::with_capacity(64);\nfor _ in 0..depth { out.push('['); }\nout.push_str(\"]\");"
+            "note": "Rust grows its String directly; push takes a character, not an arbitrary byte.",
+            "code": "let mut out = String::with_capacity(5);\nfor _ in 0..3 { out.push('['); }\nout.push_str(\"]\");\nprintln!(\"{out}\");"
           }
         },
         "options": [
           {
             "key": "A",
-            "name": "One String, built in place",
-            "gist": "Build with `^s: \"\"`, `+=`, `push` and `push_byte`; no builder type.",
+            "name": "One String",
+            "gist": "Add append methods to the existing String type.",
             "gains": [
-              "One text type to learn, as in Rust and Swift.",
-              "A finished String needs no conversion step.",
-              "Keeps the name every Jet file and guide uses."
+              "No separate builder or finish step.",
+              "Unique growth can reuse the existing buffer."
             ],
             "losses": [
-              "`push_byte` takes only ASCII bytes, so the text stays valid."
+              "Retained versions can still make repeated growth expensive."
             ],
             "proposed": {
-              "code": "^out: \"\"\nout.reserve(depth + 1)\nloop _ in 0..<depth -> out.push(\"[\")\nout.push_byte(27)\nout += \"]\""
+              "code": "// Proposed checked methods; byte rule is separately rejectable.\n^out: \"\"\nout.reserve(5)!\nloop _ in 0..<3 -> out.push_byte(91)!\nout.push(\"]\")!\nprint(out)"
             }
           },
           {
             "key": "B",
-            "name": "Separate StringBuilder",
-            "gist": "Add a StringBuilder type that turns into a String when done.",
+            "name": "Separate builder",
+            "gist": "Use a dedicated construction type and finish into String.",
             "gains": [
-              "Familiar to Java, C# and Go programmers."
+              "A construction-only type can prevent retaining intermediate strings."
             ],
             "losses": [
-              "Two text types for one job.",
-              "Every finished builder needs a conversion call."
+              "Users learn a second text type and a finish step."
             ],
             "proposed": {
-              "code": "^b: StringBuilder.new()\nloop _ in 0..<depth -> b.push(\"[\")\nout: b.to_string()"
-            }
-          },
-          {
-            "key": "C",
-            "name": "One type, renamed Text",
-            "gist": "Same in-place building, but rename String to Text.",
-            "gains": [
-              "The name says it holds text, not any bytes."
-            ],
-            "losses": [
-              "Renames the most used type in every Jet file.",
-              "Drops the name nearly every other language uses."
-            ],
-            "proposed": {
-              "code": "greet: fn(name: Text) -> Text {\n    ^out: \"hello, \"\n    out += name\n    out\n}"
+              "code": "// Proposed alternative API, not existing Jet.\n^out: StringBuilder.new()!\nout.reserve(5)!\nloop _ in 0..<3 -> out.push_byte(91)!\nout.push(\"]\")!\nprint(out.finish())"
             }
           }
         ],
         "recommendation": {
           "rec": "A",
-          "why": "Jet's String already grows in place, so a few building methods give fast building without a second type to learn or convert.",
+          "why": "String already has reusable growth machinery; expose it without another construction type.",
           "gains": [
-            "No builder-to-String conversion at the end.",
-            "No rename across every Jet file."
+            "One text type for building and passing strings."
           ],
           "losses": [
             {
-              "loss": "`push_byte` refuses bytes 128 and above.",
-              "mitigation": "Other characters go through `push` with text; the refusal message names the byte and points to `push`."
+              "loss": "Retaining earlier strings can cause repeated copying.",
+              "mitigation": "Warn about retained growth and offer a Writer when output need not stay in memory."
             }
           ],
           "whyNot": [
             {
               "key": "B",
-              "reason": "B adds a second text type and a conversion step for a job String already does in place."
-            },
-            {
-              "key": "C",
-              "reason": "C renames the most common type everywhere for a small gain in clarity."
+              "reason": "Its stronger construction boundary helps some code, but adds a second type for ordinary text loops."
             }
           ],
-          "tradeoff": "Raw non-ASCII bytes go through `[U8]` and `String.from_bytes`, not `push_byte`."
+          "tradeoff": "Keep one type, without promising cheap growth when earlier versions remain live."
         }
       },
       "reports": [
         {
           "title": "Zero-magic memory trio review",
           "path": "Docs/Audits/2026-11-27-zero-magic-memory-trio-review.md",
-          "note": "Section 2.2 item 3: no second builder type, and the kept-each-pass slow case that needs a warning."
-        },
-        {
-          "title": "Jet authoring friction survey",
-          "path": "Docs/Research/jet-authoring-friction-2026-11-27.md",
-          "note": "Item F36, the original StringBuilder request."
+          "note": "Section 2.2(3): unique growth, retained snapshots, and owed warning."
         }
       ],
       "draftedBy": "Orchestrator",
-      "reviewedBy": null,
-      "draft": true,
+      "reviewedBy": "BallotReview1",
+      "draft": false,
       "status": "open",
       "created": "2026-11-28T01:56:09.790Z"
     },
@@ -122107,62 +122058,56 @@
       "id": "D-FN-TYPE-NOFAIL1",
       "cardId": "c0ql4qd5",
       "group": "language",
-      "title": "Function types follow the same no-fail default as function declarations",
-      "situation": "A function type such as `fn(Int) -> Int` describes a callback that another function accepts. Today that type quietly lets the callback fail with the default `Err`, while a declaration spelled the same way will soon mean it cannot fail. The same words would then mean opposite things depending on where they appear. This vote decides whether function types follow the declaration rule; we recommend yes, with failing callbacks written through a type parameter `E!`.",
-      "gist": "Should a function type with no error list, like `fn(Int) -> Int`, also mean the callback cannot fail?",
-      "lesson": "A function type describes a callback's parameters and result. Jet already lets a function accept a failing callback through a type parameter, `fn(Int) -> Int E!`, and pass that failure on. This vote sets what the plain spelling means. Either way, every callback type in Jet's own code must be checked during the switch.",
+      "title": "Function types share the no-error default",
+      "situation": "A function type describes a callback's inputs, result, and possible errors. Jet currently gives a plain callback parameter an implicit error route, while ordinary declarations are moving to a no-error default. Keeping different defaults would make matching signatures misleading for library users. We recommend the same no-error default for function types, using named or generic error types for callbacks that can fail.",
+      "gist": "Should function types share the no-error default, or require every error contract to be written?",
+      "lesson": "A callback is a function passed as a value. Its type must say whether calls can return errors. A plain callback parameter currently permits Err. The owner picked no errors by default. Failing callbacks can name a fixed error type or use generic E! to pass their errors on.",
       "explainer": "",
-      "story": "Sam passes a pure `double` function to a helper that takes `fn(Int) -> Int`. Today the helper's type says the callback may fail, so Sam's caller must handle an error that can never happen.",
-      "inWild": "func apply<E>(_ step: (Int) throws(E) -> Int, _ n: Int) throws(E) -> Int {\n    try step(n)\n}\n// Swift typed throws: https://github.com/swiftlang/swift-evolution/blob/main/proposals/0413-typed-throws.md",
-      "detail": "Owner context: card #7054 makes an ordinary function with no written error list infallible. The owner answered this follow-up in chat on 2026-11-27 and picked the same rule for function types.\n\nWhat Jet does today. `Docs/Spec/spec.md` (function-typed parameters) says a parameter type `fn(Int) -> Int` takes the implicit `Err`. It also says `[fn(Int) -> Int]` and `[fn(Int) -> Int Err!]` are different types (E0638), and a non-failing function widens into the failing form. The failure-contract section shows the generic callback rule: `total: fn<T, E>(rows: [T], weigh: fn(T) -> Int E!) -> Int (ShopError | E)!`. A callback that cannot fail binds `E` to `Never` (E2417).\n\nAudit finding. `Docs/Audits/2026-11-27-infallible-default-fn-review.md` (attack 2) shows that keeping implicit `Err` on types while declarations default to no failure makes a declaration and its own type disagree. That is a special case, so the audit recommends the generic `E!` rule for callbacks.\n\nResearch. Swift function types do not throw unless marked, and typed throws (SE-0413) passes a callback's error type on generically. Rust closures return a plain value unless their type names a `Result`.",
+      "story": "Sam passes a doubling function to a helper. The helper should not force him to handle a returned error unless its callback can actually return one.",
+      "inWild": "fn apply<E>(step: impl Fn(i32) -> Result<i32, E>, n: i32) -> Result<i32, E> {\n    step(n)\n}",
+      "detail": "The owner picked the same no-error default for function types. `Docs/Spec/spec.md:2033-2046` currently gives a plain function-typed parameter implicit Err, but preserves written contracts inside containers and nested types. Thus the old draft's claim that all plain function types uniformly permit Err was too broad. The specification also distinguishes container types with E0638; a single-value conversion does not imply conversion of a whole list.\n\n`Compiler/JetFoundation/Source/AST/Comptime.jet:91-134`, `failure_contract_from_return_type` and `failure_contract_effective_type`, define the shared contract mapping. `Compiler/JetFoundation/Data/Syntax/Spellings.jet`, the callable-arrow and ! rows, register named error contracts. `Docs/Spec/spec.md:2169-2176` gives generic callback errors and binds E to Never for a callback that returns no errors. The infallibility audit's second attack requires coordinated defaults rather than a declaration/type exception.\n\nExecuted baseline: a0.0.46-dev rejected `step(n)` in a plain callback parameter with Jet.FailureMarkRequired. Adding its old question-mark propagation compiled and ran: `apply(double, 3)` produced 6 and `try_apply(double, 4)` produced 8. Its callable-signature projection showed generic E!. Current dev's registry uses ! instead; no built compiler here proves that cutover or the proposed default.\n\nResearch: the executed Rust comparison uses a generic Result error and forwards it unchanged. Swift typed throws offers a closer nonthrowing default and generic E, with Never as nonthrowing: https://github.com/swiftlang/swift-evolution/blob/main/proposals/0413-typed-throws.md. Its full closure-inference changes remain future work, so it is not evidence that every closure error is inferred.\n\nThe former losing option retained opposite defaults for identical syntax. That conflicts with the one-mechanism rule, so it is replaced by a coherent alternative requiring all callback contracts to be explicit.",
       "options": [
         {
           "key": "A",
-          "name": "Same rule everywhere",
-          "detail": "`fn(Int) -> Int` as a type means the callback cannot fail, just like a declaration. A callback that may fail is written with an error type, `Err!`, or a type parameter `E!`. A function that can fail no longer fits a parameter that cannot; one that cannot fail still fits a failing parameter.",
-          "technical": "Function types with no error list lower to `Never` failure in the type checker, in the same patch as the declaration change. Update the function-typed parameter section and the E0638 text in `Docs/Spec/spec.md`. The cutover audits every `fn(...)` type in `Compiler/`, `Core/`, `Examples/`, `Tests/` and `Tools/` and adds `E!` or `Err!` where the callback really fails.",
-          "code": "apply: fn(step: fn(Int) -> Int, n: Int) -> Int { step(n) }\ntry_apply: fn<E>(step: fn(Int) -> Int E!, n: Int) -> Int E! { step(n)! }"
+          "name": "Same no-error default",
+          "detail": "A function type without an error contract permits no returned errors. Failing callbacks use a named error domain, Err!, or generic E!. Generic E is useful when passing through arbitrary callback failures; a fixed domain needs no new type parameter. No-error callbacks may still have effects or stop through a panic.",
+          "technical": "Change declarations and every function-type position together: parameters, fields, returns, aliases, optionals, lists, and nested callback arguments. Preserve directionality: a no-error function can fill a failing slot, not the reverse. Do not invent whole-container widening. Test expected-type lambdas, bound methods, trait requirements, generic Never binding, and callable input/output variance.\n\nMigrate all affected Compiler, Core, Examples, Tests, Tools, and Docs in the same cutover. A helper's own allocations can add AllocError even when its callback cannot fail; preserve the ratified recoverable-allocation rule. Reject a lone inferred ! without a body only if the separate inference ballot's proposed bodyless rule is accepted.",
+          "code": "apply: fn(step: fn(Int) -> Int, n: Int) -> Int { step(n) }\ntry_apply: fn<E>(step: fn(Int) -> Int E!, n: Int) -> Int E! {\n    step(n)!\n}"
         },
         {
           "key": "B",
-          "name": "Types stay fallible",
-          "detail": "Function types keep the implicit `Err` while declarations default to no failure. A function declared `fn(Int) -> Int` would then have the type `fn(Int) -> Int Never!`, written differently from its own signature.",
-          "technical": "No type-checker change for function types. The spec must document that a declaration and its function type are spelled differently.",
-          "code": "apply: fn(step: fn(Int) -> Int, n: Int) -> Int Err! {\n    step(n)!\n}"
+          "name": "Require written contracts",
+          "detail": "Reject omitted error contracts in function types. Every callback type writes Never!, a fixed error domain, or generic E!. This avoids opposite defaults and makes callable contracts self-contained, at the cost of repeating the no-error promise.",
+          "technical": "Require an explicit contract in every function-type position. Ordinary function declarations still use the owner's no-error default. Diagnostics for omitted contracts offer Never! or a named domain; no implicit Err exception remains.",
+          "code": "apply: fn(step: fn(Int) -> Int Never!, n: Int) -> Int {\n    step(n)\n}"
         }
       ],
       "comparisons": [
         {
-          "lang": "Swift",
-          "note": "Function types do not throw unless marked; generic `throws(E)` passes a callback's errors on. See https://github.com/swiftlang/swift-evolution/blob/main/proposals/0413-typed-throws.md.",
-          "code": "func apply<E>(_ step: (Int) throws(E) -> Int, _ n: Int) throws(E) -> Int { try step(n) }"
-        },
-        {
           "lang": "Rust",
-          "note": "A closure type returns a plain value unless it names a `Result`; see https://doc.rust-lang.org/std/ops/trait.Fn.html.",
-          "code": "fn apply<E>(step: impl Fn(i32) -> Result<i32, E>, n: i32) -> Result<i32, E> { step(n) }"
+          "note": "Generic Result errors preserve a callback's error type.",
+          "code": "fn apply<E>(step: impl Fn(i32) -> Result<i32, E>, n: i32) -> Result<i32, E> {\n    step(n)\n}"
         }
       ],
       "rec": "A",
       "recommendation": {
-        "why": "One spelling keeps one meaning, and Jet already has a rule for callbacks that fail, so nothing new is needed.",
+        "why": "Use the same default everywhere and keep existing named and generic contracts for callbacks that return errors.",
         "gains": [
-          "Declarations and function types read the same way.",
-          "Callers of helpers given safe callbacks handle no errors."
+          "No special default for a function used as a value."
         ],
         "losses": [
           {
-            "loss": "Helpers that pass failing callbacks on add a type parameter `E`.",
-            "mitigation": "The type-mismatch error for a failing callback shows the `fn<E>` form to copy."
+            "loss": "Fallible callback types need migration.",
+            "mitigation": "A mismatch names the failing callback and shows a named or generic error contract."
           }
         ],
         "whyNot": [
           {
             "key": "B",
-            "reason": "B makes the same words mean opposite things by position, a special case every reader must learn."
+            "reason": "Writing Never on every no-error callback repeats the declaration default without adding information."
           }
         ],
-        "tradeoff": "Callback-taking helpers that pass failures on write one type parameter."
+        "tradeoff": "Write error types only where errors are possible."
       },
       "hybrid": null,
       "ballotMode": "short",
@@ -122171,84 +122116,81 @@
       "reviewPasses": null,
       "checkInstructions": null,
       "surface": {
-        "gist": "Should a function type with no error list, like `fn(Int) -> Int`, also mean the callback cannot fail?",
-        "lesson": "A function type describes a callback's parameters and result. Jet already lets a function accept a failing callback through a type parameter, `fn(Int) -> Int E!`, and pass that failure on. This vote sets what the plain spelling means. Either way, every callback type in Jet's own code must be checked during the switch.",
+        "gist": "Should function types share the no-error default, or require every error contract to be written?",
+        "lesson": "A callback is a function passed as a value. Its type must say whether calls can return errors. A plain callback parameter currently permits Err. The owner picked no errors by default. Failing callbacks can name a fixed error type or use generic E! to pass their errors on.",
         "trio": {
           "current": {
-            "note": "Today the parameter type lets `step` fail with `Err`, so every call of `apply` may fail too.",
-            "code": "apply: fn(step: fn(Int) -> Int, n: Int) -> Int {\n    step(n)\n}"
+            "note": "The executable baseline requires propagation on this callback call; its spelling predates the current registry.",
+            "code": "apply: fn(step: fn(Int) -> Int, n: Int) -> Int {\n    step(n)? // executable baseline's old propagation mark\n}"
           },
           "wild": {
-            "lang": "Swift",
-            "note": "A Swift function type cannot throw unless marked; a generic `throws(E)` passes a callback's errors on. See https://github.com/swiftlang/swift-evolution/blob/main/proposals/0413-typed-throws.md.",
-            "code": "func apply<E>(_ step: (Int) throws(E) -> Int, _ n: Int) throws(E) -> Int {\n    try step(n)\n}"
+            "lang": "Rust",
+            "note": "A generic Result callback passes its error type through.",
+            "code": "fn apply<E>(step: impl Fn(i32) -> Result<i32, E>, n: i32) -> Result<i32, E> {\n    step(n)\n}"
           }
         },
         "options": [
           {
             "key": "A",
-            "name": "Same rule everywhere",
-            "gist": "`fn(Int) -> Int` cannot fail; a failing callback is written `fn(Int) -> Int E!`.",
+            "name": "Same no-error default",
+            "gist": "Omitting an error contract means no returned error.",
             "gains": [
-              "One spelling means one thing in declarations and types.",
-              "Passing a safe callback never makes the caller handle errors.",
-              "Reuses Jet's existing type-parameter rule for failing callbacks."
+              "Declarations and types use the same default.",
+              "Generic helpers preserve the callback's error type."
             ],
             "losses": [
-              "Helpers that pass failing callbacks on add a type parameter `E`."
+              "Existing fallible callback types need an explicit error contract."
             ],
             "proposed": {
-              "code": "// cannot fail\napply: fn(step: fn(Int) -> Int, n: Int) -> Int { step(n) }\n// passes on whatever step fails with\ntry_apply: fn<E>(step: fn(Int) -> Int E!, n: Int) -> Int E! { step(n)! }"
+              "code": "apply: fn(step: fn(Int) -> Int, n: Int) -> Int { step(n) }\ntry_apply: fn<E>(step: fn(Int) -> Int E!, n: Int) -> Int E! {\n    step(n)!\n}"
             }
           },
           {
             "key": "B",
-            "name": "Types stay fallible",
-            "gist": "Keep `fn(Int) -> Int` as a type that may fail with `Err`.",
+            "name": "Require written contracts",
+            "gist": "Every function type names its errors, including Never for none.",
             "gains": [
-              "Existing callback types keep their meaning."
+              "Every callback type states its full error promise."
             ],
             "losses": [
-              "One spelling means cannot fail on declarations, may fail on types.",
-              "Every caller of a callback-taking helper must handle a possible `Err`."
+              "No-error callbacks repeatedly write Never!."
             ],
             "proposed": {
-              "code": "// fn(Int) -> Int here may still fail with Err\napply: fn(step: fn(Int) -> Int, n: Int) -> Int Err! {\n    step(n)!\n}"
+              "code": "apply: fn(step: fn(Int) -> Int Never!, n: Int) -> Int {\n    step(n)\n}"
             }
           }
         ],
         "recommendation": {
           "rec": "A",
-          "why": "One spelling keeps one meaning, and Jet already has a rule for callbacks that fail, so nothing new is needed.",
+          "why": "Use the same default everywhere and keep existing named and generic contracts for callbacks that return errors.",
           "gains": [
-            "Declarations and function types read the same way.",
-            "Callers of helpers given safe callbacks handle no errors."
+            "No special default for a function used as a value."
           ],
           "losses": [
             {
-              "loss": "Helpers that pass failing callbacks on add a type parameter `E`.",
-              "mitigation": "The type-mismatch error for a failing callback shows the `fn<E>` form to copy."
+              "loss": "Fallible callback types need migration.",
+              "mitigation": "A mismatch names the failing callback and shows a named or generic error contract."
             }
           ],
           "whyNot": [
             {
               "key": "B",
-              "reason": "B makes the same words mean opposite things by position, a special case every reader must learn."
+              "reason": "Writing Never on every no-error callback repeats the declaration default without adding information."
             }
           ],
-          "tradeoff": "Callback-taking helpers that pass failures on write one type parameter."
+          "tradeoff": "Write error types only where errors are possible."
         }
       },
       "reports": [
         {
-          "title": "Infallible-by-default fn design review",
+          "title": "Infallible-by-default function review",
           "path": "Docs/Audits/2026-11-27-infallible-default-fn-review.md",
-          "note": "Attack 2: function types versus declarations under the no-fail default."
+          "note": "Attack 2 and the coordinated callable cutover."
         }
       ],
       "draftedBy": "Orchestrator",
-      "reviewedBy": null,
-      "draft": true,
+      "reviewedBy": "BallotReview1",
+      "draft": false,
       "status": "open",
       "created": "2026-11-28T01:57:54.954Z"
     },
@@ -122256,61 +122198,60 @@
       "id": "D-CLI-OPTVALUE-SPLIT1",
       "cardId": "c0v29n8b",
       "group": "cli",
-      "title": "Split each flag that works alone or with a value into a switch and a named value flag",
-      "situation": "Some jet command-line flags work both alone and with a value, such as `--watch` and `--watch=off`. Jet is moving every flag value to one spelling, `--flag value` with a space. Then `jet dev --watch app.jet` cannot tell whether `app.jet` is the flag's value or the program. Git hit the same problem and requires `=` for such flags. This vote decides how those flags change; we recommend splitting each into a plain switch and a separately named flag that always takes a value.",
-      "gist": "How should flags that work alone or with a value change once every flag value follows a space?",
-      "lesson": "A switch is a flag with no value, like `--release`. A value flag always takes one, like `--port 8080`. Six jet flags are both today. This vote splits each so every flag is one kind. It also drops `--small=false`, since false is already the default.",
+      "title": "Separate CLI switches from values",
+      "situation": "A CLI switch stands alone, while a value flag takes a following word. Jet's table labels six names optional-value, although some handlers already require values and other scopes are not implemented. The owner chose separate switch and value spellings and removal of small=false. We recommend that split, but removing false also needs a way to override a saved true setting for one invocation.",
+      "gist": "Should mixed switch/value flags split into separate names or always require values?",
+      "lesson": "An optional-value flag can stand alone or take a value. A space then becomes ambiguous: is the next word a value or the file to run? Jet's chosen direction uses spaces for values. The owner picked separate names and dropping small=false. Exact renames and broader boolean cleanup below remain proposals.",
       "explainer": "",
-      "story": "Ana runs `jet dev --watch app.jet` after the space-separated flag change. Jet cannot know whether `app.jet` is the watch setting or the program, so it guesses.",
-      "inWild": "git log --abbrev=10   # 10 is the value\ngit log --abbrev 10   # 10 is a separate argument\n# https://git-scm.com/docs/gitcli",
-      "detail": "Owner context: card #7058 (with card J49) makes `--flag value` the one value spelling. The owner answered in chat on 2026-11-27: split every optional-value flag, and drop `--small=false` because false is the default.\n\nWhat Jet does today. `JetCLIFlagValue` in `Compiler/JetFoundation/Source/Registry/CLICommands.jet` has five kinds: Switch, Bool (`--small`, `--small=false`), Value, Optional (`--watch`, `--watch=off`) and Repeated. The Optional rows are `--deep-checks`, `--version`, `--lock`, `--watch`, `--export` and `--browser`. Bool covers the build options `small` and `checked_alloc` (`jet_cli_build_option_value`) and test switches such as `--serial` (`jet_cli_test_setting_value`).\n\nSaved settings. `Compiler/JetCLI/Source/CLI/CommandSettings.jet` lets every flag also be saved as `<command>.<flag>` in the user settings file or a package's `commands:`. A typed flag wins over saved layers. Today `--small=false` undoes a saved `small: true` for one run; after this change that needs an edit to the saved setting.\n\nResearch. Git's command-line rules (gitcli) require the joined `--opt=value` form for options with an optional value, because the separate form is ambiguous. Cargo and clap-based tools give each flag one kind: switches take no value and options always take one.",
+      "story": "Lee has saved small=true but needs one full-size run. Removing small=false must not force Lee to edit persistent settings just for that invocation.",
+      "inWild": "git --no-pager diff --color=always",
+      "detail": "Owner scope: split optional-value flags into separate bare/value names; drop --small=false. The owner did NOT approve each rename, removal of every other off-by-default flag's false form, or a negative switch name. The table and --no-small below are proposals the owner may reject.\n\nSource baseline: `Compiler/JetFoundation/Source/Registry/CLICommands.jet:25-39` defines Switch, Bool, Value, Optional, and Repeated shapes. The six Optional rows are --deep-checks:1015, --version:1039, --lock:1070, --watch:1113, --export:1210, and --browser:1267. They have different scopes and defaults; they are not six proven identical parser bugs. --export-preset already exists at 1211.\n\n`Jetpack/CLI/Source/Hosts/PackageDependencyHost.jet:111-116,375-376` ALREADY requires a script after fetch --lock, despite the shared Optional row. Its missing-script probe returned Jet.InvalidCommandInput. `CLICommands.jet:756-758` marks db and package unported; both executable probes refused those commands. A registry row does not prove their advertised optional forms run today.\n\n`Compiler/JetCLI/Source/CLI/CommandSettings.jet:1-17` excludes typed operands/authority flags from persistent settings and orders settings below explicit argv. `jet_cli_setting_on_words:195-202` emits --flag=false for a saved false Bool. `jet_cli_command_settings_words:285-307` skips saved values when the same flag is explicit. Thus 'off by default' does not make false useless: an explicit false can defeat saved true. Editing or deleting saved settings does not preserve a one-run override.\n\n`Compiler/JetCLI/Source/CLI/Front.jet:2249-2264` recognizes bare watch and watch=on/off; the Optional row scopes watching to run/dev/test/jobs/build. --once at 1012 currently belongs to inspect live, not those commands. Extending it is a proposal. Removing the Bool shape is not entailed by the narrower --small=false pick.\n\nExecuted baseline: run with --small=false printed hi and exited 0, including with run.small=true in an isolated user-settings file. A combined watch/deep-checks invocation was refused as unported; scoped deep-checks rejected the nonexistent tree module. These establish neither successful watching nor a working deep-check scope. Current dev source and the available seed are not claimed to match.\n\nResearch: https://git-scm.com/docs/gitcli documents optional arguments as an attached form, not a following word. The Git diff example's attached color value was executed. That conventional alternative conflicts with Jet's recorded space-only direction, so B instead requires values while keeping spaces.",
       "options": [
         {
           "key": "A",
-          "name": "Switch plus named value flag",
-          "detail": "Each Optional flag becomes a switch plus a value flag:\n\n- `--deep-checks` runs every deep check; `--deep-checks-in <scope>` (repeatable) replaces `--deep-checks=<scope>`.\n- `--version` prints the compiler version; `jet package --bundle-version <v>` and `jet new migration --migration-version <n>` replace `--version=<v>`.\n- `jet fetch --lock <script>` already always takes a script, so it becomes a plain value flag; `--lock-mode <shared|exclusive>` replaces `--lock=<mode>` on migrations.\n\n- `--watch` stays a switch; `jet dev --once` replaces `--watch=off`, and `--watch=on` goes because `jet dev` already watches.\n- `--export` includes the export phase; the existing `--export-preset <name>` names the preset.\n- `jet db --browser` serves the inspector; `jet test --browser-engines <list>` replaces `--browser=<list>`.\n\nEvery Bool flag, such as `--small`, `--checked-alloc` and the `jet test` switches, becomes a plain switch with no `=false` form.",
-          "technical": "In `Compiler/JetFoundation/Source/Registry/CLICommands.jet`, delete the `Optional` and `Bool` kinds from `JetCLIFlagValue` and split the six Optional rows as listed. `--once` already exists for `jet inspect live`, and `--export-preset` and the `--browser-*` siblings already exist. Update `jet_cli_build_option_value` and `jet_cli_test_setting_value`, and the `--watch`/`--watch=on`/`--watch=off` handling in `Compiler/JetCLI/Source/CLI/Front.jet`.\n\nMigration lock modes come from `Core/DB/DB.jet`. The `jet package` and `jet db` rows are not ported yet, so their split lands with the port. Regenerate `Docs/Spec/Reference/cli.md`, and give each removed form a hint that names its replacement.",
-          "code": "jet run --deep-checks-in tree app.jet\njet dev --once app.jet\njet db migrate --lock-mode exclusive\njet test --browser-engines chromium,firefox\njet build --small"
+          "name": "Split the roles",
+          "detail": "Every flag is either a switch or takes a required following value. Remove optional-value parsing. Keep command-specific defaults, and give valued variants distinct names only where their meaning differs. A valued form must imply its feature is enabled without requiring a redundant switch.",
+          "technical": "Proposed rename table, NOT settled names:\n\nDeep checks: bare --deep-checks keeps all; repeatable --deep-checks-in S selects scopes. Version: global --version prints the compiler version; package --bundle-version V and new migration --migration-version V take required values. Those valued command forms are proposals, not claims that their current handlers accept them.\n\nLock: fetch --lock-script S takes the required script; do not turn it into an enable switch and lose its operand. Proposed db migrate/new --lock-policy P takes their advertised policy. Watch: --watch enables and --once disables across run/dev/test/jobs/build, preserving command defaults. Inspect live keeps its existing --once meaning in its own scope.\n\nExport: --export enables the phase; existing --export-preset P selects a preset and implies the phase. Browser: test --browser enables default engines; --browser-engines E selects engines. Proposed db --browser opens its inspector. Its unported scope has no verified engine-value behavior, so no db engine selector is invented here. Future db policy and package options must stay clearly advertised as unimplemented until their handlers land.\n\nProposed boolean migration: replace --small=false with --no-small as a one-run override, retaining --small. Both map to one logical setting. Dropping false on every off-by-default boolean is a separately rejectable proposal; do not delete Bool or change other flags merely from the small pick.\n\nExplicit positive or negative argv must override saved values for the same logical setting, including sibling names. Reject contradictory siblings in one invocation. Cover saved true/false, defaults, repeatable scopes, missing values, leading-dash values, -- termination, source operands, and unported forms. Migrate parsing, settings, help/completion, scripts, docs, and tests together, without accepted old-name aliases.",
+          "code": "# Proposed names; same behavior as the current example.\njet run app.jet --once --deep-checks-in tree --no-small"
         },
         {
           "key": "B",
-          "name": "Keep `=` for these flags",
-          "detail": "Keep the six Optional flags and their `=` values. Every other value flag uses a space. The rule becomes: a space for value flags, except `=` for these six.",
-          "technical": "The `Optional` kind stays in `JetCLIFlagValue`. The card J49 hint that rejects `--flag=value` must skip Optional rows.",
-          "code": "jet run --deep-checks=tree app.jet\njet dev --watch=off app.jet\njet dev --port 8080 app.jet"
+          "name": "Always require values",
+          "detail": "Eliminate optional values by making every formerly mixed-role flag require a value. For example, use watch-mode on/off and deep-checks-scope all/or-a-scope. Keep unrelated action switches such as global --version. This is a smaller name surface with longer common commands.",
+          "technical": "Preserve command-specific defaults when flags are absent. A required value cannot silently become a bare enable operation. Reuse the same explicit-over-saved setting resolution and negative small override as A; this alternative does not pretend that deleting false loses nothing.",
+          "code": "# Proposed alternative names; same behavior as the current example.\njet run app.jet --watch-mode off --deep-checks-scope tree --no-small"
         }
       ],
       "comparisons": [
         {
           "lang": "Git",
-          "note": "Options with an optional value must use the joined `=` form; see https://git-scm.com/docs/gitcli.",
-          "code": "git log --abbrev=10"
-        },
-        {
-          "lang": "Cargo",
-          "note": "Switches take no value and options always take one; see https://doc.rust-lang.org/cargo/commands/cargo-build.html.",
-          "code": "cargo build --release --target wasm32-unknown-unknown"
+          "note": "Optional argument values use an attached spelling; conventional, but not Jet's chosen space-only direction.",
+          "code": "git --no-pager diff --color=always"
         }
       ],
       "rec": "A",
       "recommendation": {
-        "why": "Splitting gives every flag one rule: a switch stands alone and a value flag takes the next word, so nothing is ambiguous.",
+        "why": "Keep convenient switches without making the next word ambiguous.",
         "gains": [
-          "No flag needs `=`, and none guesses which word is its value."
+          "Each name has one argument shape."
         ],
         "losses": [
           {
-            "loss": "`--small=false` can no longer undo a saved `small` setting of true.",
-            "mitigation": "Edit or delete the saved setting; false is already the default."
+            "loss": "The split adds names and breaks old invocations.",
+            "mitigation": "Publish the complete rename table and migrate scripts and saved settings together."
+          },
+          {
+            "loss": "Dropping false alone removes a saved-true override.",
+            "mitigation": "Approve a negative switch such as --no-small before removing that override."
           }
         ],
         "whyNot": [
           {
             "key": "B",
-            "reason": "B keeps two spellings and a per-flag exception that the one-spelling rule exists to remove."
+            "reason": "Required values are consistent, but make every common bare shortcut longer."
           }
         ],
-        "tradeoff": "Several flags gain a named sibling, mostly reusing names Jet already has."
+        "tradeoff": "More names buy predictable parsing; false removal needs an explicit negative override."
       },
       "hybrid": null,
       "ballotMode": "short",
@@ -122319,76 +122260,79 @@
       "reviewPasses": null,
       "checkInstructions": null,
       "surface": {
-        "gist": "How should flags that work alone or with a value change once every flag value follows a space?",
-        "lesson": "A switch is a flag with no value, like `--release`. A value flag always takes one, like `--port 8080`. Six jet flags are both today. This vote splits each so every flag is one kind. It also drops `--small=false`, since false is already the default.",
+        "gist": "Should mixed switch/value flags split into separate names or always require values?",
+        "lesson": "An optional-value flag can stand alone or take a value. A space then becomes ambiguous: is the next word a value or the file to run? Jet's chosen direction uses spaces for values. The owner picked separate names and dropping small=false. Exact renames and broader boolean cleanup below remain proposals.",
         "trio": {
           "current": {
-            "note": "Today a value must touch the flag with `=`; a space would hand the next word to the flag.",
-            "code": "jet run --deep-checks=tree app.jet\njet dev --watch=off app.jet\njet test --browser=chromium,firefox\njet build --small=false"
+            "note": "Advertised table forms, not an executable promise: the baseline refuses run's watch form.",
+            "code": "jet run app.jet --watch=off --deep-checks=tree --small=false"
           },
           "wild": {
             "lang": "Git",
-            "note": "Git requires the joined `--opt=value` form for options whose value is optional. See https://git-scm.com/docs/gitcli.",
-            "code": "git log --abbrev=10   # 10 is the value\ngit log --abbrev 10   # 10 is a separate argument"
+            "note": "Git's optional-value syntax attaches the value; a space is not the same form.",
+            "code": "git --no-pager diff --color=always"
           }
         },
         "options": [
           {
             "key": "A",
-            "name": "Switch plus named value flag",
-            "gist": "Each flag becomes a plain switch, with a separately named flag for the value.",
+            "name": "Split the roles",
+            "gist": "Keep bare switches and give valued forms separate names.",
             "gains": [
-              "Every flag is one kind, so a space is never ambiguous.",
-              "Help, completion and saved settings get one shape per flag.",
-              "Reuses names Jet already has, like `--export-preset` and `--once`."
+              "A value flag always consumes the next word.",
+              "Bare shortcuts remain available."
             ],
             "losses": [
-              "Several flags gain a sibling name to learn."
+              "More flag names to learn.",
+              "Removing false loses one-run disabling unless a replacement is approved."
             ],
             "proposed": {
-              "code": "jet run --deep-checks-in tree app.jet\njet dev --once app.jet\njet test --browser-engines chromium,firefox\njet build --small"
+              "code": "# Proposed names; --no-small is an additional proposal.\njet run app.jet --once --deep-checks-in tree --no-small"
             }
           },
           {
             "key": "B",
-            "name": "Keep `=` for these flags",
-            "gist": "Allow `--flag=value` only for flags whose value is optional, as Git does.",
+            "name": "Always require values",
+            "gist": "Remove bare shortcuts from mixed-role flags.",
             "gains": [
-              "No flag names change."
+              "Fewer names and no optional value parsing."
             ],
             "losses": [
-              "Two value spellings remain, the very thing this change removes.",
-              "People must remember which flags need `=`."
+              "Common shortcuts need an explicit value."
             ],
             "proposed": {
-              "code": "jet run --deep-checks=tree app.jet\njet dev --watch=off app.jet\njet dev --port 8080 app.jet"
+              "code": "# Proposed alternative names and required values.\njet run app.jet --watch-mode off --deep-checks-scope tree --no-small"
             }
           }
         ],
         "recommendation": {
           "rec": "A",
-          "why": "Splitting gives every flag one rule: a switch stands alone and a value flag takes the next word, so nothing is ambiguous.",
+          "why": "Keep convenient switches without making the next word ambiguous.",
           "gains": [
-            "No flag needs `=`, and none guesses which word is its value."
+            "Each name has one argument shape."
           ],
           "losses": [
             {
-              "loss": "`--small=false` can no longer undo a saved `small` setting of true.",
-              "mitigation": "Edit or delete the saved setting; false is already the default."
+              "loss": "The split adds names and breaks old invocations.",
+              "mitigation": "Publish the complete rename table and migrate scripts and saved settings together."
+            },
+            {
+              "loss": "Dropping false alone removes a saved-true override.",
+              "mitigation": "Approve a negative switch such as --no-small before removing that override."
             }
           ],
           "whyNot": [
             {
               "key": "B",
-              "reason": "B keeps two spellings and a per-flag exception that the one-spelling rule exists to remove."
+              "reason": "Required values are consistent, but make every common bare shortcut longer."
             }
           ],
-          "tradeoff": "Several flags gain a named sibling, mostly reusing names Jet already has."
+          "tradeoff": "More names buy predictable parsing; false removal needs an explicit negative override."
         }
       },
       "draftedBy": "Orchestrator",
-      "reviewedBy": null,
-      "draft": true,
+      "reviewedBy": "BallotReview1",
+      "draft": false,
       "status": "open",
       "created": "2026-11-28T01:57:55.758Z"
     },
@@ -122396,61 +122340,56 @@
       "id": "D-CORE-ROOT-USE1",
       "cardId": "c07z82uc",
       "group": "language",
-      "title": "One `use core` line gives full Core paths; there is no implicit `core` root",
-      "situation": "Jet code reaches standard-library modules through Core, for example `core.text` for text helpers. A short import like `use core.text` binds the name `text`, so a parameter also named `text` collides with it. Writing `use core` once and then `core.text.trim(name)` avoids the collision without a short name. This vote decides whether that one `use core` line stays required or `core` works everywhere with no import; we recommend keeping the line.",
-      "gist": "Should full Core paths like `core.text.trim` need one `use core` line, or work with no import?",
-      "lesson": "An import binds a name for the whole file. `use core.text` binds `text`; `use core` binds only `core`, so locals named `text` or `files` collide with nothing. This vote settles whether `core` still needs that line. Either way, the clearer import hints and missing-module message on this card are still owed.",
+      "title": "Import Core's root explicitly",
+      "situation": "A short module import can collide with a common parameter name, such as text. Jet already lets a file import Core's root and call a module through its full path. The owner considers that enough: there should be no implicit core binding. We recommend keeping the explicit import and ordinary shadow checks instead of adding a special always-visible root.",
+      "gist": "Should qualified Core calls require use core or get an implicit root?",
+      "lesson": "An import binds a module name in a file. A short text import can clash with a text parameter. Importing core instead allows core.text.trim(text) without that clash. This already works. The owner picked the explicit root; this does not remove Jet's existing built-in names.",
       "explainer": "",
-      "story": "Kai writes `use core.text` and then a function whose parameter is named `text`. The parameter hides the import, and Kai must rename one of them.",
-      "inWild": "import os\ndef name(path):\n    return os.path.basename(path)\n# https://docs.python.org/3/reference/import.html",
-      "detail": "Owner context: card #7057 criterion 2 (item G42 in `Docs/Research/jet-authoring-friction-2026-11-27.md`) asked for direct qualified module access such as `core.files.read(...)`. The owner answered in chat on 2026-11-27 that `use core` plus `core.text.trim(...)` is enough, with no implicit `core` root.\n\nWhat Jet does today. `Docs/Spec/spec.md` (imports) says `use core` binds the Core root itself, so a file can write `core.text.trim(name)` or `core.files.read(path)` without a short alias. A parameter named `text` or `files` then shadows nothing. A parameter that reuses an imported alias's name is still the tidy error L0538 (`Jet.NameSilentlyWins` in `Compiler/JetFoundation/Source/Registry/DiagnosticRows.jet`). A dotted type path such as `core.math.Point2` with no matching `use` is E0119.\n\nResearch. Python and Go need an explicit import before a module path works. Rust makes `std::` paths work everywhere through its extern prelude, which is the implicit-root model of option B.",
+      "story": "Ana names a String parameter text. Importing Core's root lets her call the text module without renaming that parameter.",
+      "inWild": "import os\nprint(os.path.basename(\"/tmp/hi\"))",
+      "detail": "Owner scope: `use core` plus `core.text.trim(...)` is sufficient; do not add an implicit core root. This confirms an existing path, not new syntax. It does not promise that every language-provided name requires an import.\n\nRegistry: `Compiler/JetFoundation/Data/Syntax/Spellings.jet`, the use row, registers local import bindings. `Docs/Spec/spec.md:653-660` describes the root import, qualified text call, and L0538 for a colliding short module name. Source evidence is `Compiler/JetSema/Source/Sema/Diagnostics.jet:466-501`, `sema_core_path_unimported`, which already emits E0107 with a `use core` or alias fix. The draft incorrectly listed that hint as missing implementation work.\n\nExecuted on the available a0.0.46-dev seed: the current snippet compiled and ran, printing hi. Replacing `use core` with `use core.text` and calling `text.trim()` still ran, but `jet check` exited 1 with Jet.NameSilentlyWins for the parameter. The check/run distinction matters: this is a tidy check error, not a failure of every command. The missing-root probe checks that a qualified call without the import is rejected.\n\n`Compiler/JetFoundation/Source/Registry/DiagnosticRows.jet:7698` registers built-in as well as imported-name shadowing. That disproves an absolute claim that Jet has no implicit names. This ballot is only about the Core module root.\n\nResearch: https://docs.python.org/3/reference/import.html explains that imports bind names locally. The executed Python example prints hi. It illustrates explicit qualification, not Jet's stricter shadow policy. An implicit root can use ordinary lexical shadowing; it does not inherently require banning user names or bypassing shadow checks.",
       "options": [
         {
           "key": "A",
-          "name": "One `use core` line",
-          "detail": "Keep the rule the spec already states: `use core` binds only `core`, and full paths such as `core.text.trim(name)` work after it. No name enters a file without a visible `use` line. The rest of card criterion 2, the parser hints and the clearer missing-module error, stays owed.",
-          "technical": "No language change; the spec imports section already states the rule. The unknown-name error for a bare `core.` path should carry a fix that inserts `use core`. Track this with the card's parser-hint work.",
-          "code": "use core\nclean: fn(text: String) -> String {\n    core.text.trim(text)\n}"
+          "name": "Explicit Core root",
+          "detail": "Keep the existing explicit root import and existing short imports. Users choose a full path or a short alias according to local names. The root itself receives the same shadow checks as other import bindings. Do not add an implicit core binding or exemptions from those checks.",
+          "technical": "Keep missing-root and shadowing examples in import docs. Preserve existing E0107 advice instead of implementing a duplicate diagnostic. Check grouped imports, explicit aliases, unused root imports, a local named core, and nested scopes. Do not claim direct short imports are banned: they remain valid when names do not collide.",
+          "code": "use core\nclean: fn(text: String) -> String { core.text.trim(text) }\nrun: fn() { print(clean(\" hi \")) }"
         },
         {
           "key": "B",
-          "name": "Implicit `core` root",
-          "detail": "Make `core` a name in scope in every file, the way Rust's `std` is. `use core` becomes redundant, and a local or module named `core` needs a special shadowing rule.",
-          "technical": "Name resolution seeds every file scope with the Core root. The spec imports section and the redundant-import lint change.",
-          "code": "clean: fn(text: String) -> String {\n    core.text.trim(text)\n}"
+          "name": "Implicit Core root",
+          "detail": "Bind core in every file without an import. Keep ordinary lexical and tidy-shadow rules rather than inventing a collision exemption. The advantage is smaller examples and less repeated setup. The cost is a distinct module-root visibility rule, which needs an explicit one-mechanism-rule exception.",
+          "technical": "Specify where the binding enters scope and how local or imported core names interact with it. Do not assume implicit visibility requires silent shadowing. Update import resolution, hover, completion, unused-import handling, and beginner examples if this alternative is accepted.",
+          "code": "// Proposed implicit root; not current Jet.\nclean: fn(text: String) -> String { core.text.trim(text) }\nrun: fn() { print(clean(\" hi \")) }"
         }
       ],
       "comparisons": [
         {
           "lang": "Python",
-          "note": "Modules must be imported before use; see https://docs.python.org/3/reference/import.html.",
-          "code": "import os; os.path.basename(p)"
-        },
-        {
-          "lang": "Rust",
-          "note": "`std::` paths work without `use` through the extern prelude; see https://doc.rust-lang.org/reference/names/preludes.html.",
-          "code": "let s = std::fs::read_to_string(path)?;"
+          "note": "Explicit imports bind names; this does not imply Jet's shadow policy.",
+          "code": "import os\nprint(os.path.basename(\"/tmp/hi\"))"
         }
       ],
       "rec": "A",
       "recommendation": {
-        "why": "One visible line keeps every name traceable to an import, and it already removes the collision that made short imports painful.",
+        "why": "The existing root import solves the collision without another name-visibility mechanism.",
         "gains": [
-          "Every name still has a visible source line."
+          "Qualified access uses the normal import rule."
         ],
         "losses": [
           {
-            "loss": "Files using full Core paths add a `use core` line.",
-            "mitigation": "The unknown-name error for `core` offers the `use core` line as its fix."
+            "loss": "One import line is required.",
+            "mitigation": "The missing-import diagnostic points to use core or a short alias."
           }
         ],
         "whyNot": [
           {
             "key": "B",
-            "reason": "B makes one root name appear from nowhere, a special case beside every other import."
+            "reason": "Saving one line does not justify a special module-root visibility rule."
           }
         ],
-        "tradeoff": "One import line per file in exchange for every name having a visible source."
+        "tradeoff": "Keep the import line instead of a hidden binding."
       },
       "hybrid": null,
       "ballotMode": "short",
@@ -122459,71 +122398,69 @@
       "reviewPasses": null,
       "checkInstructions": null,
       "surface": {
-        "gist": "Should full Core paths like `core.text.trim` need one `use core` line, or work with no import?",
-        "lesson": "An import binds a name for the whole file. `use core.text` binds `text`; `use core` binds only `core`, so locals named `text` or `files` collide with nothing. This vote settles whether `core` still needs that line. Either way, the clearer import hints and missing-module message on this card are still owed.",
+        "gist": "Should qualified Core calls require use core or get an implicit root?",
+        "lesson": "An import binds a module name in a file. A short text import can clash with a text parameter. Importing core instead allows core.text.trim(text) without that clash. This already works. The owner picked the explicit root; this does not remove Jet's existing built-in names.",
         "trio": {
           "current": {
-            "note": "A short import takes the plain name, so a natural parameter name collides with it.",
-            "code": "use core.text\nclean: fn(text: String) -> String {  // L0538: hides the import\n    text.trim()\n}"
+            "note": "This compiles and runs today on the baseline, printing hi.",
+            "code": "use core\nclean: fn(text: String) -> String { core.text.trim(text) }\nrun: fn() { print(clean(\" hi \")) }"
           },
           "wild": {
             "lang": "Python",
-            "note": "Python needs `import os` before `os.path` works; nothing is in scope by default. See https://docs.python.org/3/reference/import.html.",
-            "code": "import os\ndef name(path):\n    return os.path.basename(path)"
+            "note": "An explicit import binds a root used for qualified access.",
+            "code": "import os\nprint(os.path.basename(\"/tmp/hi\"))"
           }
         },
         "options": [
           {
             "key": "A",
-            "name": "One `use core` line",
-            "gist": "Write `use core` once, then any Core path in full.",
+            "name": "Explicit Core root",
+            "gist": "Keep use core for qualified Core calls.",
             "gains": [
-              "Every name in a file comes from a visible line.",
-              "Locals like `text` or `files` collide with nothing.",
-              "It is already the rule the spec states."
+              "No hidden module-root binding.",
+              "Keeps ordinary shadow checks."
             ],
             "losses": [
-              "One extra line in files that use full Core paths."
+              "Qualified Core calls need an import line."
             ],
             "proposed": {
-              "code": "use core\nclean: fn(text: String) -> String {\n    core.text.trim(text)\n}"
+              "code": "use core\nclean: fn(text: String) -> String { core.text.trim(text) }\nrun: fn() { print(clean(\" hi \")) }"
             }
           },
           {
             "key": "B",
-            "name": "Implicit `core` root",
-            "gist": "`core.` paths work in every file with no import.",
+            "name": "Implicit Core root",
+            "gist": "Make core available without an import.",
             "gains": [
-              "Saves one line per file."
+              "Qualified Core calls need no import line."
             ],
             "losses": [
-              "Not every name in a file comes from a visible line.",
-              "A local or module named `core` becomes a special case."
+              "One module root has a special visibility rule."
             ],
             "proposed": {
-              "code": "clean: fn(text: String) -> String {\n    core.text.trim(text)\n}"
+              "code": "// Proposed implicit root; not current Jet.\nclean: fn(text: String) -> String { core.text.trim(text) }\nrun: fn() { print(clean(\" hi \")) }"
             }
           }
         ],
         "recommendation": {
           "rec": "A",
-          "why": "One visible line keeps every name traceable to an import, and it already removes the collision that made short imports painful.",
+          "why": "The existing root import solves the collision without another name-visibility mechanism.",
           "gains": [
-            "Every name still has a visible source line."
+            "Qualified access uses the normal import rule."
           ],
           "losses": [
             {
-              "loss": "Files using full Core paths add a `use core` line.",
-              "mitigation": "The unknown-name error for `core` offers the `use core` line as its fix."
+              "loss": "One import line is required.",
+              "mitigation": "The missing-import diagnostic points to use core or a short alias."
             }
           ],
           "whyNot": [
             {
               "key": "B",
-              "reason": "B makes one root name appear from nowhere, a special case beside every other import."
+              "reason": "Saving one line does not justify a special module-root visibility rule."
             }
           ],
-          "tradeoff": "One import line per file in exchange for every name having a visible source."
+          "tradeoff": "Keep the import line instead of a hidden binding."
         }
       },
       "reports": [
@@ -122534,8 +122471,8 @@
         }
       ],
       "draftedBy": "Orchestrator",
-      "reviewedBy": null,
-      "draft": true,
+      "reviewedBy": "BallotReview1",
+      "draft": false,
       "status": "open",
       "created": "2026-11-28T01:57:56.563Z"
     },
@@ -122543,73 +122480,67 @@
       "id": "D-LINT-TIERS1",
       "cardId": "c07z82uc",
       "group": "diagnostics",
-      "title": "Unused locals and silent shadowing fail checks; unused imports and private functions warn; only jet fix prunes",
-      "situation": "Jet reports untidy code such as an unused import or a name that hides another. Some reports fail `jet check` and `jet build` but never stop `jet run`; others are warnings that only CI and release builds refuse. The card asked which reports land where and which command removes leftovers. We recommend that unused locals and silent shadowing fail checks, unused imports and private functions only warn, and only `jet fix` deletes code.",
-      "gist": "Which unused-code and shadowing reports should fail `jet check`, and which command removes unused imports?",
-      "lesson": "A check error fails `jet check` and `jet build` but never stops `jet run`, `jet dev` or `jet test`. A warning passes locally, while `--deny-warnings` or `--release` refuse it. `jet fix` applies safe edits; `jet fmt` changes only layout. The spec already describes the recommended split; this vote makes it the owner's rule.",
+      "title": "Separate tidy errors from cleanup warnings",
+      "situation": "Jet reports unused variables, shadowed names, unused imports, and unused private functions. The owner wants unused variables and shadowing to fail tidy checks, while unused imports and private functions remain warnings. Formatting must change layout only; fix is the CLI command that applies cleanup edits. We recommend that split and distinguish the current registry from an older executable baseline.",
+      "gist": "Which unused-name diagnostics should fail ordinary tidy checks?",
+      "lesson": "A tidy check catches suspicious names without stopping quick runs. An unused local or shadowed name can hide a mistake. An unused import or private helper is often unfinished cleanup. The owner picked errors for the first pair and warnings for the second. Formatting stays layout-only under every option.",
       "explainer": "",
-      "story": "Mia deletes a call while editing and leaves its import behind. She wants `jet check` to stay green for that leftover, but to fail when she computes a value and never reads it.",
-      "inWild": "import \"os\"   // error: imported and not used\nfunc main() {\n    x := 1    // error: declared and not used\n}\n// https://go.dev/doc/faq#unused_variables_and_imports",
-      "detail": "Owner context: card #7057 criterion 3 (item G43 in `Docs/Research/jet-authoring-friction-2026-11-27.md`) asked for tidy and style lints to warn in local dev and auto-prune in `jet fix` and `jet fmt`. The owner answered in chat on 2026-11-27: L0101 and L0538 stay errors, L0103 and L0104 warn, `jet fmt` is layout-only, and `jet fix` prunes.\n\nWhat Jet does today. In `Compiler/JetFoundation/Source/Registry/DiagnosticRows.jet`, L0101 `Jet.UnusedLocalBinding` and L0538 `Jet.NameSilentlyWins` are tier Tidy. L0103 `Jet.UnusedImport` and L0104 `Jet.UnusedPrivateFn` are tier Error at warning severity, and the L0103 fix says `jet fix` removes it. `Compiler/JetFoundation/Source/Registry/Diagnostics.jet` says a Tidy row fails `jet check` and `jet build` and never stops `run`, `dev` or `test`.\n\n`Docs/Spec/diagnostics.md` already states this split, with `--deny-warnings` and `--release` refusing warnings and `jet fmt` pruning nothing. This vote records the owner's rule and narrows the card's original wording, which also listed `jet fmt` as a pruner.\n\nResearch. Go makes unused imports and unused variables compile errors and leaves pruning to `goimports`. Rust and TypeScript make both warnings by default.",
+      "story": "Rae runs a half-written program with a spare helper. Check should catch the forgotten local, while formatting should not silently delete the helper.",
+      "inWild": "import os\ndef helper(): pass\ntotal = 0\nprint(\"ran\")",
+      "detail": "Owner scope: L0101 and L0538 stay tidy check errors; L0103 and L0104 are warnings; fmt is layout-only and fix applies pruning edits. L0104 is specifically an unused PRIVATE function, not every unused exported function. The original example omitted priv and could not demonstrate that diagnostic. The revised example uses a real Core module rather than the unavailable core.json path.\n\nRegistry truth: `Compiler/JetFoundation/Source/Registry/DiagnosticRows.jet:3290-3358,7698` puts L0101 and L0538 in tier Tidy, and L0103/L0104 in ordinary lint tier Error with warning severity. That internal tier name does not make a warning a local error. `Compiler/JetFoundation/Source/Registry/Diagnostics.jet`, `diagnostic_is_tidy:473`, distinguishes tidy findings. `Docs/Spec/diagnostics.md`, Tier Semantics and command-mode sections, describes check/build versus run/dev/test and warning promotion.\n\nExecuted a0.0.46-dev baseline: the current snippet compiled, ran, and printed ran. Its check exited 1 with L0101 and L0103 errors and L0104 warning. A separate imported-text/parameter collision ran but failed check with Jet.NameSilentlyWins. The executable therefore predates the current registry's L0103 severity; the draft must not claim source and executable already match. No newer dev binary was available for this review.\n\nFormatter/fix probes on copies: fmt retained the import, helper, and local while changing layout. Fix applied three edits: removed the private helper and prefixed the unused import and local with underscores. Thus fix applies safe diagnostic cleanup, not necessarily wholesale deletion of every unused declaration.\n\n`Compiler/JetCLI/Source/CLI/FixCommands.jet`, `jet_cli_fix_collect:92`, uses shared diagnostic edits with safety filtering. `Docs/Spec/diagnostics.md` specifies layout-only fmt and fix cleanup. This is a distinction between CLI commands, not a claim that no editor action can remove imports. `Compiler/JetLSP/Source/LSP/Imports.jet:1-6` documents import cleanup from checked unused-import rows.\n\nResearch: https://go.dev/doc/faq#unused_variables_and_imports says Go rejects unused local variables and imports, and describes goimports. That does not mean Go rejects every unused private helper or shadowing case. The old Go analogy overstated its policy. Python's executed example prints ran; external lint tools can impose stricter rules independently.",
       "options": [
         {
           "key": "A",
-          "name": "Split by risk",
-          "detail": "L0101 (unused local) and L0538 (a local silently hiding an import) stay check errors: they fail `jet check` and `jet build` and never stop `jet run`, `jet dev` or `jet test`. L0103 (unused import) and L0104 (unused private function) stay warnings that `--deny-warnings` and `--release` refuse. `jet fix` prunes them; `jet fmt` only lays out source.",
-          "technical": "No tier change in `DiagnosticRows.jet`; the rows already match. Confirm that `jet fmt` has no pruning path. Card #7057 criterion 3 closes against `Docs/Spec/diagnostics.md` as written.",
-          "code": "jet check   # fails: L0101, L0538\njet check   # warns: L0103, L0104\njet fix     # prunes L0103, L0104\njet fmt     # layout only"
+          "name": "Split the tiers",
+          "detail": "Treat unused local variables and silent shadowing as tidy errors in check/build. Treat unused imports and unused private functions as warnings locally. Run/dev/test keep their quick-loop tidy behavior. Warnings can still fail deny-warnings or release policy; warning does not mean ignored everywhere.",
+          "technical": "Preserve the existing diagnostic identities and one registry-driven command gate. Do not implement a second lint engine or a formatter-specific cleanup pass. Between CLI commands, fmt changes layout and fix applies registered cleanup edits.\n\nSafe cleanup must preserve initializer side effects and valid syntax in grouped imports and local functions. Do not blindly delete an unused binding whose initializer has effects; use the registered safe edit or intentional underscore form. Public APIs are not removed just because no local call is visible.\n\nTest all four findings under check/build/run/dev/test, deny-warnings and release, plus fix idempotence, grouped imports, effectful initializers, and formatter non-pruning. Refresh generated severity docs and snapshots from the registry rather than hand-maintaining a second table.",
+          "code": "use core.text // warning\npriv helper: fn() {} // warning\nrun: fn() {\n    total: 0 // tidy check error\n    print(\"ran\")\n}"
         },
         {
           "key": "B",
-          "name": "All warn, fmt prunes",
-          "detail": "Move L0101 and L0538 to warnings, and let `jet fmt` remove unused imports and private functions as well as `jet fix`.",
-          "technical": "Retier L0101 and L0538 in `DiagnosticRows.jet`, add a pruning pass to the formatter, and rewrite `Docs/Spec/diagnostics.md`.",
-          "code": "jet check   # warns: L0101, L0538, L0103, L0104\njet fmt     # prunes unused code"
+          "name": "Warn on all four",
+          "detail": "Make all four diagnostics ordinary local warnings, retaining release or explicit warning-denial promotion. This favors uninterrupted refactoring and consistent local severity. It also permits accidental shadowing to pass a normal check.",
+          "technical": "Move all four rows into the warning behavior consistently. Preserve diagnostic identities and shared fix edits. Fmt remains layout-only; changing severity does not justify pruning code during formatting.",
+          "code": "use core.text // warning\npriv helper: fn() {} // warning\nrun: fn() {\n    total: 0 // warning\n    print(\"ran\")\n}"
         },
         {
           "key": "C",
-          "name": "All fail checks",
-          "detail": "Move L0103 and L0104 to check errors, so all four fail `jet check` and `jet build`, as Go does.",
-          "technical": "Retier L0103 and L0104 to Tidy in `DiagnosticRows.jet` and rewrite `Docs/Spec/diagnostics.md`.",
-          "code": "jet check   # fails: L0101, L0538, L0103, L0104"
+          "name": "Fail checks on all four",
+          "detail": "Make all four findings tidy errors in check/build, while keeping quick runs free of tidy blocking. This is a coherent stricter cleanliness policy, not a claim that Go has the same four rules.",
+          "technical": "Use the same registry-driven tidy gate for all four. Preserve the same safe fixes and layout-only fmt. Do not accidentally promote cleanup findings into unconditional run-time compile errors.",
+          "code": "use core.text // tidy check error\npriv helper: fn() {} // tidy check error\nrun: fn() {\n    total: 0 // tidy check error\n    print(\"ran\")\n}"
         }
       ],
       "comparisons": [
         {
-          "lang": "Go",
-          "note": "Unused imports and variables are compile errors; see https://go.dev/doc/faq#unused_variables_and_imports.",
-          "code": "import \"os\" // error: \"os\" imported and not used"
-        },
-        {
-          "lang": "Rust",
-          "note": "Unused imports and variables are warnings by default; see https://doc.rust-lang.org/rustc/lints/listing/warn-by-default.html.",
-          "code": "use std::fs; // warning: unused import"
+          "lang": "Python",
+          "note": "The interpreter permits unused names; dedicated lint tools can choose stricter policy.",
+          "code": "import os\ndef helper(): pass\ntotal = 0\nprint(\"ran\")"
         }
       ],
       "rec": "A",
       "recommendation": {
-        "why": "It blocks the reports that usually mean a bug, lets harmless leftovers wait for `jet fix`, and keeps `jet fmt` from ever deleting code.",
+        "why": "Make suspicious bindings blocking in checks without treating every unfinished helper as a local failure.",
         "gains": [
-          "Bugs block checks; leftovers only warn.",
-          "Formatting never deletes code."
+          "Preserves strict name checks and quick run loops."
         ],
         "losses": [
           {
-            "loss": "A forgotten import passes local checks until CI.",
-            "mitigation": "`jet fix` removes it, and `--deny-warnings` in CI refuses it before merge."
+            "loss": "There are two severities to learn.",
+            "mitigation": "Show the severity and suggested edit in each diagnostic."
           }
         ],
         "whyNot": [
           {
             "key": "B",
-            "reason": "B lets a value that is computed and never read pass, and makes formatting delete code."
+            "reason": "It lets suspicious local bindings and shadowing pass ordinary checks."
           },
           {
             "key": "C",
-            "reason": "C fails a local check over a harmless leftover import, slowing every edit."
+            "reason": "It makes temporary cleanup block checks without identifying a stronger correctness risk."
           }
         ],
-        "tradeoff": "Leftover imports wait for `jet fix` or CI instead of failing locally."
+        "tradeoff": "Block suspicious bindings; leave cleanup as warnings locally."
       },
       "hybrid": null,
       "ballotMode": "short",
@@ -122618,90 +122549,87 @@
       "reviewPasses": null,
       "checkInstructions": null,
       "surface": {
-        "gist": "Which unused-code and shadowing reports should fail `jet check`, and which command removes unused imports?",
-        "lesson": "A check error fails `jet check` and `jet build` but never stops `jet run`, `jet dev` or `jet test`. A warning passes locally, while `--deny-warnings` or `--release` refuse it. `jet fix` applies safe edits; `jet fmt` changes only layout. The spec already describes the recommended split; this vote makes it the owner's rule.",
+        "gist": "Which unused-name diagnostics should fail ordinary tidy checks?",
+        "lesson": "A tidy check catches suspicious names without stopping quick runs. An unused local or shadowed name can hide a mistake. An unused import or private helper is often unfinished cleanup. The owner picked errors for the first pair and warnings for the second. Formatting stays layout-only under every option.",
         "trio": {
           "current": {
-            "note": "Today's rules already split this way; the card asked for warnings everywhere and pruning in `jet fmt` too.",
-            "code": "use core.json       // L0103 warning: unused import\nhelper: fn() { }    // L0104 warning: unused private fn\nrun: fn() {\n    total: 0        // L0101 check error: never read\n}"
+            "note": "This runs and prints ran; the older executable check still errors on its unused import.",
+            "code": "use core.text\npriv helper: fn() {}\nrun: fn() {\n    total: 0\n    print(\"ran\")\n}"
           },
           "wild": {
-            "lang": "Go",
-            "note": "Go refuses both unused imports and unused variables, and `goimports` prunes imports. See https://go.dev/doc/faq#unused_variables_and_imports.",
-            "code": "import \"os\"   // error: imported and not used\nfunc main() {\n    x := 1    // error: declared and not used\n}"
+            "lang": "Python",
+            "note": "Python executes this without unused-name enforcement; that policy leaves checks to separate tools.",
+            "code": "import os\ndef helper(): pass\ntotal = 0\nprint(\"ran\")"
           }
         },
         "options": [
           {
             "key": "A",
-            "name": "Split by risk",
-            "gist": "Unused locals and silent shadowing fail checks; unused imports and private functions warn.",
+            "name": "Split the tiers",
+            "gist": "Unused locals and shadowing fail checks; imports and helpers warn.",
             "gains": [
-              "Likely bugs, like a value computed and never read, block checks.",
-              "Leftover imports never block a local check.",
-              "`jet fmt` stays safe to run on every save."
+              "Suspicious bindings still need attention.",
+              "Cleanup can stay unfinished during local work."
             ],
             "losses": [
-              "A forgotten import passes local checks until CI."
+              "Users must learn which findings are errors."
             ],
             "proposed": {
-              "code": "jet check   # fails: L0101 unused local, L0538 silent shadowing\njet check   # passes, warns: L0103 import, L0104 private fn\njet fix     # removes the unused import and private fn\njet fmt     # layout only"
+              "code": "use core.text // warning\npriv helper: fn() {} // warning\nrun: fn() {\n    total: 0 // tidy check error\n    print(\"ran\")\n}"
             }
           },
           {
             "key": "B",
-            "name": "All warn, fmt prunes",
-            "gist": "All four only warn, and both `jet fix` and `jet fmt` remove unused code.",
+            "name": "Warn on all four",
+            "gist": "None of these findings fails an ordinary local check.",
             "gains": [
-              "Fewer local check failures."
+              "Fewer interruptions while code is being reshaped."
             ],
             "losses": [
-              "A value computed and never read slips through local checks.",
-              "`jet fmt` on save could delete an import mid-edit."
+              "Accidental shadowing can pass an ordinary check."
             ],
             "proposed": {
-              "code": "jet check   # passes, warns: L0101, L0538, L0103, L0104\njet fmt     # also removes unused imports and functions"
+              "code": "use core.text // warning\npriv helper: fn() {} // warning\nrun: fn() {\n    total: 0 // warning\n    print(\"ran\")\n}"
             }
           },
           {
             "key": "C",
-            "name": "All fail checks",
-            "gist": "All four fail `jet check`, as Go does.",
+            "name": "Fail checks on all four",
+            "gist": "Every listed finding must be cleared before check passes.",
             "gains": [
-              "No leftovers ever reach CI."
+              "One strict rule for every listed finding."
             ],
             "losses": [
-              "A spare import in a half-written file fails the local check."
+              "Temporary imports and private helpers interrupt checks."
             ],
             "proposed": {
-              "code": "jet check   # fails: L0101, L0538, L0103, L0104\njet fix     # removes the unused import and private fn"
+              "code": "use core.text // tidy check error\npriv helper: fn() {} // tidy check error\nrun: fn() {\n    total: 0 // tidy check error\n    print(\"ran\")\n}"
             }
           }
         ],
         "recommendation": {
           "rec": "A",
-          "why": "It blocks the reports that usually mean a bug, lets harmless leftovers wait for `jet fix`, and keeps `jet fmt` from ever deleting code.",
+          "why": "Make suspicious bindings blocking in checks without treating every unfinished helper as a local failure.",
           "gains": [
-            "Bugs block checks; leftovers only warn.",
-            "Formatting never deletes code."
+            "Preserves strict name checks and quick run loops."
           ],
           "losses": [
             {
-              "loss": "A forgotten import passes local checks until CI.",
-              "mitigation": "`jet fix` removes it, and `--deny-warnings` in CI refuses it before merge."
+              "loss": "There are two severities to learn.",
+              "mitigation": "Show the severity and suggested edit in each diagnostic."
             }
           ],
           "whyNot": [
             {
               "key": "B",
-              "reason": "B lets a value that is computed and never read pass, and makes formatting delete code."
+              "reason": "It lets suspicious local bindings and shadowing pass ordinary checks."
             },
             {
               "key": "C",
-              "reason": "C fails a local check over a harmless leftover import, slowing every edit."
+              "reason": "It makes temporary cleanup block checks without identifying a stronger correctness risk."
             }
           ],
-          "tradeoff": "Leftover imports wait for `jet fix` or CI instead of failing locally."
+          "tradeoff": "Block suspicious bindings; leave cleanup as warnings locally."
         }
       },
       "reports": [
@@ -122712,10 +122640,157 @@
         }
       ],
       "draftedBy": "Orchestrator",
-      "reviewedBy": null,
-      "draft": true,
+      "reviewedBy": "BallotReview1",
+      "draft": false,
       "status": "open",
       "created": "2026-11-28T01:57:57.366Z"
+    },
+    {
+      "id": "D-FAIL-INFER-MARK1",
+      "cardId": "c0ql4qd5",
+      "group": "syntax",
+      "title": "A lone ! opts into inferred errors",
+      "situation": "A function's error list tells callers which failures they must handle. Jet currently works out some lists from unmarked bodies, but the owner wants ordinary unmarked functions to return no errors. This affects helpers that return a failure without declaring an error type. We recommend a lone ! to request inference; the exact placement and rules for declarations without bodies below are proposals, not prior owner choices.",
+      "gist": "How should a function request an inferred error list under the no-error default?",
+      "lesson": "Inference means working out errors from a body. Unmarked ordinary functions will return no errors; entry and test bodies keep their friendly default. The owner picked a lone ! for inference. Placement and bodyless declarations remain proposals. All choices must preserve recoverable memory errors.",
+      "explainer": "",
+      "story": "Priya writes a helper that returns a not-found error. She wants failure visible in its signature without declaring a new error enum.",
+      "inWild": "fn findUser(id: i32) !i32 {\n    if (id < 0) return error.NotFound;\n    return id;\n}",
+      "detail": "Owner scope: the recorded pick is a lone ! requesting inferred errors. The owner has not separately settled its position, whitespace, unit form, or rules for declarations without bodies. Those are explicit proposals in A and may be rejected without changing the core pick.\n\nSource baseline: `failure_contract_from_return_type` in `Compiler/JetFoundation/Source/AST/Comptime.jet:91-106` initially gives an unwritten contract Err. `sema_failure_union_infer` in `Compiler/JetSema/Source/Sema/FailureUnion.jet:536` joins eligible top-level failures. `sema_failure_union_type_name:192` and `sema_failure_union_mint:273` name and create error enums; clashes report E0105. The infallibility audit explains the separate solve and its exclusions. Unmarked does not therefore mean always fallible today.\n\nExecutable evidence: the available a0.0.46-dev seed predates the current propagation spelling. A compiled and executed helper returned `Err(.NotFound)` and recovery produced `User { id: 0 }`. Its callable-signature projection displayed `User FindUserError!`. Generic callback execution produced 8 and ordinary callback execution produced 6. The seed requires the old question-mark propagation, whereas the current registry specifies !. This is baseline evidence, not proof that current dev has been built.\n\nRegistry: `Compiler/JetFoundation/Data/Syntax/Spellings.jet`, the ! and callable-arrow rows, register named contracts and value propagation, not lone-signature inference. `Docs/Spec/spec.md:547,2178` still requires a named domain. `Compiler/JetParser/Source/Parser/Items.jet:1937` and `Types.jet:908` currently reject a single marked type after a plain arrow. A changes this grammar; it is not existing syntax.\n\nResearch: https://ziglang.org/documentation/master/#Inferred-Error-Sets documents opt-in inference and its recursion and function-pointer limitations. Jet must not inherit those limits by analogy. The Zig example was compiled and tested; the Rust generic callback example was compiled and executed. Swift's typed-throws proposal documents fixed contracts and generic callback errors: https://github.com/swiftlang/swift-evolution/blob/main/proposals/0413-typed-throws.md. Its removed full-inference changes are future work, not evidence that body inference ships generally.\n\nReconciliation: the ratified allocation-failure ruling (2026-11-11, outcome C) covers explicit and implicit allocations. No-error defaults cannot silently turn allocation failures into stops. Functions that may allocate must handle AllocError, declare it, or opt into inference unless the allocation is proved unable to fail. Infallible here means no returned error, not no panic, no effects, or guaranteed success.",
+      "options": [
+        {
+          "key": "A",
+          "name": "Opt into inference",
+          "detail": "Proposed grammar: write `-> T !` for a value or `!` after the parameters for unit success. Whitespace must not select semantics: `-> T!` and `-> T !` mean the same inferred contract, with the formatter choosing one. This intentionally replaces the current rejection of a single marked type after an arrow.\n\nProposed bodyless rule: a lone inferred ! requires a body. A bodyless declaration that permits failures names an error domain or generic E!; an unmarked one permits no errors. A contextually typed lambda follows its expected callable contract. A named or stored body can infer its failures, including methods, recursive groups, and address-taken functions. The current top-level eligibility limits must not become new language exceptions.\n\nAn unmarked ordinary body that lets an error escape gets one registered diagnostic at its first failure, with a signature fix. Only the actual program entry and test bodies retain implicit Err; a library function named run and helpers in test files do not. A marked body with an empty inferred set returns no errors.",
+          "technical": "This is a grammar proposal, not a claim of support. Extend the signature AST and parser with an explicit inferred-contract state. Keep named `T E!`, optional success `T? E!`, unit `E!`, and effect arrows unambiguous. A unit function with effects uses the registered arrow followed by the lone contract mark. Add parser and formatting examples for all combinations before landing.\n\nReuse FailureUnion's joined error sets and enum minting; remove default-triggered infallibility solving and obsolete projection/recheck paths only after every caller is migrated. Preserve payload-clash and name-clash diagnostics. Recursive groups need a convergent common solve, not a recursion ban. Inferred callable contracts must remain usable as values and satisfy trait contracts uniformly.\n\nKeep the retired diagnostic identity `Jet.RetiredBareFailure` retired; never delete its historical code or reuse it for this meaning. Update current parser hints, registry, spec, hover, snapshots, and the audit's binding cutover list. In one bootstrap patch, migrate fallible declarations across Compiler, Core, Examples, Tests, Tools, and Docs and remove redundant Never! annotations.\n\nThe spaced form and the bodyless restriction are review proposals the owner may reject. Rejecting whitespace-sensitive meaning removes an avoidable beginner trap rather than adding a second spelling mechanism.",
+          "code": "// Proposed; not executable on the available seed.\nfind_user: fn(id: Int) -> Int ! {\n    if id < 0 -> return Err(.NotFound)\n    id\n}"
+        },
+        {
+          "key": "B",
+          "name": "Write every contract",
+          "detail": "Require a named domain, a generic domain, or Err! for every failing function. Fixed public contracts are the strongest reason to choose this option. An existing shared domain can be reused; not every helper needs its own enum. Exact anonymous local cases do require declarations. Err! can need a conversion from a typed error.",
+          "technical": "Retire automatic error-enum minting and body-derived contracts. Keep ordinary checking of written contracts, generic callback errors, and conversions. Migrate former inferred cases into explicit domains rather than assuming every typed error converts to Err.",
+          "code": "#Error\nFindUserError: enum { NotFound }\nfind_user: fn(id: Int) -> Int FindUserError! {\n    if id < 0 -> return Err(.NotFound)\n    id\n}"
+        }
+      ],
+      "comparisons": [
+        {
+          "lang": "Zig",
+          "note": "Opt-in inference; its reference explicitly warns about recursion and function pointers.",
+          "code": "fn findUser(id: i32) !i32 { if (id < 0) return error.NotFound; return id; }"
+        },
+        {
+          "lang": "Rust",
+          "note": "A generic Result callback passes its error type through without a handwritten conversion.",
+          "code": "fn apply<E>(step: impl Fn(i32) -> Result<i32, E>, n: i32) -> Result<i32, E> {\n    step(n)\n}"
+        }
+      ],
+      "rec": "A",
+      "recommendation": {
+        "why": "Keep inference behind a visible opt-in, while allowing named contracts when callers need stability.",
+        "gains": [
+          "Small failing helpers need no handwritten error enum."
+        ],
+        "losses": [
+          {
+            "loss": "A body change can widen an inferred public contract.",
+            "mitigation": "Publish a named error contract when callers need a fixed list."
+          }
+        ],
+        "whyNot": [
+          {
+            "key": "B",
+            "reason": "Fixed contracts are useful, but requiring them everywhere removes concise local error cases."
+          }
+        ],
+        "tradeoff": "Use inference locally and named contracts at stable boundaries."
+      },
+      "hybrid": null,
+      "ballotMode": "full",
+      "shortAuthorizedBy": null,
+      "ballotProcessVersion": 5,
+      "reviewPasses": {
+        "adversarial": "Author model family: Claude. Adversarial model family: GPT. Fresh agent: BallotReview1. Checked the registry, parser, inference code, audit, ratified allocation rule, and executed baseline probes; repaired whitespace sensitivity, bodyless-rule provenance, retired-code deletion, and the false delay alternative. Added recursive, callable-value, method, allocation, entry, and stable-contract cases; current dev execution remains unverified because the available seed predates its propagation spelling."
+      },
+      "checkInstructions": null,
+      "surface": {
+        "gist": "How should a function request an inferred error list under the no-error default?",
+        "lesson": "Inference means working out errors from a body. Unmarked ordinary functions will return no errors; entry and test bodies keep their friendly default. The owner picked a lone ! for inference. Placement and bodyless declarations remain proposals. All choices must preserve recoverable memory errors.",
+        "trio": {
+          "current": {
+            "note": "The executable baseline infers FindUserError here; no error mark is written.",
+            "code": "find_user: fn(id: Int) -> Int {\n    if id < 0 -> return Err(.NotFound)\n    id\n}\n// inferred: Int FindUserError!"
+          },
+          "wild": {
+            "lang": "Zig",
+            "note": "Zig requests an inferred error set with ! before the success type.",
+            "code": "fn findUser(id: i32) !i32 {\n    if (id < 0) return error.NotFound;\n    return id;\n}"
+          }
+        },
+        "options": [
+          {
+            "key": "A",
+            "name": "Opt into inference",
+            "gist": "A lone ! requests errors inferred from the body.",
+            "gains": [
+              "Failure is visible without a handwritten error enum.",
+              "Keeps exact inferred cases for callers."
+            ],
+            "losses": [
+              "Changing a body can change its public error list."
+            ],
+            "proposed": {
+              "code": "// Proposed placement; spaces do not change meaning.\nfind_user: fn(id: Int) -> Int ! {\n    if id < 0 -> return Err(.NotFound)\n    id\n}"
+            }
+          },
+          {
+            "key": "B",
+            "name": "Write every contract",
+            "gist": "Name an error type or use the general Err type.",
+            "gains": [
+              "Public error contracts stay fixed when bodies change."
+            ],
+            "losses": [
+              "Exact local cases need a handwritten error type."
+            ],
+            "proposed": {
+              "code": "#Error\nFindUserError: enum { NotFound }\nfind_user: fn(id: Int) -> Int FindUserError! {\n    if id < 0 -> return Err(.NotFound)\n    id\n}"
+            }
+          }
+        ],
+        "recommendation": {
+          "rec": "A",
+          "why": "Keep inference behind a visible opt-in, while allowing named contracts when callers need stability.",
+          "gains": [
+            "Small failing helpers need no handwritten error enum."
+          ],
+          "losses": [
+            {
+              "loss": "A body change can widen an inferred public contract.",
+              "mitigation": "Publish a named error contract when callers need a fixed list."
+            }
+          ],
+          "whyNot": [
+            {
+              "key": "B",
+              "reason": "Fixed contracts are useful, but requiring them everywhere removes concise local error cases."
+            }
+          ],
+          "tradeoff": "Use inference locally and named contracts at stable boundaries."
+        }
+      },
+      "reports": [
+        {
+          "title": "Infallible-by-default function review",
+          "path": "Docs/Audits/2026-11-27-infallible-default-fn-review.md",
+          "note": "Source baseline, scope limits, and binding cutover list."
+        }
+      ],
+      "draftedBy": "Orchestrator",
+      "reviewedBy": "BallotReview1",
+      "draft": false,
+      "status": "open",
+      "created": "2026-11-28T02:14:36.854Z"
     }
   ],
   "questions": [
@@ -124867,6 +124942,132 @@
     }
   ],
   "events": [
+    {
+      "at": "2026-11-28T02:14:52.149Z",
+      "by": "Orchestrator",
+      "action": "decision.post",
+      "ref": "D-LINT-TIERS1",
+      "note": "reviewed by BallotReview1"
+    },
+    {
+      "at": "2026-11-28T02:14:51.100Z",
+      "by": "BallotReview1",
+      "action": "decision.review",
+      "ref": "D-LINT-TIERS1",
+      "note": "passed"
+    },
+    {
+      "at": "2026-11-28T02:14:50.144Z",
+      "by": "Orchestrator",
+      "action": "decision.post",
+      "ref": "D-CORE-ROOT-USE1",
+      "note": "reviewed by BallotReview1"
+    },
+    {
+      "at": "2026-11-28T02:14:49.210Z",
+      "by": "BallotReview1",
+      "action": "decision.review",
+      "ref": "D-CORE-ROOT-USE1",
+      "note": "passed"
+    },
+    {
+      "at": "2026-11-28T02:14:48.238Z",
+      "by": "Orchestrator",
+      "action": "decision.post",
+      "ref": "D-CLI-OPTVALUE-SPLIT1",
+      "note": "reviewed by BallotReview1"
+    },
+    {
+      "at": "2026-11-28T02:14:47.302Z",
+      "by": "BallotReview1",
+      "action": "decision.review",
+      "ref": "D-CLI-OPTVALUE-SPLIT1",
+      "note": "passed"
+    },
+    {
+      "at": "2026-11-28T02:14:46.306Z",
+      "by": "Orchestrator",
+      "action": "decision.post",
+      "ref": "D-STRING-ONE1",
+      "note": "reviewed by BallotReview1"
+    },
+    {
+      "at": "2026-11-28T02:14:45.384Z",
+      "by": "BallotReview1",
+      "action": "decision.review",
+      "ref": "D-STRING-ONE1",
+      "note": "passed"
+    },
+    {
+      "at": "2026-11-28T02:14:44.444Z",
+      "by": "Orchestrator",
+      "action": "decision.post",
+      "ref": "D-FN-TYPE-NOFAIL1",
+      "note": "reviewed by BallotReview1"
+    },
+    {
+      "at": "2026-11-28T02:14:43.601Z",
+      "by": "BallotReview1",
+      "action": "decision.review",
+      "ref": "D-FN-TYPE-NOFAIL1",
+      "note": "passed"
+    },
+    {
+      "at": "2026-11-28T02:14:42.553Z",
+      "by": "Orchestrator",
+      "action": "decision.post",
+      "ref": "D-FAIL-INFER-MARK1",
+      "note": "reviewed by BallotReview1"
+    },
+    {
+      "at": "2026-11-28T02:14:41.705Z",
+      "by": "BallotReview1",
+      "action": "decision.review",
+      "ref": "D-FAIL-INFER-MARK1",
+      "note": "passed"
+    },
+    {
+      "at": "2026-11-28T02:14:36.855Z",
+      "by": "Orchestrator",
+      "action": "decision.add",
+      "ref": "D-FAIL-INFER-MARK1",
+      "note": "A lone ! opts into inferred errors (draft)"
+    },
+    {
+      "at": "2026-11-28T02:14:35.921Z",
+      "by": "Orchestrator",
+      "action": "decision.update",
+      "ref": "D-LINT-TIERS1",
+      "note": ""
+    },
+    {
+      "at": "2026-11-28T02:14:35.071Z",
+      "by": "Orchestrator",
+      "action": "decision.update",
+      "ref": "D-CORE-ROOT-USE1",
+      "note": ""
+    },
+    {
+      "at": "2026-11-28T02:14:34.245Z",
+      "by": "Orchestrator",
+      "action": "decision.update",
+      "ref": "D-CLI-OPTVALUE-SPLIT1",
+      "note": ""
+    },
+    {
+      "at": "2026-11-28T02:14:33.426Z",
+      "by": "Orchestrator",
+      "action": "decision.update",
+      "ref": "D-FN-TYPE-NOFAIL1",
+      "note": ""
+    },
+    {
+      "at": "2026-11-28T02:14:32.596Z",
+      "by": "Orchestrator",
+      "action": "decision.update",
+      "ref": "D-STRING-ONE1",
+      "note": ""
+    },
     {
       "at": "2026-11-28T02:07:16.537Z",
       "by": "Orchestrator",
