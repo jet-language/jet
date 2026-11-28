@@ -3,7 +3,7 @@
     "version": 4,
     "project": "Jet",
     "nextNum": 7071,
-    "rev": 115400,
+    "rev": 115425,
     "ui": {
       "toggled": [
         "dec-group:syntax",
@@ -64702,8 +64702,8 @@
       "parentId": null,
       "needsAcceptance": false,
       "created": "2026-11-27T21:28:07.686Z",
-      "updated": "2026-11-28T04:32:38.808Z",
-      "updatedBy": "BallotReview4",
+      "updated": "2026-11-28T04:32:51.026Z",
+      "updatedBy": "Orchestrator",
       "criteriaLastN": 3
     },
     {
@@ -64773,7 +64773,7 @@
       "parentId": null,
       "needsAcceptance": false,
       "created": "2026-11-27T21:28:08.583Z",
-      "updated": "2026-11-28T04:00:30.364Z",
+      "updated": "2026-11-28T04:33:04.474Z",
       "updatedBy": "Orchestrator",
       "criteriaLastN": 4
     },
@@ -128827,9 +128827,1228 @@
       ],
       "draftedBy": "Orchestrator",
       "reviewedBy": "BallotReview4",
-      "draft": true,
+      "draft": false,
       "status": "open",
       "created": "2026-11-28T04:32:37.955Z"
+    },
+    {
+      "id": "D-DEFER-LOOP1",
+      "cardId": "c08123r9",
+      "group": "memory",
+      "title": "A #Defer inside an unbounded loop that targets an outer scope is refused",
+      "situation": "",
+      "gist": "Should a `#Defer` in an unbounded loop targeting an outer scope be refused, or allowed with a heap cost and lint?",
+      "lesson": "Repeated registration targeting an outer lifetime may need one record per pass and keep resources alive until that target exits. A rejects registration without a static bound. B allows dynamic records with allocation and a warning. Per-pass cleanup avoids that retention.",
+      "explainer": "",
+      "story": "Dev opens a file on each pass of a loop and registers its close for function exit. With ten thousand paths, ten thousand files stay open.",
+      "inWild": "for _, p := range paths {\n    f, _ := os.Open(p)\n    defer f.Close() // all close at return\n}",
+      "detail": "Compiler/JetIR/Source/BuildTransact.jet, ir_defer, registers lexical block cleanup; the baseline loop/defer capture probe confirms live capture rather than registration-time snapshot. The proposed outer-target cleanup is new, so its repeated registrations need an explicit storage law.\n\nA rejects sites whose outstanding registration count is not statically bounded. A static bound permits fixed registration storage; it does not prove captured values allocate nothing or that every bound is a practical stack size. B permits a dynamic registration stack, charges allocation through the context allocator, and diagnoses retention risk.\n\nBoth options preserve reverse registration order, captures, early exits and allocation-failure cleanup. Collecting resources into one owner is guidance, not a universally safe mechanical fix. Register a live-owner cleanup before the loop if it must cover partial construction, and close in reverse order. The capture and cleanup-order ballots govern whether that rewrite is valid.",
+      "options": [
+        {
+          "key": "A",
+          "name": "Refuse unbounded registration",
+          "detail": "Reject unbounded outstanding outer-target registrations. Suggest per-pass cleanup or an owned resource collection; auto-rewrite only with proved equivalent capture, failure and reverse-order behavior.",
+          "code": "^files: [File]{}\n#Defer(scope: .Fn) { close_all_reverse(files) }\nloop path in paths { files.push(open(path)) }"
+        },
+        {
+          "key": "B",
+          "name": "Allow with Mem.Alloc and a lint",
+          "detail": "Allow a dynamic registration stack charged to the context allocator, with a retention warning. Preserve registered cleanup on allocation failure and retain reverse registration order.",
+          "code": "loop path in paths {\n    f: open(path)\n    #Defer(scope: .Fn) { close(f) }   // lint\n}"
+        }
+      ],
+      "comparisons": [
+        {
+          "lang": "Go",
+          "note": "Go defers run at function return, so a defer in a loop keeps every file open until then. See https://go.dev/doc/effective_go#defer.",
+          "code": "for _, p := range paths {\n    f, _ := os.Open(p)\n    defer f.Close() // all close at return\n}"
+        },
+        {
+          "lang": "Zig",
+          "note": "Zig defers are block-scoped only; function-wide cleanup over many items is an explicit list. See https://ziglang.org/documentation/master/#defer.",
+          "code": "for (paths) |p| {\n    const f = try open(p);\n    defer f.close(); // end of this pass\n}"
+        }
+      ],
+      "rec": "A",
+      "recommendation": {
+        "why": "Unbounded cleanup records hide heap use and keep resources open, the Go leak. Refusing them costs only an explicit list in rare code, and allowing them later stays possible.",
+        "gains": [
+          "Cleanup never allocates in secret.",
+          "No Go-style resource leak."
+        ],
+        "losses": [
+          {
+            "loss": "Rare loops need an explicit list.",
+            "mitigation": "The error's fix writes the list form, and B can be added later by its own ballot."
+          }
+        ],
+        "whyNot": [
+          {
+            "key": "B",
+            "reason": "B keeps the Go leak and an unbounded hidden allocation behind a lint."
+          }
+        ],
+        "tradeoff": "An explicit list in rare code buys allocation-free cleanup."
+      },
+      "hybrid": null,
+      "ballotMode": "short",
+      "shortAuthorizedBy": null,
+      "ballotProcessVersion": 5,
+      "reviewPasses": null,
+      "checkInstructions": null,
+      "surface": {
+        "gist": "Should a `#Defer` in an unbounded loop targeting an outer scope be refused, or allowed with a heap cost and lint?",
+        "lesson": "Repeated registration targeting an outer lifetime may need one record per pass and keep resources alive until that target exits. A rejects registration without a static bound. B allows dynamic records with allocation and a warning. Per-pass cleanup avoids that retention.",
+        "trio": {
+          "current": {
+            "note": "Today `defer` is block-scoped, so a cleanup in a loop runs at the end of each pass.",
+            "code": "loop path in paths {\n    f: open(path)\n    defer close(f)   // runs at the end of this pass\n}"
+          },
+          "wild": {
+            "lang": "Go",
+            "note": "Go defers run at function return, so a defer in a loop keeps every file open until then. See https://go.dev/doc/effective_go#defer.",
+            "code": "for _, p := range paths {\n    f, _ := os.Open(p)\n    defer f.Close() // all close at return\n}"
+          }
+        },
+        "options": [
+          {
+            "key": "A",
+            "name": "Refuse unbounded registration",
+            "gist": "An unbounded loop that registers outer-scope cleanup is an error; the fix uses one list.",
+            "gains": [
+              "No hidden heap use in cleanup.",
+              "No files left open until return."
+            ],
+            "losses": [
+              "The rare real case needs a list."
+            ],
+            "proposed": {
+              "code": "^files: [File]{}\n#Defer(scope: .Fn) { close_all_reverse(files) }\nloop path in paths {\n    files.push(open(path))\n}"
+            }
+          },
+          {
+            "key": "B",
+            "name": "Allow with Mem.Alloc and a lint",
+            "gist": "Each pass adds a heap record, charged as `Mem.Alloc`, with a tidy lint at the site.",
+            "gains": [
+              "The card's form works unchanged."
+            ],
+            "losses": [
+              "Unbounded memory in cleanup.",
+              "Resources stay open until return."
+            ],
+            "proposed": {
+              "code": "loop path in paths {\n    f: open(path)\n    #Defer(scope: .Fn) { close(f) }   // lint\n}"
+            }
+          }
+        ],
+        "recommendation": {
+          "rec": "A",
+          "why": "Unbounded cleanup records hide heap use and keep resources open, the Go leak. Refusing them costs only an explicit list in rare code, and allowing them later stays possible.",
+          "gains": [
+            "Cleanup never allocates in secret.",
+            "No Go-style resource leak."
+          ],
+          "losses": [
+            {
+              "loss": "Rare loops need an explicit list.",
+              "mitigation": "The error's fix writes the list form, and B can be added later by its own ballot."
+            }
+          ],
+          "whyNot": [
+            {
+              "key": "B",
+              "reason": "B keeps the Go leak and an unbounded hidden allocation behind a lint."
+            }
+          ],
+          "tradeoff": "An explicit list in rare code buys allocation-free cleanup."
+        }
+      },
+      "reports": [
+        {
+          "title": "Unified #Defer marker pre-build review",
+          "path": "Docs/Audits/2026-11-27-unified-defer-marker-review.md",
+          "note": "Section 3 and section 9, ballot B1."
+        }
+      ],
+      "draftedBy": "Orchestrator",
+      "reviewedBy": "BallotReview4",
+      "draft": false,
+      "status": "open",
+      "created": "2026-11-28T04:32:41.508Z"
+    },
+    {
+      "id": "D-ROLLBACK-KEEP1",
+      "cardId": "c08123r9",
+      "group": "library",
+      "title": "The Rollback trait stays as the per-type snapshot strategy; the spec opt-out sentence goes",
+      "situation": "",
+      "gist": "Should the `Rollback` trait stay as each type's snapshot strategy for transactions, instead of being deleted as the card says?",
+      "lesson": "Rollback customizes the snapshot and restore strategy; it is not a cleanup callback. Removing it need not add an opt-out marker: transactions can instead reject writes to values they cannot snapshot automatically. That is simpler but loses useful custom strategies.",
+      "explainer": "",
+      "story": "Ida keeps a large grid in a transaction. Her `Rollback` impl records only changed cells, and she needs it to keep working.",
+      "inWild": "atomically $ modifyTVar grid (setCell 3 4 1)",
+      "detail": "Current law. Compiler/Prelude/Traits.jet, Rollback (lines 314-319), declares Snapshot, snapshot and restore. Compiler/JetSema/Source/Sema/Statements/Assignments.jet collects snapshot roots from every assignment in the body (sema_stmt_transaction_collect_roots, line 129). It builds their snapshots in sema_stmt_transaction_snapshots (line 236). Compiler/JetIR/Source/BuildTransact.jet restores recorded snapshots before walking rollback hooks. The older executable ran Examples/ErrorsAndEffects/Errors/RollbackTrait.jet and restored balances to 60 and 40 after an overdraft.\n\nThe stale sentence is ratified text. Docs/Spec/spec.md lines 2894-2896 say an on_rollback hook takes control of undo for its value, so that value is not snapshotted. That sentence carries a spec-only ratified import. The unified defer review (Docs/Audits/2026-11-27-unified-defer-marker-review.md, lines 77-82, divergence D1) found that code never excludes such values. Both options therefore amend that sentence to match the code; neither adds an opt-out.\n\nA keeps custom strategies. This does not promise every arbitrary value has a legal snapshot. B deletes custom strategies and permits transactional writes only for values supported by ordinary automatic snapshots. No new opt-out spelling or guessed manual-restore detection is added.\n\nA handwritten cleanup can still perform ordinary work, but does not silently replace the transaction engine's snapshot strategy. Explicit and implicit transaction-wall rules remain those of the transaction-scope ballot.",
+      "options": [
+        {
+          "key": "A",
+          "name": "Keep Rollback",
+          "detail": "Keep `Rollback` unchanged. Delete the spec sentence about `on_rollback` opting a value out. Reword card criterion 3.",
+          "code": "impl Grid.Rollback { … }   // custom snapshot and restore"
+        },
+        {
+          "key": "B",
+          "name": "Delete Rollback",
+          "detail": "Remove custom Rollback strategies. Keep automatic snapshots where supported and reject unsupported transactional writes. Do not add an unspecified opt-out spelling.",
+          "code": "// custom strategies disappear; unsupported transactional writes fail"
+        }
+      ],
+      "comparisons": [
+        {
+          "lang": "Haskell",
+          "note": "GHC's STM records each transactional variable it writes and discards the writes on retry, with no user hook. See https://hackage.haskell.org/package/stm/docs/Control-Concurrent-STM.html.",
+          "code": "atomically $ modifyTVar grid (setCell 3 4 1)"
+        }
+      ],
+      "rec": "A",
+      "recommendation": {
+        "why": "A keeps custom snapshots, a different role from cleanup, without an extra opt-out mechanism.",
+        "gains": [
+          "Custom snapshot capability remains.",
+          "No new opt-out spelling."
+        ],
+        "losses": [
+          {
+            "loss": "The card keeps one trait it meant to delete.",
+            "mitigation": "Criterion 3 is reworded, and the spec's stale sentence is deleted in the same batch."
+          }
+        ],
+        "whyNot": [
+          {
+            "key": "B",
+            "reason": "B is simpler and concrete, but loses custom strategies and rejects unsupported transactional writes."
+          }
+        ],
+        "tradeoff": "A retained strategy trait preserves useful transactional writes."
+      },
+      "hybrid": null,
+      "ballotMode": "short",
+      "shortAuthorizedBy": null,
+      "ballotProcessVersion": 5,
+      "reviewPasses": null,
+      "checkInstructions": null,
+      "surface": {
+        "gist": "Should the `Rollback` trait stay as each type's snapshot strategy for transactions, instead of being deleted as the card says?",
+        "lesson": "Rollback customizes the snapshot and restore strategy; it is not a cleanup callback. Removing it need not add an opt-out marker: transactions can instead reject writes to values they cannot snapshot automatically. That is simpler but loses useful custom strategies.",
+        "trio": {
+          "current": {
+            "note": "Today a type can customize the snapshot a transaction takes.",
+            "code": "impl Grid.Rollback { … }   // custom snapshot and restore"
+          },
+          "wild": {
+            "lang": "Haskell",
+            "note": "GHC's STM records each transactional variable it writes and discards the writes on retry, with no user hook. See https://hackage.haskell.org/package/stm/docs/Control-Concurrent-STM.html.",
+            "code": "atomically $ modifyTVar grid (setCell 3 4 1)"
+          }
+        },
+        "options": [
+          {
+            "key": "A",
+            "name": "Keep Rollback",
+            "gist": "Keep the trait as the snapshot strategy and delete the spec's opt-out sentence.",
+            "gains": [
+              "Custom snapshot strategies remain available.",
+              "Spec and code agree."
+            ],
+            "losses": [
+              "The card's deletion list shrinks by one."
+            ],
+            "proposed": {
+              "code": "impl Grid.Rollback { … }   // custom snapshot and restore"
+            }
+          },
+          {
+            "key": "B",
+            "name": "Delete Rollback",
+            "gist": "Remove custom strategies; permit transactional writes only when ordinary automatic snapshots are supported.",
+            "gains": [
+              "One fewer Prelude trait."
+            ],
+            "losses": [
+              "Custom cheap snapshots disappear.",
+              "Values without an automatic snapshot cannot be written transactionally."
+            ],
+            "proposed": {
+              "code": "// no custom Rollback impl; unsupported transactional writes are errors"
+            }
+          }
+        ],
+        "recommendation": {
+          "rec": "A",
+          "why": "Snapshot strategy and cleanup are different roles. A preserves custom snapshots without adding a new opt-out mechanism.",
+          "gains": [
+            "Custom snapshot capability remains.",
+            "No new opt-out spelling."
+          ],
+          "losses": [
+            {
+              "loss": "The card keeps one trait it meant to delete.",
+              "mitigation": "Criterion 3 is reworded, and the spec's stale sentence is deleted in the same batch."
+            }
+          ],
+          "whyNot": [
+            {
+              "key": "B",
+              "reason": "B is concrete and adds no opt-out syntax, but loses custom snapshots and rejects unsupported transactional writes."
+            }
+          ],
+          "tradeoff": "One retained trait preserves custom snapshot strategies."
+        }
+      },
+      "reports": [
+        {
+          "title": "Unified #Defer marker pre-build review",
+          "path": "Docs/Audits/2026-11-27-unified-defer-marker-review.md",
+          "note": "Section 6 and section 9, ballot B4."
+        }
+      ],
+      "draftedBy": "Orchestrator",
+      "reviewedBy": "BallotReview4",
+      "draft": false,
+      "status": "open",
+      "created": "2026-11-28T04:32:44.240Z"
+    },
+    {
+      "id": "D-DEFER-CAPTURE1",
+      "cardId": "c08123r9",
+      "group": "memory",
+      "title": "One lifetime-based capture law for every cleanup target",
+      "situation": "",
+      "gist": "When cleanup is aimed at the end of the function, what happens to a local from an inner block that dies first?",
+      "lesson": "Today's block cleanup reads its locals when the block ends, and those locals are still alive then. Function-end cleanup written inside an inner block can name a local that dies earlier. A hands an owned local to the cleanup when its own block ends. B rejects such names. C captures them at the moment cleanup is registered.",
+      "explainer": "",
+      "story": "Maya opens a log file inside an if block, reads from it, and wants it closed only when the whole function finishes.",
+      "inWild": "for _, p := range paths {\n    f, _ := os.Open(p)\n    defer f.Close() // f saved now, runs at function return\n}",
+      "detail": "Current law. Compiler/JetIR/Source/BuildTransact.jet, ir_defer (comment and body at lines 251-262), records the deferred body as a binding entry. That entry runs where the block's bindings drop, and each exit reads the variables as they are there. A probe on the older supplied executable ran `^n: 1`, `defer { print(n) }`, `n = 2` and printed 2. This shows baseline live reads only; it does not show that newer dev matches it.\n\nWhy a ballot. The unified marker review (Docs/Audits/2026-11-27-unified-defer-marker-review.md, section 4) shows that a function-target cleanup written in an inner block can name locals that are dead at function exit. It proposes the lifetime-partitioned hand-over in A. No ratified ruling decides capture timing for outer targets; the ratified general-defer ruling covers block cleanup, which always runs before its locals die.\n\nA in full. Names declared in the target scope or outside it are read by place at the target's exit; writes are checked at that exit. Owned names declared strictly inside the target move into the cleanup record when their own block ends. Reject borrowed views, lock guards, region- or arena-bound values, writes to a handed-over name, and a later explicit or automatic move of it in its block. A record never crosses a task. With a block target the hand-over set is empty, so A equals today's block cleanup.\n\nB and C. B accepts only names that survive until the target exits. C snapshots owned inner names at the cleanup line, as Go does, but keeps live reads for surviving names; the audit calls this two capture laws in one marker.\n\nCompanions. The `#Defer(scope: .Fn)` spelling shown is proposed, from the open spelling ballot. The loop-defer ballot separately decides whether a function-target cleanup may sit inside an unbounded loop; the examples here use an if block so they do not depend on that answer. Cleanup ordering is the cleanup-order ballot.",
+      "options": [
+        {
+          "key": "A",
+          "name": "Hand over at block end",
+          "detail": "Use the audit's lifetime-partitioned law. Locals declared in the target scope or outside it stay live places read at the target's exit, as today. An owned local declared in a block strictly inside the target moves into the cleanup record when its own block ends. It stays usable until then.\n\nReject borrowed views, lock guards and arena-bound values that cannot outlive their block. Also reject writes to a handed-over local and any later move of it in its block. A record never crosses a task.",
+          "code": "if verbose {\n    f: open(path)\n    #Defer(scope: .Fn) { close(f) }\n    f.read()\n}"
+        },
+        {
+          "key": "B",
+          "name": "Only long-lived locals",
+          "detail": "Permit only names that stay alive until the selected target exits. A name from a shorter-lived inner block is an error whose fix moves the value to the target scope or uses block cleanup.",
+          "code": "if verbose {\n    f: open(path)\n    #Defer { close(f) } // block cleanup instead\n    f.read()\n}"
+        },
+        {
+          "key": "C",
+          "name": "Take it at registration",
+          "detail": "Snapshot owned inner locals when the cleanup line runs, as Go evaluates deferred arguments. Copyable values are copied; owned resources move, so later use in the block is an error. Locals alive until the target keep live reads, so one marker has two capture times depending on where a name was declared.",
+          "code": "if verbose {\n    f: open(path)\n    #Defer(scope: .Fn) { close(f) }\n}"
+        }
+      ],
+      "comparisons": [
+        {
+          "lang": "Go",
+          "note": "The Go specification says each time a defer statement executes, the function value and parameters are evaluated and saved, and the call runs just before the surrounding function returns. That is option C's capture time. See https://go.dev/ref/spec#Defer_statements.",
+          "code": "for _, p := range paths {\n    f, _ := os.Open(p)\n    defer f.Close()\n}"
+        },
+        {
+          "lang": "Zig",
+          "note": "Zig defer and errdefer always run at the end of the current block, so they never outlive a local; Zig avoids this question by offering no outer target. See https://ziglang.org/documentation/master/#defer.",
+          "code": "const f = try open(p);\ndefer f.close();"
+        }
+      ],
+      "rec": "A",
+      "recommendation": {
+        "why": "A is the audit's single lifetime law. It keeps today's live reads for every local that survives to the target, and adds only a safe hand-over for owned locals that die first.",
+        "gains": [
+          "One capture law for every target.",
+          "No dangling reads and no early loss of the resource."
+        ],
+        "losses": [
+          {
+            "loss": "A later move of a handed-over local is rejected.",
+            "mitigation": "The diagnostic names the conflicting move and the cleanup and offers block cleanup or an explicit earlier hand-over."
+          }
+        ],
+        "whyNot": [
+          {
+            "key": "B",
+            "reason": "B forces authors to restructure ownership for a case the compiler can handle safely."
+          },
+          {
+            "key": "C",
+            "reason": "C gives one marker two capture times and makes the resource unusable after its cleanup line."
+          }
+        ],
+        "tradeoff": "A hand-over rule at block end in exchange for keeping resources usable."
+      },
+      "hybrid": null,
+      "ballotMode": "short",
+      "shortAuthorizedBy": null,
+      "ballotProcessVersion": 5,
+      "reviewPasses": null,
+      "checkInstructions": null,
+      "surface": {
+        "gist": "When function-end cleanup names a local from an inner block, what happens to that local?",
+        "lesson": "Cleanup reads living locals when it runs. A local from an inner block dies before the function ends. A hands it over when its block ends. B forbids naming it. C takes it at registration.",
+        "trio": {
+          "current": {
+            "note": "Today's block cleanup sees the latest value; this ran on the older executable.",
+            "code": "^n: 1\ndefer { print(n) }\nn = 2 // prints 2 at exit"
+          },
+          "wild": {
+            "lang": "Go",
+            "note": "Go evaluates a deferred call's arguments when the defer runs, then calls it at function return.",
+            "code": "f, _ := os.Open(p)\ndefer f.Close() // f saved now"
+          }
+        },
+        "options": [
+          {
+            "key": "A",
+            "name": "Hand over at block end",
+            "gist": "An owned inner local moves into the cleanup when its block ends.",
+            "gains": [
+              "The local stays usable until its block ends.",
+              "Nothing can dangle."
+            ],
+            "losses": [
+              "Moving the local away later in its block is an error."
+            ],
+            "proposed": {
+              "code": "if verbose {\n    f: open(path)\n    #Defer(scope: .Fn) { close(f) }\n    f.read() // still fine\n} // f hands over here"
+            }
+          },
+          {
+            "key": "B",
+            "name": "Only long-lived locals",
+            "gist": "Cleanup may name only locals alive until its target ends.",
+            "gains": [
+              "No hand-over rule to learn."
+            ],
+            "losses": [
+              "Authors move resources outward by hand."
+            ],
+            "proposed": {
+              "code": "if verbose {\n    f: open(path)\n    #Defer(scope: .Fn) { close(f) }\n    // error: f dies before the function ends\n}"
+            }
+          },
+          {
+            "key": "C",
+            "name": "Take it at registration",
+            "gist": "An inner local is captured when the cleanup line runs.",
+            "gains": [
+              "Capture time is visible at the line."
+            ],
+            "losses": [
+              "The local is unusable after the line.",
+              "Later changes are not seen."
+            ],
+            "proposed": {
+              "code": "if verbose {\n    f: open(path)\n    #Defer(scope: .Fn) { close(f) } // f taken now\n    f.read() // error: f already taken\n}"
+            }
+          }
+        ],
+        "recommendation": {
+          "rec": "A",
+          "why": "A keeps the resource usable for its whole block, frees nothing early, and never leaves cleanup pointing at a dead local.",
+          "gains": [
+            "Owned resources outlive their inner block safely."
+          ],
+          "losses": [
+            {
+              "loss": "A later move of a handed-over local is an error.",
+              "mitigation": "The error names the move and the cleanup and offers block cleanup or an earlier hand-over."
+            }
+          ],
+          "whyNot": [
+            {
+              "key": "B",
+              "reason": "B is safe but pushes resource juggling onto every author."
+            },
+            {
+              "key": "C",
+              "reason": "C makes a resource unusable right after its cleanup line, the opposite of today's defer."
+            }
+          ],
+          "tradeoff": "One hand-over rule buys full use of the resource until its block ends."
+        }
+      },
+      "reports": [
+        {
+          "title": "Unified defer marker review",
+          "path": "Docs/Audits/2026-11-27-unified-defer-marker-review.md",
+          "note": "Section 4, capture safety across iterations."
+        }
+      ],
+      "draftedBy": "Orchestrator",
+      "reviewedBy": "BallotReview4",
+      "draft": false,
+      "status": "open",
+      "created": "2026-11-28T04:32:46.828Z"
+    },
+    {
+      "id": "D-DEFER-ORDER1",
+      "cardId": "c08123r9",
+      "group": "language",
+      "title": "Transaction commit and rollback cleanup joins the one reverse cleanup order",
+      "situation": "",
+      "gist": "Should commit and rollback callbacks run in the same reverse order as other cleanup, or keep running after it?",
+      "lesson": "A transaction's commit and rollback callbacks run today after all of the block's other cleanup. The new cleanup marker can do the same job inline. A runs every cleanup of a block in one reverse order, so some existing code changes order and must be migrated with review. B keeps callbacks in a later phase of their own.",
+      "explainer": "",
+      "story": "Omar's checkout transaction sends a receipt on commit and closes a temporary file. He needs to know which happens first.",
+      "inWild": "transaction.on_commit(send_receipt)  # Django: runs after the outermost commit",
+      "detail": "Current law. Compiler/JetIR/Source/BuildTransact.jet, ir_transaction_hook (lines 931-959), builds a closure when on_commit or on_rollback is called and puts it on the front of the handle's list. ir_transaction_drop_body (lines 91-114) walks those lists when the handle drops. ir_transact (lines 183-233) binds the handle at the start of the scope, so it drops after later bindings and their defers.\n\nThe spec (Docs/Spec/spec.md, lines 2887-2916) says rollback hooks run in reverse registration order in the same cleanup as the frame's closes and guards. It does not say how they interleave with defers. On the older supplied executable, a defer printing defer followed by an on_commit hook printing hook printed defer, then hook. That is a baseline observation, not proof that newer dev matches it.\n\nWhy a ballot. The unified marker review (Docs/Audits/2026-11-27-unified-defer-marker-review.md, sections 5 and 6) proposes one reverse order that interleaves cleanup bodies, value drops and migrated hooks. Its order-migration note shows that a defer followed by an on_commit flips from defer-then-hook to hook-then-defer. It says either the fix hoists migrated hooks or the card ballots the change.\n\nHoisting is not always equivalent: a conditional registration or a capture of a value that does not exist yet cannot move. No ratified ruling fixes this interleaving; the ratified general-defer ruling orders defers within a block in reverse.\n\nA in full. Handed-over records from inner blocks anchor at the statement of the target scope that contains them and run in reverse hand-over order there. The transaction outcome is fixed before outcome-filtered cleanup runs. Explicit inner transaction walls keep their own outcome. B keeps two phases and the hook API.\n\nCompanions. The #Defer and `.Transact` spellings shown are proposed in the open spelling and transaction-target ballots. Under A those ballots remove the hook API with checked migrations; under B they must keep it. No combination silently loses the after-cleanup capability.",
+      "options": [
+        {
+          "key": "A",
+          "name": "One reverse order",
+          "detail": "Adopt the audit's exit law. The exit route is chosen and inner scopes unwind first. A transaction then commits or restores, which fixes its outcome. Next the scope's cleanup bodies, value closes and handed-over records run strictly last-registered first, filtered by outcome. Commit and rollback callbacks migrate to outcome cleanup targeting the transaction. A fix may move a registration to keep the old order only when control flow and captured values are provably unchanged. Otherwise it reports the pair for an author-reviewed reorder.",
+          "code": "#Transact {\n    #Defer(.Ok, scope: .Transact) { send_receipt() }\n}"
+        },
+        {
+          "key": "B",
+          "name": "Keep a later phase",
+          "detail": "Keep the named-transaction callback API and its phase: ordinary block cleanup runs first, then commit callbacks or rollback callbacks in reverse registration order. Under B the spelling ballot cannot delete that API.",
+          "code": "#Transact(t) {\n    t.on_commit(fn() { send_receipt() })\n}"
+        }
+      ],
+      "comparisons": [
+        {
+          "lang": "Python (Django)",
+          "note": "Django's on_commit registers a callback that runs after the transaction successfully commits; inside nested atomic blocks it waits for the outermost commit. That is option B's separate later phase. See https://docs.djangoproject.com/en/stable/topics/db/transactions/#performing-actions-after-commit.",
+          "code": "with transaction.atomic():\n    transaction.on_commit(send_receipt)"
+        },
+        {
+          "lang": "Zig",
+          "note": "Zig runs defer and errdefer in reverse order at the end of their block, with no separate callback phase. That is option A's single reverse order. See https://ziglang.org/documentation/master/#defer.",
+          "code": "defer a();\nerrdefer b();"
+        }
+      ],
+      "rec": "A",
+      "recommendation": {
+        "why": "A follows the audit's single exit law, so one rule predicts every cleanup. It does not pretend an automatic hoist is always safe.",
+        "gains": [
+          "One scheduling rule for cleanup and transaction outcomes."
+        ],
+        "losses": [
+          {
+            "loss": "Changed order needs review in some migrated code.",
+            "mitigation": "Diagnose affected registrations and auto-fix only with a control-flow and capture equivalence proof."
+          }
+        ],
+        "whyNot": [
+          {
+            "key": "B",
+            "reason": "B keeps a second scheduling phase beside the new marker."
+          }
+        ],
+        "tradeoff": "Unified order with explicit migration."
+      },
+      "hybrid": null,
+      "ballotMode": "short",
+      "shortAuthorizedBy": null,
+      "ballotProcessVersion": 5,
+      "reviewPasses": null,
+      "checkInstructions": null,
+      "surface": {
+        "gist": "Should transaction callbacks run in the one reverse cleanup order, or after other cleanup?",
+        "lesson": "Today callbacks run after the block's other cleanup. A puts every cleanup in one reverse order. B keeps the later callback phase. Moving a line to keep an old order is not always safe.",
+        "trio": {
+          "current": {
+            "note": "On the older executable this printed defer, then hook.",
+            "code": "#Transact(t) {\n    defer { print(\"defer\") }\n    t.on_commit(fn() { print(\"hook\") })\n}"
+          },
+          "wild": {
+            "lang": "Python (Django)",
+            "note": "Django runs on_commit callbacks after the outermost transaction commits, in a separate later phase.",
+            "code": "with transaction.atomic():\n    transaction.on_commit(send_receipt)"
+          }
+        },
+        "options": [
+          {
+            "key": "A",
+            "name": "One reverse order",
+            "gist": "All cleanup in a block runs last-registered first.",
+            "gains": [
+              "One ordering rule for every cleanup."
+            ],
+            "losses": [
+              "Some existing callbacks change order."
+            ],
+            "proposed": {
+              "code": "#Transact {\n    #Defer { print(\"defer\") }\n    #Defer(.Ok, scope: .Transact) { print(\"hook\") }\n}\n// prints hook, then defer"
+            }
+          },
+          {
+            "key": "B",
+            "name": "Keep a later phase",
+            "gist": "Block cleanup runs first, then transaction callbacks.",
+            "gains": [
+              "Existing order never changes."
+            ],
+            "losses": [
+              "Two ordering rules remain.",
+              "The callback API stays."
+            ],
+            "proposed": {
+              "code": "#Transact(t) {\n    #Defer { print(\"defer\") }\n    t.on_commit(fn() { print(\"hook\") })\n}\n// prints defer, then hook"
+            }
+          }
+        ],
+        "recommendation": {
+          "rec": "A",
+          "why": "One reverse order is what every cleanup reader already expects, and the migration that changes order is shown, not hidden.",
+          "gains": [
+            "One ordering rule."
+          ],
+          "losses": [
+            {
+              "loss": "Some migrated callbacks change order.",
+              "mitigation": "The fix keeps order only when it can prove equivalence, and otherwise flags the pair for review."
+            }
+          ],
+          "whyNot": [
+            {
+              "key": "B",
+              "reason": "B keeps a second cleanup phase and the callback API next to the new marker."
+            }
+          ],
+          "tradeoff": "A reviewed one-time migration buys a single cleanup order."
+        }
+      },
+      "reports": [
+        {
+          "title": "Unified defer marker review",
+          "path": "Docs/Audits/2026-11-27-unified-defer-marker-review.md",
+          "note": "Sections 5 and 6, including the order migration hazard."
+        }
+      ],
+      "draftedBy": "Orchestrator",
+      "reviewedBy": "BallotReview4",
+      "draft": false,
+      "status": "open",
+      "created": "2026-11-28T04:32:49.313Z"
+    },
+    {
+      "id": "D-WAIT-WITHIN1",
+      "cardId": "c0mvk3ul",
+      "group": "concurrency",
+      "title": "How should waits keep recoverable per-call limits?",
+      "situation": "",
+      "gist": "Keep the existing timed and try method names, add typed timeout failures, or fold them into one within: parameter?",
+      "lesson": "A per-call timeout lets code try a lock and fall back. A scope deadline is a separate budget that stops the program when it runs out. Folding names together must still give each call one return type.",
+      "explainer": "",
+      "story": "Ali tries a lock for 20 milliseconds and uses a cache if it stays busy, while preserving his request's outer deadline.",
+      "inWild": "if (lock.tryLock(20, MILLISECONDS)) { /* use lock */ }",
+      "detail": "Current law. Docs/Spec/spec.md lines 2875-2878: try_guard_read and try_guard_edit take the guard only when free now; guard_read_within and guard_edit_within wait at most a Duration. Each returns SharedGuard<T>?, None when the lock stayed taken. Plain guard_read returns the named SharedGuard by ratified D-SHAREDGUARD2=A.\n\nCompiler/JetSema/Source/Sema/Calls/SharedOwner.jet, sema_call_shared_owner_guard (lines 176-182), implements this split. Core/Tasks/Tasks.jet, Semaphore.try_acquire and acquire_within (lines 172-184), return Bool. The older executable acquired a free Shared guard with guard_read_within(1ms).\n\nThe scope deadline is not a substitute. Docs/Spec/spec.md lines 5050-5062: an expired wait whose operation has a typed error returns it; any other wait emits E3003 and exits. Ratified D-DEADLINE-ONE1=A made the deadline block the one way to bound network waits. The effects review (Docs/Audits/2026-11-27-effects-concurrency-shared-unification-review.md, F3.1, lines 365-410) shows that a deadline around guard_read kills the process where guard_read_within returns None.\n\nWhy the recommendation moved off the review's parameter option. The review's form gave guard_read(within: d) an optional result while plain guard_read keeps a guard. One function with an optional parameter has one return type, so that pairing needs a label-dependent type that Jet does not define. The concrete form makes every guard_read call optional, even unbounded calls whose result is never None. That changes the ratified SharedGuard return. It also adds a per-call timeout argument after D-DEADLINE-ONE1=A retired such arguments for network calls.\n\nA keeps today's methods and contracts and leaves the deadline block as the whole-scope budget. The card's goal of deleting the _within names is not met. B adds a declared timeout failure to guard_read and acquire under a deadline. Every caller, including the common no-deadline case, then handles that failure, and the ratified guard return gains a failure. C is the review's parameter in its concrete form. Zero makes one immediate attempt, negative limits are rejected, and an outer expiry wins.\n\nTask timeouts are a separate surface. The Prelude task.timeout installs a task deadline: Examples/Concurrency/TaskTimeoutDeadline.jet stops in sleep with Jet.DeadlineExceeded (its .err.out). Core/Tasks/Tasks.jet line 299 still defines a core.tasks.timeout that only sleeps. This ballot changes neither.",
+      "options": [
+        {
+          "key": "A",
+          "name": "Keep existing names",
+          "detail": "Retain guard_read, the timed and try guard methods, and the semaphore's acquire forms with their current results. Keep the deadline block as a separate whole-scope budget.",
+          "code": "g: cell.guard_read_within(20ms)"
+        },
+        {
+          "key": "B",
+          "name": "Typed timeout failures",
+          "detail": "Declare a timeout failure on guard and semaphore waits; the scope deadline supplies the budget. Calls without a deadline remain declared fallible but get no artificial runtime timeout.",
+          "code": "#Deadline(20ms) {\n    g: cell.guard_read()?   // proposed: fails with a timeout\n}"
+        },
+        {
+          "key": "C",
+          "name": "One within parameter",
+          "detail": "Use within: Duration? with default None and one recoverable return type per family. Zero attempts once; reject negative limits; outer expiry wins. Delete the _within and try names.",
+          "code": "g: cell.guard_read(within: 20ms) // optional, as is guard_read()"
+        }
+      ],
+      "comparisons": [
+        {
+          "lang": "Java",
+          "note": "Lock uses distinct methods for blocking, immediate and timed attempts, not an optional argument with a changing result type. See https://docs.oracle.com/en/java/javase/21/docs/api/java.base/java/util/concurrent/locks/Lock.html.",
+          "code": "if (lock.tryLock(20, MILLISECONDS)) { /* use lock */ }"
+        }
+      ],
+      "rec": "A",
+      "recommendation": {
+        "why": "The timed and try names already give a recoverable limit while plain guard_read keeps its ratified guard result. Folding them forces an optional or a failure onto every guard call.",
+        "gains": [
+          "Plain guard calls keep their guard result.",
+          "No per-call timeout argument returns after the network ones were retired."
+        ],
+        "losses": [
+          {
+            "loss": "The card's goal of removing the _within names is not met.",
+            "mitigation": "Only guard and semaphore waits keep a timed form; the deadline block stays the one scope budget."
+          }
+        ],
+        "whyNot": [
+          {
+            "key": "B",
+            "reason": "B adds a timeout failure to every guard and acquire call, including calls with no deadline in force."
+          },
+          {
+            "key": "C",
+            "reason": "C makes every guard_read optional, even unbounded calls whose result is never empty, and adds a per-call timeout argument."
+          }
+        ],
+        "tradeoff": "A few extra method names buy exact result types."
+      },
+      "hybrid": null,
+      "ballotMode": "short",
+      "shortAuthorizedBy": null,
+      "ballotProcessVersion": 5,
+      "reviewPasses": null,
+      "checkInstructions": null,
+      "surface": {
+        "gist": "Keep the timed and try names, add timeout failures, or use one within parameter?",
+        "lesson": "A keeps the recoverable timed and immediate guard calls as they are. B makes waits fail with a timeout under a deadline. C folds the names into one parameter, so every guard result becomes optional.",
+        "trio": {
+          "current": {
+            "note": "Plain guard_read waits and returns a guard; the timed and try forms return an optional guard, empty when the lock stayed taken.",
+            "code": "g: cell.guard_read_within(20ms)\nnow: cell.try_guard_read()"
+          },
+          "wild": {
+            "lang": "Java",
+            "note": "Lock has separate tryLock overloads; the timed overload returns false on timeout. See https://docs.oracle.com/en/java/javase/21/docs/api/java.base/java/util/concurrent/locks/Lock.html.",
+            "code": "if (lock.tryLock(20, MILLISECONDS)) { /* use lock */ }"
+          }
+        },
+        "options": [
+          {
+            "key": "A",
+            "name": "Keep existing names",
+            "gist": "Keep blocking, timed and immediate methods with their current return types.",
+            "gains": [
+              "No return-type migration or new parameter.",
+              "Plain guard calls keep a guard, not an optional."
+            ],
+            "losses": [
+              "More public method names."
+            ],
+            "proposed": {
+              "code": "g: cell.guard_read_within(20ms)\nnow: cell.try_guard_read()"
+            }
+          },
+          {
+            "key": "B",
+            "name": "Typed timeout failures",
+            "gist": "Waits fail with a declared timeout when the scope deadline runs out.",
+            "gains": [
+              "One way to bound waiting: the deadline block."
+            ],
+            "losses": [
+              "Every guard call handles a timeout failure, even with no deadline."
+            ],
+            "proposed": {
+              "code": "#Deadline(20ms) {\n    g: cell.guard_read()?   // proposed: fails with a timeout\n}"
+            }
+          },
+          {
+            "key": "C",
+            "name": "One within parameter",
+            "gist": "One guard_read with an optional limit; its result is always optional.",
+            "gains": [
+              "One name for bounded and immediate attempts."
+            ],
+            "losses": [
+              "Plain guard callers must also handle an optional that is never empty."
+            ],
+            "proposed": {
+              "code": "g: cell.guard_read(within: 20ms)\nnow: cell.guard_read(within: 0s)\n// guard_read() also returns an optional"
+            }
+          }
+        ],
+        "recommendation": {
+          "rec": "A",
+          "why": "Today's names already give a recoverable limit and a plain guard. Folding them forces an optional or a failure onto every guard call.",
+          "gains": [
+            "Plain guard calls keep their guard result.",
+            "No new per-call timeout argument."
+          ],
+          "losses": [
+            {
+              "loss": "The card's goal of removing the _within names is not met.",
+              "mitigation": "The names stay few: two timed and two try guard methods plus acquire_within."
+            }
+          ],
+          "whyNot": [
+            {
+              "key": "B",
+              "reason": "B puts a timeout failure on every guard call, including calls with no deadline."
+            },
+            {
+              "key": "C",
+              "reason": "C makes every guard_read optional, even unbounded calls that always succeed."
+            }
+          ],
+          "tradeoff": "A few extra method names buy exact result types."
+        }
+      },
+      "reports": [
+        {
+          "title": "Effects, concurrency and Shared unification pre-build review",
+          "path": "Docs/Audits/2026-11-27-effects-concurrency-shared-unification-review.md",
+          "note": "Finding F3.1 and section 5, ballot 7. This ballot recommends keeping the existing names, not the review's parameter option."
+        }
+      ],
+      "draftedBy": "Orchestrator",
+      "reviewedBy": "BallotReview4",
+      "draft": false,
+      "status": "open",
+      "created": "2026-11-28T04:32:51.864Z"
+    },
+    {
+      "id": "D-CONTEXT-READ2",
+      "cardId": "c0mvk3ul",
+      "group": "effects",
+      "title": "Source reads of the task context become the Context.Read effect, reversing the implicit-context ruling",
+      "situation": "",
+      "gist": "Should reading `context.<field>` in source become a `Context.Read` effect, reversing the ruling that context reads are free?",
+      "lesson": "The ratified rule treats context as an implicit input and keys #Memo on the context fields read. A reverses it: explicit source reads add Context.Read at runtime and compile time, without a machine grant. B keeps it: pure functions are deterministic in arguments plus context. Runtime wait bookkeeping is not a source read under either choice.",
+      "explainer": "",
+      "story": "Mara writes a pure helper that reads the task's deadline. Its row is empty, so a reviewer cannot see or deny that hidden input.",
+      "inWild": "limit :: Reader Ctx Duration\nlimit = asks deadline",
+      "detail": "Ratified D-CONTEXT-EFFECT1=F selected the implicit-input model, as in Jai: pure functions may read context, and Context is not an effect name. Memo keys include reachable context fields, or the whole context if reach cannot be bounded. Different context with equal explicit arguments does not refute this model's determinism. Card #7064's body nonetheless lists Context.Read as explicit; A reverses option F's no-read-effect clause, not context-aware memoization.\n\nCompiler/JetSema/Source/Sema/Expressions/Places.jet, sema_expression_context_read:998-1026, records an empty intrinsic row for task-record fields (line 1015). Allocator reads do the same at 1074-1076. The dir/env shortcuts delegate to sema_expression_context_sys_field and retain their system semantics. Baseline pick:fn()-[]>Int{context.thread} ran and printed 0. This older executable is not parity with newer dev.\n\nA makes explicit task-record reads a Context.Read provider fact, propagated through calls. No machine grant is needed, but ceilings and denials see it, including build-time reads. A #run reads build-root context under the same law. Runtime cancellation and deadline bookkeeping are not source reads (effects review F1.5). Context-aware memo keys remain necessary; an effect row does not replace a cache key.\n\nThe original draft did not establish that every module initializer has an empty row. Retain rejection of unavailable task context independently of row checking. A creates no context where none exists. B retains the ratified model and drops the proposed effect. Neither answer changes physical-clock effects caused by using a field.",
+      "options": [
+        {
+          "key": "A",
+          "name": "Context.Read for source reads",
+          "detail": "Explicit source task-record reads add Context.Read at every tier, including build time. No machine grant is required. Runtime bookkeeping does not add it; missing task context remains an independent error.",
+          "code": "pick: fn() -[Context.Read]> {\n    limit: context.deadline\n}"
+        },
+        {
+          "key": "B",
+          "name": "Keep the implicit-context ruling",
+          "detail": "Keep today's law and E0643, and reword the card.",
+          "code": "pick: fn() -[]> {\n    limit: context.deadline   // allowed\n}"
+        }
+      ],
+      "comparisons": [
+        {
+          "lang": "Haskell",
+          "note": "Haskell's Reader monad makes context reads visible in the type. See https://hackage.haskell.org/package/mtl/docs/Control-Monad-Reader.html.",
+          "code": "limit :: Reader Ctx Duration\nlimit = asks deadline"
+        }
+      ],
+      "rec": "A",
+      "recommendation": {
+        "why": "A makes ambient source dependencies visible and denyable. This is a policy change, not a repair to broken memoization or proof that the ratified model is impure.",
+        "gains": [
+          "Rows expose context reads.",
+          "Source dependencies can be denied."
+        ],
+        "losses": [
+          {
+            "loss": "Reverses the ratified implicit-input contract.",
+            "mitigation": "Add the read effect only to explicit source reads, migrate published rows, and retain context-aware #Memo keys."
+          }
+        ],
+        "whyNot": [
+          {
+            "key": "B",
+            "reason": "B is coherent and avoids migration, but does not provide effect-row denial of implicit-input reads."
+          }
+        ],
+        "tradeoff": "Visible denyable context dependencies replace an implicit-input purity model."
+      },
+      "hybrid": null,
+      "ballotMode": "short",
+      "shortAuthorizedBy": null,
+      "ballotProcessVersion": 5,
+      "reviewPasses": null,
+      "checkInstructions": null,
+      "surface": {
+        "gist": "Should reading `context.<field>` in source become a `Context.Read` effect, reversing the ruling that context reads are free?",
+        "lesson": "The ratified rule treats context as an implicit input and keys #Memo on the context fields read. A reverses it: explicit source reads add Context.Read at runtime and compile time, without a machine grant. B keeps it: pure functions are deterministic in arguments plus context. Runtime wait bookkeeping is not a source read under either choice.",
+        "trio": {
+          "current": {
+            "note": "Today pure code may read the task context.",
+            "code": "pick: fn() -[]> {\n    limit: context.deadline   // allowed\n}"
+          },
+          "wild": {
+            "lang": "Haskell",
+            "note": "Haskell's Reader monad makes context reads visible in the type. See https://hackage.haskell.org/package/mtl/docs/Control-Monad-Reader.html.",
+            "code": "limit :: Reader Ctx Duration\nlimit = asks deadline"
+          }
+        },
+        "options": [
+          {
+            "key": "A",
+            "name": "Context.Read for source reads",
+            "gist": "Source reads record Context.Read on every tier; runtime wait plumbing adds no extra read effect.",
+            "gains": [
+              "Rows expose source-level ambient dependencies.",
+              "Packages can deny context reads."
+            ],
+            "losses": [
+              "Reverses a ratified ruling."
+            ],
+            "proposed": {
+              "code": "pick: fn() -[Context.Read]> {\n    limit: context.deadline\n}"
+            }
+          },
+          {
+            "key": "B",
+            "name": "Keep the implicit-context ruling",
+            "gist": "Context reads stay free in pure code; the card's `Context.Read` is dropped.",
+            "gains": [
+              "No reversal or migration.",
+              "Keeps implicit-input determinism and context-aware memo keys."
+            ],
+            "losses": [
+              "Empty written rows still admit dependencies on implicit context."
+            ],
+            "proposed": {
+              "code": "pick: fn() -[]> {\n    limit: context.deadline   // allowed\n}"
+            }
+          }
+        ],
+        "recommendation": {
+          "rec": "A",
+          "why": "A makes ambient source dependencies visible and denyable. This is a policy change, not a repair to broken memoization or proof that the ratified model is impure.",
+          "gains": [
+            "Rows expose context reads.",
+            "Source dependencies can be denied."
+          ],
+          "losses": [
+            {
+              "loss": "Reverses the ratified implicit-input contract.",
+              "mitigation": "Add the read effect only to explicit source reads, migrate published rows, and retain context-aware #Memo keys."
+            }
+          ],
+          "whyNot": [
+            {
+              "key": "B",
+              "reason": "B is coherent and avoids migration, but does not provide effect-row denial of implicit-input reads."
+            }
+          ],
+          "tradeoff": "Visible denyable context dependencies replace an implicit-input purity model."
+        }
+      },
+      "reports": [
+        {
+          "title": "Effects, concurrency and Shared unification pre-build review",
+          "path": "Docs/Audits/2026-11-27-effects-concurrency-shared-unification-review.md",
+          "note": "Finding F1.5 and section 5, ballot 3."
+        }
+      ],
+      "draftedBy": "Orchestrator",
+      "reviewedBy": "BallotReview4",
+      "draft": false,
+      "status": "open",
+      "created": "2026-11-28T04:32:54.396Z"
+    },
+    {
+      "id": "D-EVENT-MODULE1",
+      "cardId": "c0mvk3ul",
+      "group": "library",
+      "title": "Which module the event types move into",
+      "situation": "",
+      "gist": "Choose the module that owns the event types once they leave the built-in names.",
+      "lesson": "Both options move the full event family, including FfiCallbackEvent, and key compiler roles by module identity. Only the module name differs.",
+      "explainer": "",
+      "story": "Kai declares his own Event type and wants the compiler's event types out of his way, under one clear module name.",
+      "inWild": "import { EventEmitter } from 'node:events';",
+      "detail": "Current law. Compiler/JetFoundation/Source/Syntax/Spellings.jet lines 124-131 list Event, Hook, DecisionHook, AsyncEvent, DispatchReport, EventScope, Subscription and EventTrace as built-in type names. Compiler/JetFoundation/Source/Types/Types.jet line 999 repeats them in SYMBOL_BUILTIN_TYPES. Core/Event/Event.jet declares package core.event, which Core/package.jet line 10 lists. The older executable ran `use core.event` with event.new<Int>() and printed loaded.\n\nFfiCallbackEvent is name-keyed in Compiler/JetSema/Source/Sema/Calls/EventHandles.jet line 25. Compiler/JetSema/Source/Sema/Registration/Checked.jet, sema_checked_foreign_managed_callback_param (line 1363), checks its payload. Both options move it with the other eight.\n\nSubscription has one owner today. EventHandles.jet types on, once and on_priority as Subscription (line 105) and checks its methods (line 85); Core/Watcher/Watcher.jet lines 217-221 return it. Reactive handles do not use it: Compiler/JetSema/Source/Sema/Calls/ReactiveHandles.jet line 248 gives unsubscribe and is_active to the reactive Effect handle. The effects review's shared-Subscription concern (F3.3) rests on Tools/Agent/CoreSurfaceLedger.jet line 1806, which mislabels those Effect methods. The earlier shared-module option was therefore dropped.\n\nBoth options resolve compiler-owned roles by checked declaration identity, so a user Event is not treated as built in. They preserve callback ABI, payload checks, cancellation and lifetime behavior. In the older executable, a user `Event: struct { id: Int }` already compiled and printed its field. That simple case does not prove that every event lowering ignores user types.\n\nA keeps core.event. B renames the module to core.events and migrates imports by resolved identity. Neither changes the event runtime in this vote.",
+      "options": [
+        {
+          "key": "A",
+          "name": "Keep core.event",
+          "detail": "Move the nine event types into core.event, keyed by module identity.",
+          "code": "use core.event\nh: event.hook<Int, Int>(0)   // a core.event.Hook"
+        },
+        {
+          "key": "B",
+          "name": "Use core.events",
+          "detail": "Rename the module to core.events, move the nine types there, and migrate imports by resolved identity.",
+          "code": "use core.events   // proposed rename\nh: events.hook<Int, Int>(0)"
+        }
+      ],
+      "comparisons": [
+        {
+          "lang": "Node.js",
+          "note": "EventEmitter is exported by node:events: https://nodejs.org/api/events.html.",
+          "code": "import { EventEmitter } from 'node:events';"
+        }
+      ],
+      "rec": "A",
+      "recommendation": {
+        "why": "core.event already exists and already builds events, so moving the types there needs no import migration. A plural rename adds churn and no meaning.",
+        "gains": [
+          "No import migration.",
+          "Constructors and types share one module."
+        ],
+        "losses": [
+          {
+            "loss": "The card's text names core.events.",
+            "mitigation": "This vote corrects the card's module name explicitly."
+          }
+        ],
+        "whyNot": [
+          {
+            "key": "B",
+            "reason": "B renames a working module and migrates every core.event import for a plural spelling."
+          }
+        ],
+        "tradeoff": "The card's wording yields to the existing name."
+      },
+      "hybrid": null,
+      "ballotMode": "short",
+      "shortAuthorizedBy": null,
+      "ballotProcessVersion": 5,
+      "reviewPasses": null,
+      "checkInstructions": null,
+      "surface": {
+        "gist": "When the event types stop being built-in names, should they live in the existing core.event module or a renamed core.events?",
+        "lesson": "The event types are built-in names today, and their constructors already live in core.event. Both options move the whole family, including the callback event type, into one module. Only the module name differs.",
+        "trio": {
+          "current": {
+            "note": "The event types are built-in names; the module that builds events is core.event.",
+            "code": "use core.event\nrun: fn() { e: event.new<Int>(); print(\"loaded\") }"
+          },
+          "wild": {
+            "lang": "Node.js",
+            "note": "EventEmitter is exported by node:events: https://nodejs.org/api/events.html.",
+            "code": "import { EventEmitter } from 'node:events';"
+          }
+        },
+        "options": [
+          {
+            "key": "A",
+            "name": "Keep core.event",
+            "gist": "Move the event types into the existing core.event module.",
+            "gains": [
+              "Existing imports keep working.",
+              "One home for constructors and types."
+            ],
+            "losses": [
+              "The card's plural name is not used."
+            ],
+            "proposed": {
+              "code": "use core.event\nh: event.hook<Int, Int>(0)   // a core.event.Hook"
+            }
+          },
+          {
+            "key": "B",
+            "name": "Use core.events",
+            "gist": "Rename the module to the plural and move the family there.",
+            "gains": [
+              "Matches the card's wording."
+            ],
+            "losses": [
+              "Every core.event import migrates."
+            ],
+            "proposed": {
+              "code": "use core.events   // proposed rename\nh: events.hook<Int, Int>(0)"
+            }
+          }
+        ],
+        "recommendation": {
+          "rec": "A",
+          "why": "The module already exists under the singular name, and a rename adds churn without new meaning.",
+          "gains": [
+            "No import migration."
+          ],
+          "losses": [
+            {
+              "loss": "The card's text names core.events.",
+              "mitigation": "This vote corrects the card's module name explicitly."
+            }
+          ],
+          "whyNot": [
+            {
+              "key": "B",
+              "reason": "B renames a working module and migrates every import for a plural spelling."
+            }
+          ],
+          "tradeoff": "The card's wording yields to the existing name."
+        }
+      },
+      "reports": [
+        {
+          "title": "Effects, concurrency and Shared unification pre-build review",
+          "path": "Docs/Audits/2026-11-27-effects-concurrency-shared-unification-review.md",
+          "note": "Finding F3.3 and section 5, ballot 9. Its shared-Subscription concern rests on a mislabeled ledger entry."
+        }
+      ],
+      "draftedBy": "Orchestrator",
+      "reviewedBy": "BallotReview4",
+      "draft": false,
+      "status": "open",
+      "created": "2026-11-28T04:32:57.056Z"
+    },
+    {
+      "id": "D-STATE-EFFECT1",
+      "cardId": "c0mvk3ul",
+      "group": "effects",
+      "title": "Module state becomes the State.Read and State.Write effects, replacing E3401's module branch",
+      "situation": "",
+      "gist": "Should module-state access become `State.Read` and `State.Write` effects, or should only reads become an effect?",
+      "lesson": "Today reading or writing changeable module state is not an effect, but pure code may do neither; E3401 refuses it. The card adds `State.Read` only, which would leave writes on the special rule. Making both an effect lets ordinary ceilings handle module state and retires that branch of E3401.",
+      "explainer": "",
+      "story": "Max counts calls in a module variable. He wants the function's row to say it touches module state, as it says it touches files.",
+      "inWild": "fun bump(r : ref<h,int>) : <read<h>,write<h>> ()\n  r := !r + 1",
+      "detail": "Current law. Docs/Spec/spec.md lines 3407-3417: reading or writing changeable module state is not an effect, but a -[]> function may do neither (E3401). Locals, cells the function builds and lent ^ parameters stay free. Debugger and --pure probes refuse only writes. Compiler/JetSema/Source/Sema/Effects/PureRoot.jet, sema_pure_root_expr (line 46), tracks module-place access separately from the ordinary row. Compiler/JetFoundation/Source/Registry/DiagnosticRows.jet line 11583 names E3401 Jet.ImpureCallInPureContext.\n\nThe older executable checked HITS: Shared{Counter{value: 0}} with count: fn() -[]> { HITS.value += 1 }. It failed Jet.ImpureCallInPureContext: count writes module state HITS. Raw module-global assignment instead fails ImmutableAssignment before that check. Ratified D-MODULE-WRITE1=A makes plain module bindings unwritable and routes changeable module state through links; this ballot does not revisit that.\n\nCompiler/JetIR/Source/BuildTransact.jet, ir_tx_unwind:750-774, restores recorded snapshots on an early transaction exit. This does not prove every possible module write is automatically transactional.\n\nA makes State a provider trait with Read and Write provider subtraits, following the ratified provider model. It must not introduce the draft's second enum-based declaration mechanism. Read requires Read, replacement requires Write, and read-modify-write requires both. Locals and caller-lent places are not module state merely because they mutate. Delete only the corresponding module-state purity branch after direct and transitive facts reach the ordinary row checker. Effects do not grant ownership or synchronization authority.\n\nState.Write records replacement. A write is reversible only with a valid snapshot/restore or buffered-write path for that place; being inside a transaction is insufficient. Otherwise retain ordinary irreversibility restrictions. The debugger and --pure probe rule keeps its current read allowance under every option. B adds only a Read provider identity. C keeps the separate purity rule.",
+      "options": [
+        {
+          "key": "A",
+          "name": "State.Read and State.Write",
+          "detail": "Add State.Read and State.Write as provider subtraits, not enum cases. Compound updates require both; preserve authority, synchronization and transactional reversibility checks.",
+          "code": "count: fn() -[State.Read, State.Write]> { HITS.value += 1 }"
+        },
+        {
+          "key": "B",
+          "name": "State.Read only",
+          "detail": "As the card wrote it. Writes keep the E3401 rule.",
+          "code": "peek: fn() -[State.Read]> Int { HITS.value }\n// writes retain the separate purity rule"
+        },
+        {
+          "key": "C",
+          "name": "Keep today",
+          "detail": "Keep E3401 for both reads and writes and drop the card clause.",
+          "code": "count: fn() -[]> { HITS.value += 1 }\n// rejected: module-state write under empty ceiling"
+        }
+      ],
+      "comparisons": [
+        {
+          "lang": "Koka",
+          "note": "Koka splits heap access into `read` and `write` effects. See https://koka-lang.github.io/koka/doc/book.html#sec-effect-types.",
+          "code": "fun bump(r : ref<h,int>) : <read<h>,write<h>> ()\n  r := !r + 1"
+        }
+      ],
+      "rec": "A",
+      "recommendation": {
+        "why": "Module state is one idea, so it should be one mechanism. Making both reads and writes effects lets the ordinary ceiling check handle it and removes a special rule.",
+        "gains": [
+          "One rule for module state.",
+          "Visible in rows and hover."
+        ],
+        "losses": [
+          {
+            "loss": "Rows grow for functions that touch globals.",
+            "mitigation": "Inference fills unwritten rows, and `jet fix` adds them where a row is written."
+          }
+        ],
+        "whyNot": [
+          {
+            "key": "B",
+            "reason": "B splits module state between an effect and a special rule."
+          },
+          {
+            "key": "C",
+            "reason": "C keeps module state invisible in rows."
+          }
+        ],
+        "tradeoff": "Longer rows for global users buy one module-state rule."
+      },
+      "hybrid": null,
+      "ballotMode": "short",
+      "shortAuthorizedBy": null,
+      "ballotProcessVersion": 5,
+      "reviewPasses": null,
+      "checkInstructions": null,
+      "surface": {
+        "gist": "Should module-state access become `State.Read` and `State.Write` effects, or should only reads become an effect?",
+        "lesson": "Today reading or writing changeable module state is not an effect, but pure code may do neither; E3401 refuses it. The card adds `State.Read` only, which would leave writes on the special rule. Making both an effect lets ordinary ceilings handle module state and retires that branch of E3401.",
+        "trio": {
+          "current": {
+            "note": "Today pure code may not read or write module state, by a separate rule.",
+            "code": "Counter: struct { value: Int }\nHITS: Shared{Counter{value: 0}}\ncount: fn() -[]> { HITS.value += 1 }\n// baseline: ImpureCallInPureContext"
+          },
+          "wild": {
+            "lang": "Koka",
+            "note": "Koka splits heap access into `read` and `write` effects. See https://koka-lang.github.io/koka/doc/book.html#sec-effect-types.",
+            "code": "fun bump(r : ref<h,int>) : <read<h>,write<h>> ()\n  r := !r + 1"
+          }
+        },
+        "options": [
+          {
+            "key": "A",
+            "name": "State.Read and State.Write",
+            "gist": "Both reads and writes of module state are effects; E3401's module branch goes.",
+            "gains": [
+              "One mechanism for module state.",
+              "Rows say exactly what a function touches."
+            ],
+            "losses": [
+              "Functions that touch module state list it."
+            ],
+            "proposed": {
+              "code": "// proposed provider-trait identities; ownership checks remain\ncount: fn() -[State.Read, State.Write]> { HITS.value += 1 }"
+            }
+          },
+          {
+            "key": "B",
+            "name": "State.Read only",
+            "gist": "Reads become an effect; writes stay on E3401.",
+            "gains": [
+              "Smaller change."
+            ],
+            "losses": [
+              "Module state is half effect, half special rule."
+            ],
+            "proposed": {
+              "code": "peek: fn() -[State.Read]> Int { HITS.value }\n// writes retain the separate purity rule"
+            }
+          },
+          {
+            "key": "C",
+            "name": "Keep today",
+            "gist": "Module state stays outside effects, guarded by E3401.",
+            "gains": [
+              "No migration."
+            ],
+            "losses": [
+              "Rows cannot show module-state use."
+            ],
+            "proposed": {
+              "code": "count: fn() -[]> { HITS.value += 1 }\n// rejected: module-state write under empty ceiling"
+            }
+          }
+        ],
+        "recommendation": {
+          "rec": "A",
+          "why": "Module state is one idea, so it should be one mechanism. Making both reads and writes effects lets the ordinary ceiling check handle it and removes a special rule.",
+          "gains": [
+            "One rule for module state.",
+            "Visible in rows and hover."
+          ],
+          "losses": [
+            {
+              "loss": "Rows grow for functions that touch globals.",
+              "mitigation": "Inference fills unwritten rows, and `jet fix` adds them where a row is written."
+            }
+          ],
+          "whyNot": [
+            {
+              "key": "B",
+              "reason": "B splits module state between an effect and a special rule."
+            },
+            {
+              "key": "C",
+              "reason": "C keeps module state invisible in rows."
+            }
+          ],
+          "tradeoff": "Longer rows for global users buy one module-state rule."
+        }
+      },
+      "reports": [
+        {
+          "title": "Effects, concurrency and Shared unification pre-build review",
+          "path": "Docs/Audits/2026-11-27-effects-concurrency-shared-unification-review.md",
+          "note": "Finding F1.4 and section 5, ballot 2."
+        }
+      ],
+      "draftedBy": "Orchestrator",
+      "reviewedBy": "BallotReview4",
+      "draft": false,
+      "status": "open",
+      "created": "2026-11-28T04:33:01.438Z"
     }
   ],
   "questions": [
@@ -130981,6 +132200,181 @@
     }
   ],
   "events": [
+    {
+      "at": "2026-11-28T04:33:04.475Z",
+      "by": "Orchestrator",
+      "action": "decision.post",
+      "ref": "D-STATE-EFFECT1",
+      "note": "reviewed by BallotReview4"
+    },
+    {
+      "at": "2026-11-28T04:33:02.892Z",
+      "by": "BallotReview4",
+      "action": "decision.review",
+      "ref": "D-STATE-EFFECT1",
+      "note": "passed"
+    },
+    {
+      "at": "2026-11-28T04:33:01.438Z",
+      "by": "Orchestrator",
+      "action": "decision.add",
+      "ref": "D-STATE-EFFECT1",
+      "note": "Module state becomes the State.Read and State.Write effects, replacing E3401's module branch (draft)"
+    },
+    {
+      "at": "2026-11-28T04:32:59.994Z",
+      "by": "Orchestrator",
+      "action": "decision.post",
+      "ref": "D-EVENT-MODULE1",
+      "note": "reviewed by BallotReview4"
+    },
+    {
+      "at": "2026-11-28T04:32:58.510Z",
+      "by": "BallotReview4",
+      "action": "decision.review",
+      "ref": "D-EVENT-MODULE1",
+      "note": "passed"
+    },
+    {
+      "at": "2026-11-28T04:32:57.056Z",
+      "by": "Orchestrator",
+      "action": "decision.add",
+      "ref": "D-EVENT-MODULE1",
+      "note": "Which module the event types move into (draft)"
+    },
+    {
+      "at": "2026-11-28T04:32:56.140Z",
+      "by": "Orchestrator",
+      "action": "decision.post",
+      "ref": "D-CONTEXT-READ2",
+      "note": "reviewed by BallotReview4"
+    },
+    {
+      "at": "2026-11-28T04:32:55.243Z",
+      "by": "BallotReview4",
+      "action": "decision.review",
+      "ref": "D-CONTEXT-READ2",
+      "note": "passed"
+    },
+    {
+      "at": "2026-11-28T04:32:54.396Z",
+      "by": "Orchestrator",
+      "action": "decision.add",
+      "ref": "D-CONTEXT-READ2",
+      "note": "Source reads of the task context become the Context.Read effect, reversing the implicit-context ruling (draft)"
+    },
+    {
+      "at": "2026-11-28T04:32:53.524Z",
+      "by": "Orchestrator",
+      "action": "decision.post",
+      "ref": "D-WAIT-WITHIN1",
+      "note": "reviewed by BallotReview4"
+    },
+    {
+      "at": "2026-11-28T04:32:52.695Z",
+      "by": "BallotReview4",
+      "action": "decision.review",
+      "ref": "D-WAIT-WITHIN1",
+      "note": "passed"
+    },
+    {
+      "at": "2026-11-28T04:32:51.864Z",
+      "by": "Orchestrator",
+      "action": "decision.add",
+      "ref": "D-WAIT-WITHIN1",
+      "note": "How should waits keep recoverable per-call limits? (draft)"
+    },
+    {
+      "at": "2026-11-28T04:32:51.026Z",
+      "by": "Orchestrator",
+      "action": "decision.post",
+      "ref": "D-DEFER-ORDER1",
+      "note": "reviewed by BallotReview4"
+    },
+    {
+      "at": "2026-11-28T04:32:50.137Z",
+      "by": "BallotReview4",
+      "action": "decision.review",
+      "ref": "D-DEFER-ORDER1",
+      "note": "passed"
+    },
+    {
+      "at": "2026-11-28T04:32:49.313Z",
+      "by": "Orchestrator",
+      "action": "decision.add",
+      "ref": "D-DEFER-ORDER1",
+      "note": "Transaction commit and rollback cleanup joins the one reverse cleanup order (draft)"
+    },
+    {
+      "at": "2026-11-28T04:32:48.457Z",
+      "by": "Orchestrator",
+      "action": "decision.post",
+      "ref": "D-DEFER-CAPTURE1",
+      "note": "reviewed by BallotReview4"
+    },
+    {
+      "at": "2026-11-28T04:32:47.648Z",
+      "by": "BallotReview4",
+      "action": "decision.review",
+      "ref": "D-DEFER-CAPTURE1",
+      "note": "passed"
+    },
+    {
+      "at": "2026-11-28T04:32:46.828Z",
+      "by": "Orchestrator",
+      "action": "decision.add",
+      "ref": "D-DEFER-CAPTURE1",
+      "note": "One lifetime-based capture law for every cleanup target (draft)"
+    },
+    {
+      "at": "2026-11-28T04:32:45.995Z",
+      "by": "Orchestrator",
+      "action": "decision.post",
+      "ref": "D-ROLLBACK-KEEP1",
+      "note": "reviewed by BallotReview4"
+    },
+    {
+      "at": "2026-11-28T04:32:45.169Z",
+      "by": "BallotReview4",
+      "action": "decision.review",
+      "ref": "D-ROLLBACK-KEEP1",
+      "note": "passed"
+    },
+    {
+      "at": "2026-11-28T04:32:44.240Z",
+      "by": "Orchestrator",
+      "action": "decision.add",
+      "ref": "D-ROLLBACK-KEEP1",
+      "note": "The Rollback trait stays as the per-type snapshot strategy; the spec opt-out sentence goes (draft)"
+    },
+    {
+      "at": "2026-11-28T04:32:43.340Z",
+      "by": "Orchestrator",
+      "action": "decision.post",
+      "ref": "D-DEFER-LOOP1",
+      "note": "reviewed by BallotReview4"
+    },
+    {
+      "at": "2026-11-28T04:32:42.477Z",
+      "by": "BallotReview4",
+      "action": "decision.review",
+      "ref": "D-DEFER-LOOP1",
+      "note": "passed"
+    },
+    {
+      "at": "2026-11-28T04:32:41.509Z",
+      "by": "Orchestrator",
+      "action": "decision.add",
+      "ref": "D-DEFER-LOOP1",
+      "note": "A #Defer inside an unbounded loop that targets an outer scope is refused (draft)"
+    },
+    {
+      "at": "2026-11-28T04:32:40.540Z",
+      "by": "Orchestrator",
+      "action": "decision.post",
+      "ref": "D-CLEANUP-FAIL1",
+      "note": "reviewed by BallotReview4"
+    },
     {
       "at": "2026-11-28T04:32:38.808Z",
       "by": "BallotReview4",
