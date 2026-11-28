@@ -3,7 +3,7 @@
     "version": 4,
     "project": "Jet",
     "nextNum": 7071,
-    "rev": 115474,
+    "rev": 115475,
     "ui": {
       "toggled": [
         "dec-group:syntax",
@@ -65115,6 +65115,11 @@
         {
           "at": "2026-11-28",
           "by": "Orchestrator",
+          "text": "Third occurrence, 2026-11-28 ~03:12: a worker build (batch93-skip-seed, build --profile dev, run under timeout with an address-space limit of 12 GiB, not a systemd-run service) stalled for more than 8 minutes at about 4% CPU. Parent jet: 34 threads, all in __futex_wait. Child jet-comptime: 1 thread in anon_pipe_read, on the request pipe. The parent waits on a futex while the child waits for a request, so the parent never sent one; this fits the theory that an allocation under the AS limit fails in a worker thread and the request is never written or the lock never released. The seed had no jet.debug beside it, so no symbolized stacks; the processes were killed to free the build lock."
+        },
+        {
+          "at": "2026-11-28",
+          "by": "Orchestrator",
           "text": "Trigger found by the #7056 worker: its shell carried a hard ulimit -v 4194304 (4 GiB of address space), which systemd-run --scope inherits. When a thread's allocation fails, the compiler deadlocks (the parent's threads in futex wait, the jet-comptime child in a pipe read) instead of exiting. With --threads 1 the same build aborts with 'memory allocation of 119505768 bytes failed'. The defect this card owns is that a failed allocation on a worker thread deadlocks the compile instead of ending it with a clear out-of-memory error. Reproduce with ulimit -v 4194304 and then jet build --profile dev Compiler."
         },
         {
@@ -65159,7 +65164,7 @@
       "parentId": null,
       "needsAcceptance": false,
       "created": "2026-11-28T02:49:22.814Z",
-      "updated": "2026-11-28T04:09:20.066Z",
+      "updated": "2026-11-28T08:20:56.403Z",
       "updatedBy": "Orchestrator",
       "criteriaLastN": 3
     },
@@ -133656,6 +133661,13 @@
     }
   ],
   "events": [
+    {
+      "at": "2026-11-28T08:20:56.403Z",
+      "by": "Orchestrator",
+      "action": "card.update",
+      "ref": "c03ewpy6",
+      "note": "logEntry"
+    },
     {
       "at": "2026-11-28T08:13:42.631Z",
       "by": "Orchestrator",
