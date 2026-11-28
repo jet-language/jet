@@ -2,8 +2,8 @@
   "meta": {
     "version": 4,
     "project": "Jet",
-    "nextNum": 7067,
-    "rev": 115236,
+    "nextNum": 7069,
+    "rev": 115243,
     "ui": {
       "toggled": [
         "dec-group:syntax",
@@ -64356,11 +64356,44 @@
         {
           "n": 4,
           "text": "Honest Pool<T>/ID<T>: clean Pool<T> indexing & optional stale-ID safety (people[bob]?.name, people[bob]?.hp -= 1) with zero ambient pool-guessing magic, O0/O1/O2 goldens + UI snapshots + full suite green",
-          "status": "open",
-          "metBy": null,
+          "status": "met",
+          "metBy": "Orchestrator",
           "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-11-27T19:19:28.613Z"
+          "evidence": "Moved to #7067 c1",
+          "at": "2026-11-28T01:52:46.426Z",
+          "closure": "duplicate",
+          "movedTo": {
+            "card": 7067,
+            "n": 1
+          }
+        },
+        {
+          "n": 5,
+          "text": "Pool index width follows capacity: a Pool<T> whose capacity is known at compile time stores ID<T> in the narrowest unsigned index that holds it (capacity 1024 gives a U16 index), proven by T.reflect().layout.size and O0/O1/O2 goldens",
+          "status": "met",
+          "metBy": "Orchestrator",
+          "verifiedBy": null,
+          "evidence": "Moved to #7067 c2",
+          "at": "2026-11-28T01:52:46.426Z",
+          "closure": "duplicate",
+          "movedTo": {
+            "card": 7067,
+            "n": 2
+          }
+        },
+        {
+          "n": 6,
+          "text": "Append-only pools carry no generation: a Pool<T> that the program never removes from stores no generation in its slots or IDs and emits no generation check, proven by layout size and jet inspect code on O2",
+          "status": "met",
+          "metBy": "Orchestrator",
+          "verifiedBy": null,
+          "evidence": "Moved to #7067 c3",
+          "at": "2026-11-28T01:52:46.426Z",
+          "closure": "duplicate",
+          "movedTo": {
+            "card": 7067,
+            "n": 3
+          }
         }
       ],
       "refs": [],
@@ -64368,9 +64401,9 @@
       "parentId": null,
       "needsAcceptance": false,
       "created": "2026-11-27T19:19:25.407Z",
-      "updated": "2026-11-28T01:44:13.334Z",
+      "updated": "2026-11-28T01:52:46.426Z",
       "updatedBy": "Orchestrator",
-      "criteriaLastN": 4
+      "criteriaLastN": 6
     },
     {
       "id": "c0fwmv7h",
@@ -64820,6 +64853,112 @@
       "updated": "2026-11-27T22:22:27.423Z",
       "updatedBy": "Orchestrator",
       "criteriaLastN": 3
+    },
+    {
+      "id": "c0tcufgj",
+      "num": 7067,
+      "title": "Honest Pool<T>/ID<T>: reused slots, stale-ID safety, and indices sized and checked at compile time",
+      "body": "Split from #7059.",
+      "kind": "task",
+      "track": "epoch",
+      "epoch": "G1",
+      "milestoneId": null,
+      "phase": "planning",
+      "priority": "P0",
+      "plan": null,
+      "checkSteps": null,
+      "probe": null,
+      "visualMedia": [],
+      "blockedBy": [],
+      "assignee": null,
+      "log": [],
+      "criteria": [
+        {
+          "n": 1,
+          "text": "Honest Pool<T>/ID<T>: clean Pool<T> indexing & optional stale-ID safety (people[bob]?.name, people[bob]?.hp -= 1) with zero ambient pool-guessing magic, O0/O1/O2 goldens + UI snapshots + full suite green",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-11-28T01:52:46.426Z",
+          "movedFrom": {
+            "card": 7059,
+            "n": 4
+          }
+        },
+        {
+          "n": 2,
+          "text": "Pool index width follows capacity: a Pool<T> whose capacity is known at compile time stores ID<T> in the narrowest unsigned index that holds it (capacity 1024 gives a U16 index), proven by T.reflect().layout.size and O0/O1/O2 goldens",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-11-28T01:52:46.426Z",
+          "movedFrom": {
+            "card": 7059,
+            "n": 5
+          }
+        },
+        {
+          "n": 3,
+          "text": "Append-only pools carry no generation: a Pool<T> that the program never removes from stores no generation in its slots or IDs and emits no generation check, proven by layout size and jet inspect code on O2",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-11-28T01:52:46.426Z",
+          "movedFrom": {
+            "card": 7059,
+            "n": 6
+          }
+        },
+        {
+          "n": 4,
+          "text": "Pool reads drop the bounds check when the ID's index range fits inside the pool's compile-time capacity, so pool[id] lowers to one address computation and load on O2, proven by jet inspect code; any ID that can fall outside keeps the check",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-11-28T01:52:53.545Z"
+        }
+      ],
+      "refs": [
+        "7059"
+      ],
+      "tags": [],
+      "parentId": null,
+      "needsAcceptance": false,
+      "created": "2026-11-28T01:52:46.426Z",
+      "updated": "2026-11-28T01:53:03.450Z",
+      "updatedBy": "Orchestrator",
+      "criteriaLastN": 4
+    },
+    {
+      "id": "c08b7fdg",
+      "num": 7068,
+      "title": "Relative pointer type: offset-from-self links for compact, position-independent data",
+      "body": "Research card, frozen until scheduled. Jai's relative pointer (*~s16) stores a signed offset from the pointer's own address instead of a full address. Gains: 2-4 byte links instead of 8 (denser cache lines), and a block holding them can be copied, mmapped or serialized with no fixups. Cost: copying or moving the struct that holds one silently retargets it, so in Jet it is unsafe outside #Unsafe or a checked serialization/arena format. Scope: survey Jai, Zig, Rust relative-pointer crates, MSVC based pointers, and position-independent formats (FlatBuffers, Cap'n Proto); decide whether Jet needs a type at all or whether compile-time-sized Pool<T>/ID<T> indices (#7067) plus a serialization format cover it; if a type is warranted, how compile-time checking confines it so it erases to zero run-time cost.",
+      "kind": "task",
+      "track": "epoch",
+      "epoch": "G1",
+      "milestoneId": null,
+      "phase": "frozen",
+      "priority": "P3",
+      "plan": null,
+      "checkSteps": null,
+      "probe": null,
+      "visualMedia": [],
+      "blockedBy": [],
+      "assignee": null,
+      "log": [],
+      "criteria": [],
+      "refs": [],
+      "tags": [],
+      "parentId": null,
+      "needsAcceptance": false,
+      "created": "2026-11-28T01:52:56.037Z",
+      "updated": "2026-11-28T01:53:01.252Z",
+      "updatedBy": "Orchestrator"
     }
   ],
   "decisions": [
@@ -123898,6 +124037,108 @@
   ],
   "events": [
     {
+      "at": "2026-11-28T01:53:03.450Z",
+      "by": "Orchestrator",
+      "action": "card.update",
+      "ref": "c0tcufgj",
+      "note": "refs"
+    },
+    {
+      "at": "2026-11-28T01:53:01.252Z",
+      "by": "Orchestrator",
+      "action": "card.update",
+      "ref": "c08b7fdg",
+      "note": "phase"
+    },
+    {
+      "at": "2026-11-28T01:52:56.037Z",
+      "by": "Orchestrator",
+      "action": "card.add",
+      "ref": "c08b7fdg",
+      "note": "Relative pointer type: offset-from-self links for compact, position-independent data"
+    },
+    {
+      "at": "2026-11-28T01:52:53.545Z",
+      "by": "Orchestrator",
+      "action": "card.criteria-add",
+      "ref": "c0tcufgj",
+      "note": "#4 Pool reads drop the bounds check when the ID's index range f"
+    },
+    {
+      "at": "2026-11-28T01:52:46.426Z",
+      "by": "Orchestrator",
+      "action": "card.split",
+      "ref": "c0nnf642",
+      "refs": [
+        "c0nnf642",
+        "c0tcufgj"
+      ],
+      "note": "c4, c5, c6 → #7067 Honest Pool<T>/ID<T>: reused slots, stale-ID safety, and ind"
+    },
+    {
+      "at": "2026-11-28T01:52:46.426Z",
+      "by": "Orchestrator",
+      "action": "card.criteria-add",
+      "ref": "c0tcufgj",
+      "note": "#3 moved from #7059 c6"
+    },
+    {
+      "at": "2026-11-28T01:52:46.426Z",
+      "by": "Orchestrator",
+      "action": "card.criteria-move",
+      "ref": "c0nnf642",
+      "note": "#6 → #7067 c3: split into #7067"
+    },
+    {
+      "at": "2026-11-28T01:52:46.426Z",
+      "by": "Orchestrator",
+      "action": "card.criteria-add",
+      "ref": "c0tcufgj",
+      "note": "#2 moved from #7059 c5"
+    },
+    {
+      "at": "2026-11-28T01:52:46.426Z",
+      "by": "Orchestrator",
+      "action": "card.criteria-move",
+      "ref": "c0nnf642",
+      "note": "#5 → #7067 c2: split into #7067"
+    },
+    {
+      "at": "2026-11-28T01:52:46.426Z",
+      "by": "Orchestrator",
+      "action": "card.criteria-add",
+      "ref": "c0tcufgj",
+      "note": "#1 moved from #7059 c4"
+    },
+    {
+      "at": "2026-11-28T01:52:46.426Z",
+      "by": "Orchestrator",
+      "action": "card.criteria-move",
+      "ref": "c0nnf642",
+      "note": "#4 → #7067 c1: split into #7067"
+    },
+    {
+      "at": "2026-11-28T01:52:46.426Z",
+      "by": "Orchestrator",
+      "action": "card.add",
+      "ref": "c0tcufgj",
+      "note": "Honest Pool<T>/ID<T>: reused slots, stale-ID safety, and indices sized and checked at compile time"
+    },
+    {
+      "at": "2026-11-28T01:52:39.441Z",
+      "by": "Orchestrator",
+      "action": "card.criteria-add",
+      "ref": "c0nnf642",
+      "note": "#6 Append-only pools carry no generation: a Pool<T> that the pr"
+    },
+    {
+      "at": "2026-11-28T01:52:38.421Z",
+      "by": "Orchestrator",
+      "action": "card.criteria-add",
+      "ref": "c0nnf642",
+      "note": "#5 Pool index width follows capacity: a Pool<T> whose capacity "
+    },
+    {
       "at": "2026-11-28T01:44:13.334Z",
       "by": "Orchestrator",
       "action": "card.update",
@@ -127326,720 +127567,6 @@
       "action": "card.criteria-meet",
       "ref": "c028lxdd",
       "note": "#11"
-    },
-    {
-      "at": "2026-11-26T09:14:14.461Z",
-      "by": "Orchestrator",
-      "action": "card.update",
-      "ref": "c02i9l7p",
-      "note": "phase,logEntry"
-    },
-    {
-      "at": "2026-11-26T09:14:11.858Z",
-      "by": "Orchestrator",
-      "action": "card.criteria-meet",
-      "ref": "c02i9l7p",
-      "note": "#4"
-    },
-    {
-      "at": "2026-11-26T09:14:10.252Z",
-      "by": "Orchestrator",
-      "action": "card.criteria-meet",
-      "ref": "c02i9l7p",
-      "note": "#3"
-    },
-    {
-      "at": "2026-11-26T09:14:08.823Z",
-      "by": "Orchestrator",
-      "action": "card.criteria-meet",
-      "ref": "c02i9l7p",
-      "note": "#2"
-    },
-    {
-      "at": "2026-11-26T09:14:07.393Z",
-      "by": "Orchestrator",
-      "action": "card.criteria-meet",
-      "ref": "c02i9l7p",
-      "note": "#1"
-    },
-    {
-      "at": "2026-11-26T09:14:05.990Z",
-      "by": "Orchestrator",
-      "action": "card.update",
-      "ref": "c01wqict",
-      "note": "phase,logEntry"
-    },
-    {
-      "at": "2026-11-26T09:14:02.623Z",
-      "by": "Orchestrator",
-      "action": "card.criteria-meet",
-      "ref": "c01wqict",
-      "note": "#5"
-    },
-    {
-      "at": "2026-11-26T09:14:01.353Z",
-      "by": "Orchestrator",
-      "action": "card.criteria-meet",
-      "ref": "c01wqict",
-      "note": "#4"
-    },
-    {
-      "at": "2026-11-26T09:13:59.962Z",
-      "by": "Orchestrator",
-      "action": "card.criteria-meet",
-      "ref": "c01wqict",
-      "note": "#2"
-    },
-    {
-      "at": "2026-11-26T08:38:27.984Z",
-      "by": "Orchestrator",
-      "action": "card.criteria-meet",
-      "ref": "c0mbiq9g",
-      "note": "#6"
-    },
-    {
-      "at": "2026-11-26T08:38:27.156Z",
-      "by": "Orchestrator",
-      "action": "card.criteria-meet",
-      "ref": "c0mbiq9g",
-      "note": "#4"
-    },
-    {
-      "at": "2026-11-26T08:38:26.317Z",
-      "by": "Orchestrator",
-      "action": "card.update",
-      "ref": "c0pej44b",
-      "note": "phase"
-    },
-    {
-      "at": "2026-11-26T08:38:24.365Z",
-      "by": "Orchestrator",
-      "action": "card.criteria-meet",
-      "ref": "c0pej44b",
-      "note": "#4"
-    },
-    {
-      "at": "2026-11-26T08:19:37.410Z",
-      "by": "Orchestrator",
-      "action": "card.criteria-meet",
-      "ref": "c05bs1oq",
-      "note": "#1"
-    },
-    {
-      "at": "2026-11-26T07:54:38.872Z",
-      "by": "Orchestrator",
-      "action": "card.criteria-meet",
-      "ref": "c0pej44b",
-      "note": "#5"
-    },
-    {
-      "at": "2026-11-26T07:54:16.158Z",
-      "by": "Orchestrator",
-      "action": "card.criteria-meet",
-      "ref": "c0mbiq9g",
-      "note": "#5"
-    },
-    {
-      "at": "2026-11-26T07:54:15.270Z",
-      "by": "Orchestrator",
-      "action": "card.criteria-meet",
-      "ref": "c0pej44b",
-      "note": "#8"
-    },
-    {
-      "at": "2026-11-26T07:54:14.110Z",
-      "by": "Orchestrator",
-      "action": "card.criteria-meet",
-      "ref": "c0pej44b",
-      "note": "#7"
-    },
-    {
-      "at": "2026-11-26T07:54:13.052Z",
-      "by": "Orchestrator",
-      "action": "card.criteria-meet",
-      "ref": "c0pej44b",
-      "note": "#6"
-    },
-    {
-      "at": "2026-11-26T07:54:12.044Z",
-      "by": "Orchestrator",
-      "action": "card.criteria-meet",
-      "ref": "c0pej44b",
-      "note": "#3"
-    },
-    {
-      "at": "2026-11-26T07:48:34.243Z",
-      "by": "Orchestrator",
-      "action": "card.criteria-meet",
-      "ref": "c0hnoa1d",
-      "note": "#1"
-    },
-    {
-      "at": "2026-11-26T07:48:33.058Z",
-      "by": "Orchestrator",
-      "action": "card.criteria-meet",
-      "ref": "c01wqict",
-      "note": "#1"
-    },
-    {
-      "at": "2026-11-26T06:59:49.410Z",
-      "by": "Orchestrator",
-      "action": "card.update",
-      "ref": "c0in2dft",
-      "note": "phase"
-    },
-    {
-      "at": "2026-11-26T06:59:46.639Z",
-      "by": "Orchestrator",
-      "action": "card.criteria-meet",
-      "ref": "c0in2dft",
-      "note": "#1"
-    },
-    {
-      "at": "2026-11-26T06:59:45.364Z",
-      "by": "Orchestrator",
-      "action": "card.criteria-meet",
-      "ref": "c0tzvhij",
-      "note": "#35"
-    },
-    {
-      "at": "2026-11-26T06:40:56.969Z",
-      "by": "Orchestrator",
-      "action": "card.criteria-meet",
-      "ref": "c0mbiq9g",
-      "note": "#24"
-    },
-    {
-      "at": "2026-11-26T06:40:56.114Z",
-      "by": "Orchestrator",
-      "action": "card.criteria-meet",
-      "ref": "c0mbiq9g",
-      "note": "#23"
-    },
-    {
-      "at": "2026-11-26T06:40:55.247Z",
-      "by": "Orchestrator",
-      "action": "card.criteria-meet",
-      "ref": "c0mbiq9g",
-      "note": "#22"
-    },
-    {
-      "at": "2026-11-26T06:40:54.404Z",
-      "by": "Orchestrator",
-      "action": "card.criteria-meet",
-      "ref": "c0mbiq9g",
-      "note": "#21"
-    },
-    {
-      "at": "2026-11-26T06:40:53.535Z",
-      "by": "Orchestrator",
-      "action": "card.criteria-meet",
-      "ref": "c0mbiq9g",
-      "note": "#20"
-    },
-    {
-      "at": "2026-11-26T06:40:52.679Z",
-      "by": "Orchestrator",
-      "action": "card.criteria-meet",
-      "ref": "c0mbiq9g",
-      "note": "#16"
-    },
-    {
-      "at": "2026-11-26T06:40:51.833Z",
-      "by": "Orchestrator",
-      "action": "card.criteria-meet",
-      "ref": "c0mbiq9g",
-      "note": "#1"
-    },
-    {
-      "at": "2026-11-26T06:32:06.029Z",
-      "by": "Orchestrator",
-      "action": "card.update",
-      "ref": "c0ba141x",
-      "note": "phase"
-    },
-    {
-      "at": "2026-11-26T06:32:04.134Z",
-      "by": "Orchestrator",
-      "action": "card.criteria-meet",
-      "ref": "c0ba141x",
-      "note": "#2"
-    },
-    {
-      "at": "2026-11-26T06:32:03.294Z",
-      "by": "Orchestrator",
-      "action": "card.criteria-meet",
-      "ref": "c0ba141x",
-      "note": "#1"
-    },
-    {
-      "at": "2026-11-26T05:54:22.964Z",
-      "by": "Orchestrator",
-      "action": "card.criteria-meet",
-      "ref": "c0mbiq9g",
-      "note": "#25"
-    },
-    {
-      "at": "2026-11-26T05:54:22.072Z",
-      "by": "Orchestrator",
-      "action": "card.criteria-meet",
-      "ref": "c0mbiq9g",
-      "note": "#13"
-    },
-    {
-      "at": "2026-11-26T05:54:21.206Z",
-      "by": "Orchestrator",
-      "action": "card.criteria-meet",
-      "ref": "c0mbiq9g",
-      "note": "#10"
-    },
-    {
-      "at": "2026-11-26T05:54:20.291Z",
-      "by": "Orchestrator",
-      "action": "card.criteria-meet",
-      "ref": "c05bs1oq",
-      "note": "#5"
-    },
-    {
-      "at": "2026-11-26T05:54:19.422Z",
-      "by": "Orchestrator",
-      "action": "card.criteria-meet",
-      "ref": "c05bs1oq",
-      "note": "#4"
-    },
-    {
-      "at": "2026-11-26T05:54:18.579Z",
-      "by": "Orchestrator",
-      "action": "card.criteria-meet",
-      "ref": "c05bs1oq",
-      "note": "#3"
-    },
-    {
-      "at": "2026-11-26T05:28:36.109Z",
-      "by": "Orchestrator",
-      "action": "card.update",
-      "ref": "c0xphd0i",
-      "note": "phase"
-    },
-    {
-      "at": "2026-11-26T05:28:33.353Z",
-      "by": "Orchestrator",
-      "action": "card.criteria-meet",
-      "ref": "c0xphd0i",
-      "note": "#8"
-    },
-    {
-      "at": "2026-11-26T05:28:32.004Z",
-      "by": "Orchestrator",
-      "action": "card.criteria-meet",
-      "ref": "c0xphd0i",
-      "note": "#4"
-    },
-    {
-      "at": "2026-11-26T05:28:31.029Z",
-      "by": "Orchestrator",
-      "action": "card.criteria-meet",
-      "ref": "c0xphd0i",
-      "note": "#3"
-    },
-    {
-      "at": "2026-11-26T05:27:29.499Z",
-      "by": "Orchestrator",
-      "action": "decision.post",
-      "ref": "D-WATCH-FRESHNESS1",
-      "note": "reviewed by AdversarialReviewer-f890d291"
-    },
-    {
-      "at": "2026-11-26T05:27:28.358Z",
-      "by": "AdversarialReviewer-f890d291",
-      "action": "decision.review",
-      "ref": "D-WATCH-FRESHNESS1",
-      "note": "passed"
-    },
-    {
-      "at": "2026-11-26T05:27:27.529Z",
-      "by": "Orchestrator",
-      "action": "decision.update",
-      "ref": "D-WATCH-FRESHNESS1",
-      "note": "review cleared by the edit"
-    },
-    {
-      "at": "2026-11-26T05:26:58.267Z",
-      "by": "AdversarialReviewer-f890d291",
-      "action": "decision.review",
-      "ref": "D-WATCH-FRESHNESS1",
-      "note": "passed"
-    },
-    {
-      "at": "2026-11-26T05:26:56.975Z",
-      "by": "Orchestrator",
-      "action": "decision.update",
-      "ref": "D-WATCH-FRESHNESS1",
-      "note": "review cleared by the edit"
-    },
-    {
-      "at": "2026-11-26T05:25:45.895Z",
-      "by": "AdversarialReviewer-f890d291",
-      "action": "decision.review",
-      "ref": "D-WATCH-FRESHNESS1",
-      "note": "passed"
-    },
-    {
-      "at": "2026-11-26T05:25:32.667Z",
-      "by": "Orchestrator",
-      "action": "decision.add",
-      "ref": "D-WATCH-FRESHNESS1",
-      "note": "How DataWatchStatus reports freshness_ms while watch(), get() and status() stay honest about Time (draft)"
-    },
-    {
-      "at": "2026-11-26T05:12:10.268Z",
-      "by": "Orchestrator",
-      "action": "card.criteria-meet",
-      "ref": "c0s2gaqp",
-      "note": "#1"
-    },
-    {
-      "at": "2026-11-26T05:03:47.112Z",
-      "by": "Orchestrator",
-      "action": "card.criteria-meet",
-      "ref": "c028o7uk",
-      "note": "#6"
-    },
-    {
-      "at": "2026-11-26T04:53:05.980Z",
-      "by": "Orchestrator",
-      "action": "card.criteria-meet",
-      "ref": "c0hnoa1d",
-      "note": "#8"
-    },
-    {
-      "at": "2026-11-26T04:53:05.035Z",
-      "by": "Orchestrator",
-      "action": "card.criteria-meet",
-      "ref": "c0hnoa1d",
-      "note": "#7"
-    },
-    {
-      "at": "2026-11-26T04:53:04.211Z",
-      "by": "Orchestrator",
-      "action": "card.criteria-meet",
-      "ref": "c0hnoa1d",
-      "note": "#6"
-    },
-    {
-      "at": "2026-11-26T04:53:03.377Z",
-      "by": "Orchestrator",
-      "action": "card.criteria-meet",
-      "ref": "c0pej44b",
-      "note": "#2"
-    },
-    {
-      "at": "2026-11-26T04:53:02.558Z",
-      "by": "Orchestrator",
-      "action": "card.criteria-meet",
-      "ref": "c01wqict",
-      "note": "#6"
-    },
-    {
-      "at": "2026-11-26T04:53:01.728Z",
-      "by": "Orchestrator",
-      "action": "card.criteria-meet",
-      "ref": "c0mhrplj",
-      "note": "#5"
-    },
-    {
-      "at": "2026-11-26T04:33:33.492Z",
-      "by": "Orchestrator",
-      "action": "card.criteria-meet",
-      "ref": "c0dktg7a",
-      "note": "#42"
-    },
-    {
-      "at": "2026-11-26T04:33:32.618Z",
-      "by": "Orchestrator",
-      "action": "card.criteria-meet",
-      "ref": "c01wqict",
-      "note": "#3"
-    },
-    {
-      "at": "2026-11-26T04:33:31.773Z",
-      "by": "Orchestrator",
-      "action": "card.update",
-      "ref": "c0jxsy7l",
-      "note": "phase"
-    },
-    {
-      "at": "2026-11-26T04:33:29.606Z",
-      "by": "Orchestrator",
-      "action": "card.criteria-meet",
-      "ref": "c0jxsy7l",
-      "note": "#10"
-    },
-    {
-      "at": "2026-11-26T04:29:46.391Z",
-      "by": "Orchestrator",
-      "action": "card.update",
-      "ref": "c0on083p",
-      "note": "phase"
-    },
-    {
-      "at": "2026-11-26T04:29:43.801Z",
-      "by": "Orchestrator",
-      "action": "card.criteria-meet",
-      "ref": "c0on083p",
-      "note": "#4"
-    },
-    {
-      "at": "2026-11-26T04:29:42.555Z",
-      "by": "Orchestrator",
-      "action": "card.criteria-meet",
-      "ref": "c0on083p",
-      "note": "#3"
-    },
-    {
-      "at": "2026-11-26T04:29:41.319Z",
-      "by": "Orchestrator",
-      "action": "card.criteria-meet",
-      "ref": "c0on083p",
-      "note": "#2"
-    },
-    {
-      "at": "2026-11-26T04:29:40.161Z",
-      "by": "Orchestrator",
-      "action": "card.criteria-meet",
-      "ref": "c0mhrplj",
-      "note": "#16"
-    },
-    {
-      "at": "2026-11-26T04:29:39.320Z",
-      "by": "Orchestrator",
-      "action": "card.criteria-meet",
-      "ref": "c0mhrplj",
-      "note": "#9"
-    },
-    {
-      "at": "2026-11-26T04:23:57.393Z",
-      "by": "Orchestrator",
-      "action": "card.criteria-meet",
-      "ref": "c0nwrfck",
-      "note": "#120"
-    },
-    {
-      "at": "2026-11-26T03:32:09.040Z",
-      "by": "Orchestrator",
-      "action": "card.criteria-meet",
-      "ref": "c0aha21c",
-      "note": "#15"
-    },
-    {
-      "at": "2026-11-26T03:32:08.106Z",
-      "by": "Orchestrator",
-      "action": "card.criteria-meet",
-      "ref": "c0gokkbf",
-      "note": "#5"
-    },
-    {
-      "at": "2026-11-26T03:32:07.127Z",
-      "by": "Orchestrator",
-      "action": "card.criteria-meet",
-      "ref": "c0jxsy7l",
-      "note": "#4"
-    },
-    {
-      "at": "2026-11-26T03:32:06.245Z",
-      "by": "Orchestrator",
-      "action": "card.criteria-meet",
-      "ref": "c0mhrplj",
-      "note": "#7"
-    },
-    {
-      "at": "2026-11-26T03:32:05.359Z",
-      "by": "Orchestrator",
-      "action": "card.update",
-      "ref": "c0t3jsi0",
-      "note": "phase"
-    },
-    {
-      "at": "2026-11-26T03:32:03.586Z",
-      "by": "Orchestrator",
-      "action": "card.criteria-meet",
-      "ref": "c0t3jsi0",
-      "note": "#4"
-    },
-    {
-      "at": "2026-11-26T03:31:30.315Z",
-      "by": "Orchestrator",
-      "action": "card.criteria-meet",
-      "ref": "c0t3jsi0",
-      "note": "#3"
-    },
-    {
-      "at": "2026-11-26T03:31:29.291Z",
-      "by": "Orchestrator",
-      "action": "card.update",
-      "ref": "c06tzcrf",
-      "note": "phase"
-    },
-    {
-      "at": "2026-11-26T03:31:26.879Z",
-      "by": "Orchestrator",
-      "action": "card.criteria-meet",
-      "ref": "c06tzcrf",
-      "note": "#14"
-    },
-    {
-      "at": "2026-11-26T03:31:25.479Z",
-      "by": "Orchestrator",
-      "action": "card.criteria-meet",
-      "ref": "c06tzcrf",
-      "note": "#13"
-    },
-    {
-      "at": "2026-11-26T03:10:21.757Z",
-      "by": "Orchestrator",
-      "action": "card.criteria-meet",
-      "ref": "c0t3jsi0",
-      "note": "#5"
-    },
-    {
-      "at": "2026-11-26T03:10:20.810Z",
-      "by": "Orchestrator",
-      "action": "card.criteria-meet",
-      "ref": "c0t3jsi0",
-      "note": "#2"
-    },
-    {
-      "at": "2026-11-26T03:06:51.486Z",
-      "by": "Orchestrator",
-      "action": "card.criteria-meet",
-      "ref": "c0e6znz4",
-      "note": "#40"
-    },
-    {
-      "at": "2026-11-26T03:06:48.904Z",
-      "by": "Orchestrator",
-      "action": "card.update",
-      "ref": "c0yuue6m",
-      "note": "phase"
-    },
-    {
-      "at": "2026-11-26T03:06:19.184Z",
-      "by": "Orchestrator",
-      "action": "card.criteria-meet",
-      "ref": "c0yuue6m",
-      "note": "#5"
-    },
-    {
-      "at": "2026-11-26T02:27:07.175Z",
-      "by": "Orchestrator",
-      "action": "card.update",
-      "ref": "c0pej44b",
-      "note": "logEntry"
-    },
-    {
-      "at": "2026-11-26T02:27:06.311Z",
-      "by": "Orchestrator",
-      "action": "card.update",
-      "ref": "c0e6znz4",
-      "note": "logEntry"
-    },
-    {
-      "at": "2026-11-26T02:27:05.472Z",
-      "by": "Orchestrator",
-      "action": "card.update",
-      "ref": "c0ho9o8j",
-      "note": "logEntry"
-    },
-    {
-      "at": "2026-11-26T02:04:26.436Z",
-      "by": "Orchestrator",
-      "action": "card.update",
-      "ref": "c0yuouhx",
-      "note": "logEntry"
-    },
-    {
-      "at": "2026-11-26T02:04:25.500Z",
-      "by": "Orchestrator",
-      "action": "card.update",
-      "ref": "c0cs6xlg",
-      "note": "logEntry"
-    },
-    {
-      "at": "2026-11-26T01:59:06.258Z",
-      "by": "Orchestrator",
-      "action": "card.update",
-      "ref": "c01vsb2c",
-      "note": "logEntry"
-    },
-    {
-      "at": "2026-11-26T01:44:57.760Z",
-      "by": "Orchestrator",
-      "action": "card.update",
-      "ref": "c07hz2zg",
-      "note": "logEntry"
-    },
-    {
-      "at": "2026-11-26T01:29:32.934Z",
-      "by": "owner",
-      "action": "done.clear",
-      "ref": null,
-      "note": "2026-11-26T01:29:32.934Z"
-    },
-    {
-      "at": "2026-11-26T01:29:28.066Z",
-      "by": "owner",
-      "action": "card.update",
-      "ref": "c0s7shwh",
-      "note": "phase"
-    },
-    {
-      "at": "2026-11-26T01:29:01.696Z",
-      "by": "owner",
-      "action": "done.clear",
-      "ref": null,
-      "note": "2026-11-26T01:29:01.696Z"
-    },
-    {
-      "at": "2026-11-26T01:26:16.235Z",
-      "by": "Orchestrator",
-      "action": "card.criteria-meet",
-      "ref": "c0s7shwh",
-      "note": "#2"
-    },
-    {
-      "at": "2026-11-26T01:26:13.758Z",
-      "by": "Orchestrator",
-      "action": "card.criteria-meet",
-      "ref": "c0s7shwh",
-      "note": "#1"
-    },
-    {
-      "at": "2026-11-26T01:25:04.374Z",
-      "by": "Orchestrator",
-      "action": "card.update",
-      "ref": "c0ho9o8j",
-      "note": "logEntry"
-    },
-    {
-      "at": "2026-11-26T01:24:34.518Z",
-      "by": "owner",
-      "action": "card.update",
-      "ref": "c07kbx9u",
-      "note": "phase"
-    },
-    {
-      "at": "2026-11-26T01:24:08.531Z",
-      "by": "owner",
-      "action": "card.update",
-      "ref": "c07kbx9u",
-      "note": "phase,logEntry"
-    },
-    {
-      "at": "2026-11-26T01:24:07.679Z",
-      "by": "owner",
-      "action": "card.update",
-      "ref": "c07kbx9u",
-      "note": "phase,logEntry"
     }
   ],
   "nextNum": 368,
