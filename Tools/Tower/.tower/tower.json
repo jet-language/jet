@@ -3,7 +3,7 @@
     "version": 4,
     "project": "Jet",
     "nextNum": 7071,
-    "rev": 115533,
+    "rev": 115534,
     "ui": {
       "toggled": [
         "dec-group:syntax",
@@ -134262,6 +134262,13 @@
   ],
   "events": [
     {
+      "at": "2026-11-28T12:37:32.123Z",
+      "by": "Orchestrator",
+      "action": "briefing.post",
+      "ref": "briefing0s2auei",
+      "note": "Open ballots ranked by what they unblock; full-suite status"
+    },
+    {
       "at": "2026-11-28T11:35:40.443Z",
       "by": "Orchestrator",
       "action": "briefing.post",
@@ -137917,6 +137924,14 @@
   "nextNum": 368,
   "rev": 2,
   "briefings": [
+    {
+      "id": "briefing0s2auei",
+      "title": "Open ballots ranked by what they unblock; full-suite status",
+      "body": "## Open ballots ranked by what they unblock\n\n29 ballots are still open. None of them repeats a ruling you gave in chat. They are ordered by how close their card is to closing.\n\n**Tier 1: each one blocks the last open criteria on a nearly finished authoring card**\n\n1. **D-STRING-ONE1** (#7055, 2/3 met): the last criterion, c2 (String.find returning Int?, text building).\n2. **D-CLI-OPTVALUE-SPLIT1** (#7058, 2/3 met): the last criterion, c2 (one canonical `--flag value` syntax).\n3. **D-WEAK-STALE-WRITE1** (#7059, 4/6 met): c3 (field writes through Shared/Weak, and the stale `?.` write).\n4. **D-GROUP-JUMP1** (#7049, 3/10 met): c4 (soundness of jumps out of a `task.group` body).\n5. **D-FAIL-INFER-MARK1** (#7054, 0/3 met): c1 and c2 (the infallible-by-default fn and its sweep). The whole card waits on it.\n\n**Tier 2: these decide the build shape of the P1 simplification cards. Nothing past the audit can start without them.**\n\n6. #7062 (ownership marks): D-TAKE-AUTOCOPY1, D-TAKE-MARK-COPY1, D-CLOSURE-WRITE-ACCESS1. Gate c2.\n7. #7063 (#Defer): D-DEFER-TXSCOPE1, D-DEFER-CAPTURE1, D-CLEANUP-FAIL1. Gate c2, c3 and c4; 8 criteria are open.\n8. #7067 (Pool/ID): D-POOL-STALE-GET1, D-POOL-CROSS-ID1, D-DISJOINT-EDIT1. Gate c1; the card is 0/4.\n9. #7064 (effects): D-STATE-EFFECT1 and D-FX-EMPTY1 gate c2. D-PAR-FOLD1 is independent.\n10. #7060 (effect inference):\n    - D-VIA-FATE1, D-FNFIELD-ROW1 and D-ROW-CALLBACK1 gate c2.\n    - D-DYN-CEILING1 gates c3.\n    - D-DEBUG-DENY1 gates c4.\n11. #7061 (role traits): D-DYNDATA-ROLE1 and D-DOT-STATIC1 gate c3.\n12. #7066 (DSL extraction): D-VALIDATE-NAME1 and D-STATE-TEACH1 gate c2. D-PYTHON-MODE1 gates c3.\n\n**Tier 3: outside the authoring batch**\n\n13. **D-PLACE-RETURN1** (#6980 c5): the calling-convention gate that must be ratified before any memory-placement build.\n14. **D-NET-DTLS-PEER1** (#6737): which interop peer DTLS tests run against.\n\n## Full suite on dev (compiler from dev 404d4f67cf1)\n\n| Suite | Pass | Fail | Notes |\n|---|---|---|---|\n| ui | 2222 | 1094 | 1082 are snapshot mismatches |\n| golden | 5193 | 290 rows | across 117 files |\n| cases | — | 10 | |\n\nGuards are running separately. The UI failures fall into three groups:\n\n- **639 snapshots only gained warning and tidy-lint lines.**\n  - Cause: `jet check` now prints warnings first and errors last (J48, approved).\n  - The UI corpus was never re-blessed after that change.\n  - The 46 Tests/UILint snapshots also pick up a stray \"no workspace session\" note.\n- **308 fixtures were not moved to `!` / `!!` when fallible values cut over (#7047 part 2).**\n  - The new FailureMarkRequired error now hides the diagnostic many of them test.\n- **135 look like real regressions.** These are diagnostics that vanished, for example:\n  - `SQL{DELETE …}` without WHERE no longer errors;\n  - `2.5` now reports as Float instead of Decimal;\n  - several Fix lists changed.\n\nRepair workers take these groups next. The full-suite criteria (#7045 c4, #7046 c6, #7047 c4/c5, #7048 c6, #7049 c6) stay unmet until a clean rerun.\n\nSeparately, `jet build --release` no longer turns warnings into errors. Only `--deny-warnings` does, as you asked (dev 404d4f67cf1).\n",
+      "by": "Orchestrator",
+      "created": "2026-11-28T12:37:32.123Z",
+      "sections": []
+    },
     {
       "id": "briefing0nn5e8h",
       "title": "Ballots: chat rulings applied (35 closed); 29 genuinely new ballots remain",
